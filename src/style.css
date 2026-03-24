@@ -73,6 +73,16 @@ body {
   background: #eaf4ff;
 }
 
+/* Range selection highlight (Shift+Arrow) */
+.node-row-range-selected {
+  background: rgba(59, 130, 246, 0.12);
+  border-radius: 3px;
+}
+
+.node-row-range-selected:hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
 .node-text {
   flex: 1;
   font-size: 14px;
@@ -186,4 +196,87 @@ body {
 .breadcrumb-current {
   color: #555;
   font-weight: 500;
+}
+
+/* ============================================================
+   TipTap node editor
+   ============================================================ */
+.node-editor {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-editor-content {
+  font-size: 14px;
+  color: #1a1a1a;
+  outline: none;
+  width: 100%;
+  line-height: 1.5;
+}
+
+.node-editor-content p {
+  margin: 0;
+}
+
+/* Focused editor row highlight */
+.node-row:has(.node-editor) {
+  background: #f0f4ff;
+}
+
+/* ============================================================
+   Drag-and-drop (react-arborist)
+   ============================================================ */
+
+/* Dragged item opacity */
+[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+/* Drop line indicator (reorder) */
+.drop-target-above::before,
+.drop-target-below::after {
+  content: '';
+  display: block;
+  height: 2px;
+  background: #2563eb;
+  border-radius: 1px;
+  margin: 0 4px;
+}
+
+/* Drop-into highlight (nesting) */
+.drop-target-inside {
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 3px;
+  outline: 1px solid rgba(37, 99, 235, 0.3);
+}
+
+/* Cursor during drag */
+body.is-dragging,
+body.is-dragging * {
+  cursor: grabbing !important;
+}
+
+/* Grab handle on node rows */
+.node-row {
+  cursor: default;
+}
+
+.node-row:hover .bullet-dot {
+  cursor: grab;
+}
+
+/* react-arborist drop cursor line */
+[class*="drop-line"] {
+  background: #2563eb;
+  height: 2px;
+  border-radius: 1px;
+}
+
+/* react-arborist drag preview */
+[class*="drag-preview"] {
+  opacity: 0.85;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  padding: 2px 8px;
 }
