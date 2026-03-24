@@ -78,31 +78,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TREE-01 | — | Pending |
-| TREE-02 | — | Pending |
-| TREE-03 | — | Pending |
-| TREE-04 | — | Pending |
-| TREE-05 | — | Pending |
-| TREE-06 | — | Pending |
-| EDIT-01 | — | Pending |
-| EDIT-02 | — | Pending |
-| EDIT-03 | — | Pending |
-| EDIT-04 | — | Pending |
-| AGNT-01 | — | Pending |
-| AGNT-02 | — | Pending |
-| AGNT-03 | — | Pending |
-| AGNT-04 | — | Pending |
-| AGNT-05 | — | Pending |
-| INFR-01 | — | Pending |
-| INFR-02 | — | Pending |
-| INFR-03 | — | Pending |
-| INFR-04 | — | Pending |
+| TREE-01 | Phase 2 | Pending |
+| TREE-02 | Phase 2 | Pending |
+| TREE-03 | Phase 2 | Pending |
+| TREE-04 | Phase 2 | Pending |
+| TREE-05 | Phase 3 | Pending |
+| TREE-06 | Phase 2 | Pending |
+| EDIT-01 | Phase 3 | Pending |
+| EDIT-02 | Phase 3 | Pending |
+| EDIT-03 | Phase 3 | Pending |
+| EDIT-04 | Phase 3 | Pending |
+| AGNT-01 | Phase 4 | Pending |
+| AGNT-02 | Phase 4 | Pending |
+| AGNT-03 | Phase 5 | Pending |
+| AGNT-04 | Phase 5 | Pending |
+| AGNT-05 | Phase 5 | Pending |
+| INFR-01 | Phase 4 | Pending |
+| INFR-02 | Phase 1 | Pending |
+| INFR-03 | Phase 6 | Pending |
+| INFR-04 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-24*
-*Last updated: 2026-03-24 after initial definition*
+*Last updated: 2026-03-24 — traceability mapped during roadmap creation*
