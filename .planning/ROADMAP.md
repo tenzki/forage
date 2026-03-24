@@ -34,8 +34,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 01-01-PLAN.md — Scaffold Tauri v2 project, SQLite schema, Rust models, DB initialization
-- [ ] 01-02-PLAN.md — IPC command handlers, tauri-specta bindings, integration tests
+- [x] 01-01-PLAN.md — Scaffold Tauri v2 project, SQLite schema, Rust models, DB initialization
+- [x] 01-02-PLAN.md — IPC command handlers, tauri-specta bindings, integration tests
 
 ### Phase 2: Core Outliner
 **Goal**: Users can work in a fast, fully keyboard-driven infinite outliner that feels like Workflowy
@@ -47,7 +47,12 @@ Plans:
   3. User can navigate and restructure the entire tree without touching the mouse: Tab/Shift-Tab to indent, Enter for new sibling, Alt+Arrow to move, Delete to remove
   4. User can expand and collapse any branch and that state persists across app restarts
   5. User can drag a node to reorder it or re-nest it under a different parent
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — React setup, move_node backend IPC, Vitest, tree helper utilities with tests
+- [ ] 02-02-PLAN.md — Zustand store, OutlinerView, NodeRow, Bullet, Breadcrumb, expand/collapse, zoom/hoist
+- [ ] 02-03-PLAN.md — TipTap NodeEditor, keyboard shortcuts, drag-and-drop
 
 ### Phase 3: Search and Editing
 **Goal**: Users can find any node instantly and have a complete, undo-safe editing experience
@@ -105,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
-| 2. Core Outliner | 0/TBD | Not started | - |
+| 2. Core Outliner | 0/3 | Planning complete | - |
 | 3. Search and Editing | 0/TBD | Not started | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |
