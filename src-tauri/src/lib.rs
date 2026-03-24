@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+pub mod commands;
 pub mod db;
 pub mod errors;
 
@@ -10,9 +11,14 @@ pub struct AppState {
 }
 
 pub fn run() {
-    // Set up tauri-specta builder with no commands for Phase 1.
-    // Commands are added in Plan 02.
-    let builder = tauri_specta::Builder::<tauri::Wry>::new();
+    // Set up tauri-specta builder registering all five IPC commands.
+    let builder = tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        commands::nodes::create_node,
+        commands::nodes::get_node,
+        commands::nodes::get_children,
+        commands::nodes::update_node,
+        commands::nodes::delete_node,
+    ]);
 
     // Export TypeScript bindings in debug builds only.
     // Creates src/lib/bindings.ts for the frontend to consume.
