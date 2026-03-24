@@ -17,6 +17,7 @@ pub fn run() {
         commands::nodes::get_node,
         commands::nodes::get_children,
         commands::nodes::update_node,
+        commands::nodes::move_node,
         commands::nodes::delete_node,
     ]);
 

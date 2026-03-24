@@ -358,3 +358,198 @@ async fn test_cascade_delete() {
     pool.close().await;
     cleanup(&path);
 }
+
+// ─── TREE-01 move_node Tests ──────────────────────────────────────────────────
+
+/// Helper: insert a minimal node into the pool directly via SQL.
+async fn insert_node(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+    parent_id: Option<&str>,
+    position: &str,
+    node_type: &str,
+    content: &str,
+    metadata: Option<&str>,
+) {
+    sqlx::query(
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(id)
+    .bind(parent_id)
+    .bind(position)
+    .bind(content)
+    .bind(node_type)
+    .bind(metadata)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| panic!("insert_node failed for id={}: {}", id, e));
+}
+
+/// TREE-01: move_node changes parent_id and position of an existing node.
+#[tokio::test]
+async fn test_move_node_changes_parent_and_position() {
+    let path = temp_db_path("move_node_reparent");
+    let pool = create_test_pool(&path).await;
+
+    // Create parent A and parent B at root level.
+    insert_node(&pool, "parent-a", None, "a0", "note", "{}", None).await;
+    insert_node(&pool, "parent-b", None, "a1", "note", "{}", None).await;
+    // Create child under parent A.
+    insert_node(&pool, "child-1", Some("parent-a"), "a0", "note", "{}", None).await;
+
+    // Simulate move_node: update child-1 to parent-b with new position.
+    sqlx::query(
+        "UPDATE nodes SET parent_id = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
+    )
+    .bind(Some("parent-b"))
+    .bind("a0")
+    .bind("2026-01-02T00:00:00Z")
+    .bind("child-1")
+    .execute(&pool)
+    .await
+    .expect("UPDATE failed");
+
+    let row = sqlx::query("SELECT parent_id, position FROM nodes WHERE id = 'child-1'")
+        .fetch_one(&pool)
+        .await
+        .expect("SELECT failed");
+
+    assert_eq!(
+        row.get::<Option<String>, _>("parent_id"),
+        Some("parent-b".to_string()),
+        "parent_id should be parent-b after move"
+    );
+    assert_eq!(
+        row.get::<String, _>("position"),
+        "a0",
+        "position should be a0 after move"
+    );
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+/// TREE-01: move_node to root (parent_id = None) works.
+#[tokio::test]
+async fn test_move_node_to_root() {
+    let path = temp_db_path("move_node_to_root");
+    let pool = create_test_pool(&path).await;
+
+    // Create a parent and a child.
+    insert_node(&pool, "root-parent", None, "a0", "note", "{}", None).await;
+    insert_node(&pool, "nested-child", Some("root-parent"), "a0", "note", "{}", None).await;
+
+    // Move nested-child to root (parent_id = NULL).
+    sqlx::query(
+        "UPDATE nodes SET parent_id = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
+    )
+    .bind(None::<String>)
+    .bind("a1")
+    .bind("2026-01-02T00:00:00Z")
+    .bind("nested-child")
+    .execute(&pool)
+    .await
+    .expect("UPDATE failed");
+
+    let row = sqlx::query("SELECT parent_id, position FROM nodes WHERE id = 'nested-child'")
+        .fetch_one(&pool)
+        .await
+        .expect("SELECT failed");
+
+    assert_eq!(
+        row.get::<Option<String>, _>("parent_id"),
+        None,
+        "parent_id should be NULL after moving to root"
+    );
+    assert_eq!(row.get::<String, _>("position"), "a1");
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+/// TREE-01: move_node preserves all other node fields (content, metadata, collapsed, node_type).
+#[tokio::test]
+async fn test_move_node_preserves_other_fields() {
+    let path = temp_db_path("move_node_preserves");
+    let pool = create_test_pool(&path).await;
+
+    let content = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hello"}]}]}"#;
+    let metadata = r#"{"model":"gpt-4","tokens":42}"#;
+
+    // Create node with content/metadata at root.
+    sqlx::query(
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, created_at, updated_at)
+         VALUES (?1, NULL, 'a0', ?2, 'agent_response', 1, NULL, ?3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind("rich-node")
+    .bind(content)
+    .bind(metadata)
+    .execute(&pool)
+    .await
+    .expect("insert failed");
+
+    // Create a new parent to move to.
+    insert_node(&pool, "new-parent", None, "a1", "note", "{}", None).await;
+
+    // Move rich-node to new-parent.
+    sqlx::query(
+        "UPDATE nodes SET parent_id = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
+    )
+    .bind(Some("new-parent"))
+    .bind("a0")
+    .bind("2026-01-02T00:00:00Z")
+    .bind("rich-node")
+    .execute(&pool)
+    .await
+    .expect("UPDATE failed");
+
+    let row = sqlx::query("SELECT * FROM nodes WHERE id = 'rich-node'")
+        .fetch_one(&pool)
+        .await
+        .expect("SELECT failed");
+
+    // parent_id and position should have changed.
+    assert_eq!(
+        row.get::<Option<String>, _>("parent_id"),
+        Some("new-parent".to_string())
+    );
+    assert_eq!(row.get::<String, _>("position"), "a0");
+
+    // All other fields should be unchanged.
+    assert_eq!(row.get::<String, _>("content"), content);
+    assert_eq!(row.get::<String, _>("node_type"), "agent_response");
+    assert_eq!(row.get::<i64, _>("collapsed"), 1);
+    assert_eq!(
+        row.get::<Option<String>, _>("metadata"),
+        Some(metadata.to_string())
+    );
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+/// TREE-01: Attempting to move a non-existent node id returns no rows updated (simulates NotFound).
+#[tokio::test]
+async fn test_move_node_not_found() {
+    let path = temp_db_path("move_node_not_found");
+    let pool = create_test_pool(&path).await;
+
+    // Try to move a node that does not exist.
+    let result = sqlx::query(
+        "UPDATE nodes SET parent_id = NULL, position = 'a0', updated_at = '2026-01-02T00:00:00Z' WHERE id = ?1",
+    )
+    .bind("nonexistent-id")
+    .execute(&pool)
+    .await
+    .expect("UPDATE should not error on missing row");
+
+    assert_eq!(
+        result.rows_affected(),
+        0,
+        "No rows should be updated for a nonexistent id"
+    );
+
+    pool.close().await;
+    cleanup(&path);
+}

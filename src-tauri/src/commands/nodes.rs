@@ -198,6 +198,36 @@ pub async fn update_node(
     get_node(state, id).await
 }
 
+/// Move a node to a new parent and position atomically.
+///
+/// Changes `parent_id` and `position` in a single UPDATE statement.
+/// `new_parent_id = None` moves the node to the root level.
+/// Returns AppError::NotFound if the node does not exist.
+#[tauri::command]
+#[specta::specta]
+pub async fn move_node(
+    state: State<'_, AppState>,
+    id: String,
+    new_parent_id: Option<String>,
+    new_position: String,
+) -> Result<Node, AppError> {
+    // Verify node exists first.
+    let _ = get_node(State::clone(&state), id.clone()).await?;
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query(
+        "UPDATE nodes SET parent_id = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
+    )
+    .bind(&new_parent_id)
+    .bind(&new_position)
+    .bind(&now)
+    .bind(&id)
+    .execute(&state.db)
+    .await?;
+
+    get_node(state, id).await
+}
+
 /// Delete a node by id.
 ///
 /// CASCADE delete removes all descendant nodes automatically (schema-enforced).
