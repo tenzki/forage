@@ -1,0 +1,189 @@
+/* ============================================================
+   Global reset & base
+   ============================================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: #fff;
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================
+   Outliner container
+   ============================================================ */
+.outliner-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 8px 20px;
+  overflow: hidden;
+}
+
+.outliner-tree {
+  flex: 1;
+  transition: opacity 150ms ease;
+}
+
+.outliner-loading {
+  font-size: 13px;
+  color: #999;
+  padding: 8px 0;
+}
+
+.outliner-empty {
+  font-size: 13px;
+  color: #bbb;
+  padding: 8px 0;
+  font-style: italic;
+}
+
+/* ============================================================
+   Node rows
+   ============================================================ */
+.node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: default;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.node-row:hover {
+  background: #f7f7f5;
+}
+
+.node-row--selected {
+  background: #eaf4ff;
+}
+
+.node-text {
+  flex: 1;
+  font-size: 14px;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-text--empty {
+  color: #bbb;
+  font-style: italic;
+}
+
+/* ============================================================
+   Bullet component
+   ============================================================ */
+.bullet-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Expand/collapse triangle */
+.bullet-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 7px;
+  color: #bbb;
+  cursor: pointer;
+  transition: transform 150ms ease, color 150ms ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.bullet-toggle:hover {
+  color: #777;
+}
+
+.bullet-toggle--hidden {
+  visibility: hidden;
+}
+
+/* Filled circle bullet */
+.bullet-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #555;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 150ms ease;
+}
+
+.bullet-dot:hover {
+  background: #2563eb;
+}
+
+/* ============================================================
+   Breadcrumb
+   ============================================================ */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 0 10px 0;
+  font-size: 12px;
+  color: #999;
+}
+
+.breadcrumb-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.breadcrumb-separator {
+  color: #ccc;
+  font-size: 13px;
+  line-height: 1;
+  margin: 0 2px;
+}
+
+.breadcrumb-segment {
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+
+.breadcrumb-link {
+  color: #888;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 100ms ease;
+}
+
+.breadcrumb-link:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.breadcrumb-current {
+  color: #555;
+  font-weight: 500;
+}

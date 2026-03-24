@@ -1,9 +1,9 @@
-import React from 'react'
+import OutlinerView from './components/Outliner/OutlinerView'
 
 export default function App() {
   return (
-    <div id="outliner-root">
-      <p>AI Chat — Outliner loading…</p>
+    <div id="app">
+      <OutlinerView />
     </div>
   )
 }
