@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. SQLite file is placed in the iCloud Drive folder so iCloud handles sync automatically
   4. Data model includes a `node_type` column distinguishing user notes from agent responses, compatible with Pi's tree session structure (1:1 mapping between outliner nodes and Pi session branches)
   5. All IPC commands are typed end-to-end via tauri-specta — no runtime type mismatches at the IPC boundary
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 01-01-PLAN.md — Scaffold Tauri v2 project, SQLite schema, Rust models, DB initialization
@@ -104,7 +104,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Storage Foundation | 0/2 | Planning complete | - |
+| 1. Storage Foundation | 1/2 | In Progress|  |
 | 2. Core Outliner | 0/TBD | Not started | - |
 | 3. Search and Editing | 0/TBD | Not started | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |

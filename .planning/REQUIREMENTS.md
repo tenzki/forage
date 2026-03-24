@@ -34,9 +34,9 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Infrastructure
 
 - [ ] **INFR-01**: User can store and manage their own LLM API keys (OpenAI, Anthropic)
-- [ ] **INFR-02**: Data persists locally across app restarts (local-first SQLite)
+- [x] **INFR-02**: Data persists locally across app restarts (local-first SQLite)
 - [ ] **INFR-03**: Data syncs across devices via iCloud Drive
-- [ ] **INFR-04**: Data model supports node types to enable future chat mode
+- [x] **INFR-04**: Data model supports node types to enable future chat mode
 
 ## v2 Requirements
 
@@ -94,9 +94,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AGNT-04 | Phase 5 | Pending |
 | AGNT-05 | Phase 5 | Pending |
 | INFR-01 | Phase 4 | Pending |
-| INFR-02 | Phase 1 | Pending |
+| INFR-02 | Phase 1 | Complete |
 | INFR-03 | Phase 6 | Pending |
-| INFR-04 | Phase 1 | Pending |
+| INFR-04 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 19 total
