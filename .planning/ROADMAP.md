@@ -58,24 +58,26 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: TBD
 
 ### Phase 4: Agent Infrastructure
-**Goal**: The AI agent system is wired up end-to-end: API keys stored safely, LLM calls stream to the UI, slash commands trigger generation
+**Goal**: Pi agent SDK embedded as Node.js sidecar, wired to Tauri IPC — slash commands trigger Pi skills that stream results into the tree
 **Depends on**: Phase 3
 **Requirements**: INFR-01, AGNT-01, AGNT-02, AGNT-03
+**Tech decision**: Pi agent SDK (`@mariozechner/pi-coding-agent`) replaces custom Vercel AI SDK + sidecar. Pi provides multi-model support (15+ providers), streaming, skills, and tree-structured sessions out of the box.
 **Success Criteria** (what must be TRUE):
-  1. User can enter and save their OpenAI or Anthropic API key in a settings panel and it is stored in the macOS keychain — never in plaintext
-  2. User can type a slash command in any node and it triggers the agent without false positives on slashes mid-sentence
-  3. Agent generates structured child notes under the triggered node using the ancestors and siblings as context
-  4. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
-  5. User can cancel an in-progress generation and the partial output is not committed to the tree
+  1. Pi agent SDK runs as a Node.js sidecar within Tauri, communicating via RPC (JSON over stdin/stdout)
+  2. User can configure API keys through Pi's built-in model configuration
+  3. User can type a slash command in any node and it triggers a Pi skill without false positives on slashes mid-sentence
+  4. Agent generates structured child notes under the triggered node using the ancestors and siblings as context
+  5. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
+  6. User can cancel an in-progress generation cleanly
 **Plans**: TBD
 
 ### Phase 5: Skills and Agent UI
-**Goal**: Users can run the built-in research skill out of the box and configure their own custom skills
+**Goal**: Users can run the built-in research skill out of the box and configure their own custom skills using Pi's skill/extension system
 **Depends on**: Phase 4
 **Requirements**: AGNT-04, AGNT-05
 **Success Criteria** (what must be TRUE):
   1. User can type `/research [topic]` in any node and receive structured research findings as child nodes without any configuration
-  2. User can create a custom skill by naming it, writing a system prompt, and choosing a model — it then appears in the slash command menu
+  2. User can create a custom skill using Pi's skill format (instructions + tools) — it then appears in the slash command menu
   3. User can edit or delete custom skills from a skills configuration panel
   4. Agent can generate inline content on the current node (not just child notes) when the skill calls for it
 **Plans**: TBD

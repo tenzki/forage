@@ -47,7 +47,7 @@ The tree is the universal data structure — every note, conversation, and piece
 
 ## Constraints
 
-- **Tech stack**: Tauri (Rust backend + web frontend), Rust for server component
+- **Tech stack**: Tauri (Rust backend + web frontend), Rust for server component, Pi agent SDK (`@mariozechner/pi-coding-agent`) embedded as Node.js sidecar for LLM agent runtime
 - **Data**: Local-first architecture, iCloud for sync in v1
 - **LLM access**: User-provided API keys, no hosted inference
 - **Target user**: Personal tool first, small team second
@@ -61,6 +61,7 @@ The tree is the universal data structure — every note, conversation, and piece
 | Tree as universal primitive | Enables reuse for chat app later without architectural rework | — Pending |
 | Slash commands for agent | Inline UX keeps user in flow, no context switching to a chat panel | — Pending |
 | User-provided API keys | No billing/auth infrastructure needed for v1 | — Pending |
+| Pi agent SDK as agent runtime | Provides multi-model support, streaming, skills, tree sessions out of the box — no need to build custom LLM integration. Embedded via Node.js sidecar in Tauri. Replaces Vercel AI SDK + custom sidecar approach | — Pending |
 
 ---
-*Last updated: 2026-03-24 after initialization*
+*Last updated: 2026-03-24 after tech decision (Pi agent SDK)*
