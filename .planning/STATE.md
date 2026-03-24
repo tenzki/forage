@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: "Checkpoint: 02-core-outliner-02-02-PLAN.md Task 3 (human-verify)"
-last_updated: "2026-03-24T19:43:46.461Z"
+stopped_at: Completed 02-core-outliner-02-02-PLAN.md
+last_updated: "2026-03-24T19:57:21.385Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-storage-foundation P02 | 25min | 2 tasks | 4 files |
 | Phase 02-core-outliner P01 | 6min | 3 tasks | 13 files |
 | Phase 02-core-outliner P02 | 3min | 2 tasks | 9 files |
+| Phase 02-core-outliner P02 | 45min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,7 @@ Recent decisions affecting current work:
 - [Phase 02-core-outliner]: moveNodeIpc uses direct invoke() not commands.moveNode — bindings.ts regenerates only on cargo tauri dev/build
 - [Phase 02-core-outliner]: @tauri-apps/api installed as npm dep for getCurrentWindow/setTitle window title support
 - [Phase 02-core-outliner]: react-arborist controlled mode: onToggle delegates to store toggleNode, data prop is sole source of truth
+- [Phase 02-core-outliner]: Text editing (TipTap) deferred to Plan 02-03 — NodeRow renders plain text for now; tree rendering infrastructure complete
 
 ### Pending Todos
 
@@ -93,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T19:43:46.458Z
-Stopped at: Checkpoint: 02-core-outliner-02-02-PLAN.md Task 3 (human-verify)
+Last session: 2026-03-24T19:57:21.383Z
+Stopped at: Completed 02-core-outliner-02-02-PLAN.md
 Resume file: None
