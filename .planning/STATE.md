@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 02-core-outliner-02-02-PLAN.md
-last_updated: "2026-03-24T19:57:21.385Z"
+stopped_at: "Completed 02-core-outliner-02-03-PLAN.md (checkpoint:human-verify pending)"
+last_updated: "2026-03-24T20:05:27.010Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-core-outliner P01 | 6min | 3 tasks | 13 files |
 | Phase 02-core-outliner P02 | 3min | 2 tasks | 9 files |
 | Phase 02-core-outliner P02 | 45min | 3 tasks | 9 files |
+| Phase 02-core-outliner P03 | 4min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 02-core-outliner]: @tauri-apps/api installed as npm dep for getCurrentWindow/setTitle window title support
 - [Phase 02-core-outliner]: react-arborist controlled mode: onToggle delegates to store toggleNode, data prop is sole source of truth
 - [Phase 02-core-outliner]: Text editing (TipTap) deferred to Plan 02-03 — NodeRow renders plain text for now; tree rendering infrastructure complete
+- [Phase 02-core-outliner]: TipTap Extension options via configure() for keyboard handler callbacks to prevent stale closures in React
+- [Phase 02-core-outliner]: editingNodeId in zustand store (not local state) enables single TipTap instance pattern — one active editor at a time
+- [Phase 02-core-outliner]: batchOutdent processes bottom-to-top to prevent parent conflicts during sequential outdents
 
 ### Pending Todos
 
@@ -95,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T19:57:21.383Z
-Stopped at: Completed 02-core-outliner-02-02-PLAN.md
+Last session: 2026-03-24T20:05:27.008Z
+Stopped at: Completed 02-core-outliner-02-03-PLAN.md (checkpoint:human-verify pending)
 Resume file: None

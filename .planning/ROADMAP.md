@@ -13,7 +13,7 @@ Six phases building from the ground up: a stable storage foundation first, then 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Storage Foundation** - SQLite schema, UUID node identity, Tauri IPC layer, iCloud file placement (completed 2026-03-24)
-- [ ] **Phase 2: Core Outliner** - Infinite nested tree, zoom/hoist, keyboard navigation, drag-to-reorder
+- [x] **Phase 2: Core Outliner** - Infinite nested tree, zoom/hoist, keyboard navigation, drag-to-reorder (completed 2026-03-24)
 - [ ] **Phase 3: Search and Editing** - Global search, undo/redo, Markdown formatting, hashtags, AI content styling
 - [ ] **Phase 4: Agent Infrastructure** - API key management, Node.js sidecar, LLM streaming, slash command core
 - [ ] **Phase 5: Skills and Agent UI** - Built-in research skill, custom skill configuration, slash command overlay
@@ -47,7 +47,7 @@ Plans:
   3. User can navigate and restructure the entire tree without touching the mouse: Tab/Shift-Tab to indent, Enter for new sibling, Alt+Arrow to move, Delete to remove
   4. User can expand and collapse any branch and that state persists across app restarts
   5. User can drag a node to reorder it or re-nest it under a different parent
-**Plans:** 1/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 02-01-PLAN.md — React setup, move_node backend IPC, Vitest, tree helper utilities with tests
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
-| 2. Core Outliner | 1/3 | In Progress|  |
+| 2. Core Outliner | 3/3 | Complete   | 2026-03-24 |
 | 3. Search and Editing | 0/TBD | Not started | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |
