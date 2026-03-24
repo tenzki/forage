@@ -33,7 +33,7 @@ The tree is the universal data structure — every note, conversation, and piece
 
 - Web app — deferred to post-v1
 - Team collaboration / multi-user — deferred to post-v1
-- Chat app mode (tree = conversation) — future milestone, architecture should accommodate
+- Standalone chat app mode — deferred, but the 1:1 tree mapping with Pi sessions means chat is inherent to the architecture from v1
 - Managed cloud service — deferred, iCloud sync first
 - Local/on-device LLM support — user API keys only for v1
 - Mobile app — not planned
@@ -41,7 +41,7 @@ The tree is the universal data structure — every note, conversation, and piece
 ## Context
 
 - Inspired by Workflowy's outliner UX and Pi agent's tree-based work organization
-- The tree structure is designed to be reusable as a chat interface later (each branch = a conversation thread)
+- The outliner tree and Pi's session tree are 1:1 mapped — each outliner branch IS a Pi session branch. Notes and conversations live in the same tree structure. When a slash command is issued, it branches a Pi session from that node, with ancestors as conversation context
 - Skills are LLM agent capabilities configured per-workspace or per-branch — e.g., a "research" skill that knows how to investigate a topic and structure findings as child notes
 - Slash commands (e.g., `/research concurrent companies for LambdaWorks`) are the primary agent interaction model, triggered from any node
 
@@ -62,6 +62,7 @@ The tree is the universal data structure — every note, conversation, and piece
 | Slash commands for agent | Inline UX keeps user in flow, no context switching to a chat panel | — Pending |
 | User-provided API keys | No billing/auth infrastructure needed for v1 | — Pending |
 | Pi agent SDK as agent runtime | Provides multi-model support, streaming, skills, tree sessions out of the box — no need to build custom LLM integration. Embedded via Node.js sidecar in Tauri. Replaces Vercel AI SDK + custom sidecar approach | — Pending |
+| 1:1 tree mapping with Pi sessions | Outliner branch = Pi session branch. No separate chat data model needed. Notes and conversations share the same tree. Ancestors provide conversation context naturally | — Pending |
 
 ---
-*Last updated: 2026-03-24 after tech decision (Pi agent SDK)*
+*Last updated: 2026-03-24 after tech decision (Pi agent SDK + 1:1 tree mapping)*

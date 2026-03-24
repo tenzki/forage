@@ -29,7 +29,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. App stores nodes in SQLite and they survive app restarts with all content and hierarchy intact
   2. Node identity uses stable UUIDs with fractional indexing — no positional IDs that break on reorder
   3. SQLite file is placed in the iCloud Drive folder so iCloud handles sync automatically
-  4. Data model includes a `node_type` column that supports future chat message nodes without schema migration
+  4. Data model includes a `node_type` column distinguishing user notes from agent responses, compatible with Pi's tree session structure (1:1 mapping between outliner nodes and Pi session branches)
   5. All IPC commands are typed end-to-end via tauri-specta — no runtime type mismatches at the IPC boundary
 **Plans**: TBD
 
@@ -64,11 +64,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Tech decision**: Pi agent SDK (`@mariozechner/pi-coding-agent`) replaces custom Vercel AI SDK + sidecar. Pi provides multi-model support (15+ providers), streaming, skills, and tree-structured sessions out of the box.
 **Success Criteria** (what must be TRUE):
   1. Pi agent SDK runs as a Node.js sidecar within Tauri, communicating via RPC (JSON over stdin/stdout)
-  2. User can configure API keys through Pi's built-in model configuration
-  3. User can type a slash command in any node and it triggers a Pi skill without false positives on slashes mid-sentence
-  4. Agent generates structured child notes under the triggered node using the ancestors and siblings as context
-  5. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
-  6. User can cancel an in-progress generation cleanly
+  2. Outliner tree nodes map 1:1 to Pi session branches — slash command from a node creates/continues a Pi session branch at that position
+  3. User can configure API keys through Pi's built-in model configuration
+  4. User can type a slash command in any node and it triggers a Pi skill without false positives on slashes mid-sentence
+  5. Agent generates structured child notes under the triggered node using ancestors as Pi session context
+  6. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
+  7. User can cancel an in-progress generation cleanly
 **Plans**: TBD
 
 ### Phase 5: Skills and Agent UI
