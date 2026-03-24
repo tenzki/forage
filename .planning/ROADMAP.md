@@ -12,7 +12,7 @@ Six phases building from the ground up: a stable storage foundation first, then 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Storage Foundation** - SQLite schema, UUID node identity, Tauri IPC layer, iCloud file placement
+- [x] **Phase 1: Storage Foundation** - SQLite schema, UUID node identity, Tauri IPC layer, iCloud file placement (completed 2026-03-24)
 - [ ] **Phase 2: Core Outliner** - Infinite nested tree, zoom/hoist, keyboard navigation, drag-to-reorder
 - [ ] **Phase 3: Search and Editing** - Global search, undo/redo, Markdown formatting, hashtags, AI content styling
 - [ ] **Phase 4: Agent Infrastructure** - API key management, Node.js sidecar, LLM streaming, slash command core
@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. SQLite file is placed in the iCloud Drive folder so iCloud handles sync automatically
   4. Data model includes a `node_type` column distinguishing user notes from agent responses, compatible with Pi's tree session structure (1:1 mapping between outliner nodes and Pi session branches)
   5. All IPC commands are typed end-to-end via tauri-specta — no runtime type mismatches at the IPC boundary
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [ ] 01-01-PLAN.md — Scaffold Tauri v2 project, SQLite schema, Rust models, DB initialization
@@ -104,7 +104,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Storage Foundation | 1/2 | In Progress|  |
+| 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
 | 2. Core Outliner | 0/TBD | Not started | - |
 | 3. Search and Editing | 0/TBD | Not started | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
