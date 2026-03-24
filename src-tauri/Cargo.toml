@@ -18,7 +18,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "macros"] }
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
-specta = { version = "=2.0.0-rc.22", features = ["uuid", "chrono"] }
+specta = { version = "=2.0.0-rc.22", features = ["uuid", "chrono", "serde_json"] }
 specta-typescript = "0.0.9"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
