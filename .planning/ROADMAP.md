@@ -47,7 +47,7 @@ Plans:
   3. User can navigate and restructure the entire tree without touching the mouse: Tab/Shift-Tab to indent, Enter for new sibling, Alt+Arrow to move, Delete to remove
   4. User can expand and collapse any branch and that state persists across app restarts
   5. User can drag a node to reorder it or re-nest it under a different parent
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 - [ ] 02-01-PLAN.md — React setup, move_node backend IPC, Vitest, tree helper utilities with tests
@@ -110,7 +110,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
-| 2. Core Outliner | 0/3 | Planning complete | - |
+| 2. Core Outliner | 1/3 | In Progress|  |
 | 3. Search and Editing | 0/TBD | Not started | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |

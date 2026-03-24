@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Phase 2 context gathered
-last_updated: "2026-03-24T18:40:39.351Z"
+stopped_at: Completed 02-core-outliner-02-01-PLAN.md
+last_updated: "2026-03-24T19:38:07.020Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 5
+  completed_plans: 3
   percent: 0
 ---
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01-storage-foundation P01 | 7min | 2 tasks | 13 files |
 | Phase 01-storage-foundation P02 | 25min | 2 tasks | 4 files |
+| Phase 02-core-outliner P01 | 6min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,10 @@ Recent decisions affecting current work:
 - [Phase 01-storage-foundation]: Manual sqlx row extraction for content/metadata: TEXT in SQLite requires intermediate serde_json::from_str, derive(FromRow) cannot handle this
 - [Phase 01-storage-foundation]: IS operator for NULL parent_id in get_children — SQLite = NULL is always false, IS ?1 handles both NULL (roots) and non-NULL (children)
 - [Phase 01-storage-foundation]: Dynamic SET clause for update_node: only update provided Option<T> fields, never clobber unset fields with null
+- [Phase 02-core-outliner]: @vitejs/plugin-react v4 required (not v6) — v6 requires vite 8, project uses vite 6
+- [Phase 02-core-outliner]: TreeNode.children is always TreeNode[] (never undefined) for Workflowy-style any-node-can-have-children
+- [Phase 02-core-outliner]: positionForMove excludes dragIds before computing key to prevent self-interference during drag
+- [Phase 02-core-outliner]: move_node integration tests use raw SQL consistent with Phase 1 test patterns
 
 ### Pending Todos
 
@@ -84,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T18:40:39.342Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-core-outliner/02-CONTEXT.md
+Last session: 2026-03-24T19:38:07.019Z
+Stopped at: Completed 02-core-outliner-02-01-PLAN.md
+Resume file: None
