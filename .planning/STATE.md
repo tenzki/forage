@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 02-core-outliner-02-01-PLAN.md
-last_updated: "2026-03-24T19:38:07.020Z"
+stopped_at: "Checkpoint: 02-core-outliner-02-02-PLAN.md Task 3 (human-verify)"
+last_updated: "2026-03-24T19:43:46.461Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-storage-foundation P01 | 7min | 2 tasks | 13 files |
 | Phase 01-storage-foundation P02 | 25min | 2 tasks | 4 files |
 | Phase 02-core-outliner P01 | 6min | 3 tasks | 13 files |
+| Phase 02-core-outliner P02 | 3min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,9 @@ Recent decisions affecting current work:
 - [Phase 02-core-outliner]: TreeNode.children is always TreeNode[] (never undefined) for Workflowy-style any-node-can-have-children
 - [Phase 02-core-outliner]: positionForMove excludes dragIds before computing key to prevent self-interference during drag
 - [Phase 02-core-outliner]: move_node integration tests use raw SQL consistent with Phase 1 test patterns
+- [Phase 02-core-outliner]: moveNodeIpc uses direct invoke() not commands.moveNode — bindings.ts regenerates only on cargo tauri dev/build
+- [Phase 02-core-outliner]: @tauri-apps/api installed as npm dep for getCurrentWindow/setTitle window title support
+- [Phase 02-core-outliner]: react-arborist controlled mode: onToggle delegates to store toggleNode, data prop is sole source of truth
 
 ### Pending Todos
 
@@ -89,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T19:38:07.019Z
-Stopped at: Completed 02-core-outliner-02-01-PLAN.md
+Last session: 2026-03-24T19:43:46.458Z
+Stopped at: Checkpoint: 02-core-outliner-02-02-PLAN.md Task 3 (human-verify)
 Resume file: None

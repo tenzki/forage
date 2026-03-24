@@ -10,8 +10,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Tree
 
 - [x] **TREE-01**: User can create infinite nested bullet-point nodes
-- [ ] **TREE-02**: User can expand and collapse any branch
-- [ ] **TREE-03**: User can zoom/hoist into any node (node becomes root view with breadcrumb trail)
+- [x] **TREE-02**: User can expand and collapse any branch
+- [x] **TREE-03**: User can zoom/hoist into any node (node becomes root view with breadcrumb trail)
 - [ ] **TREE-04**: User can navigate and edit entirely via keyboard (Tab, Shift-Tab, Enter, Alt+Arrow, Delete)
 - [ ] **TREE-05**: User can search across all nodes with results navigable in context
 - [x] **TREE-06**: User can drag nodes to reorder or re-nest them
@@ -79,8 +79,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TREE-01 | Phase 2 | Complete |
-| TREE-02 | Phase 2 | Pending |
-| TREE-03 | Phase 2 | Pending |
+| TREE-02 | Phase 2 | Complete |
+| TREE-03 | Phase 2 | Complete |
 | TREE-04 | Phase 2 | Pending |
 | TREE-05 | Phase 3 | Pending |
 | TREE-06 | Phase 2 | Complete |
