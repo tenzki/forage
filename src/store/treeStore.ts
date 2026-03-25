@@ -54,6 +54,8 @@ interface TreeActions {
   setEditingNode: (id: string | null) => void
   focusPrevNode: (currentId: string) => void
   focusNextNode: (currentId: string) => void
+  // Local mutation (no IPC round-trip)
+  updateNodeLocally: (id: string, update: Partial<TreeNode>) => void
 }
 
 export type TreeStore = TreeState & TreeActions
@@ -627,5 +629,9 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     if (idx >= 0 && idx < flatIds.length - 1) {
       set({ editingNodeId: flatIds[idx + 1], selectedNodeIds: new Set<string>(), anchorNodeId: null })
     }
+  },
+
+  updateNodeLocally: (id: string, update: Partial<TreeNode>) => {
+    set({ nodes: updateNodeInTree(get().nodes, id, update) })
   },
 }))

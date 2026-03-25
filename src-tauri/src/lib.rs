@@ -19,8 +19,12 @@ pub fn run() {
         commands::nodes::update_node,
         commands::nodes::move_node,
         commands::nodes::delete_node,
+        commands::nodes::change_node_type,
         commands::search::search_nodes,
         commands::search::get_ancestors,
+        commands::undo::record_undo_step,
+        commands::undo::undo_step,
+        commands::undo::redo_step,
     ]);
 
     // Export TypeScript bindings in debug builds only.

@@ -102,6 +102,19 @@ export async function moveNodeIpc(
   }
 }
 
+/**
+ * Change the node_type of a node.
+ * Primary use: converting agent_response nodes to regular notes ("Make mine").
+ * Uses direct invoke because bindings.ts regenerates only on cargo tauri dev/build.
+ */
+export async function changeNodeTypeIpc(id: string, nodeType: string): Promise<void> {
+  try {
+    await invoke('change_node_type', { id, nodeType })
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
 // ─── Search IPC ───────────────────────────────────────────────────────────────
 
 export interface SearchResult {

@@ -253,3 +253,31 @@ pub async fn delete_node(state: State<'_, AppState>, id: String) -> Result<(), A
 
     Ok(())
 }
+
+/// Change the node_type of an existing node.
+///
+/// Updates only the `node_type` and `updated_at` columns.
+/// Primary use: converting agent_response nodes to regular notes ("Make mine").
+/// Returns the updated node.
+#[tauri::command]
+#[specta::specta]
+pub async fn change_node_type(
+    state: State<'_, AppState>,
+    id: String,
+    node_type: NodeType,
+) -> Result<Node, AppError> {
+    // Verify the node exists before attempting update.
+    let _ = get_node(State::clone(&state), id.clone()).await?;
+
+    let now = Utc::now().to_rfc3339();
+    let node_type_str = node_type.to_db_str();
+
+    sqlx::query("UPDATE nodes SET node_type = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(node_type_str)
+        .bind(&now)
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+
+    get_node(state, id).await
+}
