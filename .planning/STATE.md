@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 03-search-and-editing 03-03-PLAN.md
-last_updated: "2026-03-25T11:06:03.578Z"
+stopped_at: Completed 03-search-and-editing 03-05-PLAN.md
+last_updated: "2026-03-25T20:52:17.309Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
+  completed_phases: 2
+  total_plans: 11
+  completed_plans: 10
   percent: 0
 ---
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03-search-and-editing P04 | 3min | 1 tasks | 9 files |
 | Phase 03-search-and-editing P02 | 6min | 2 tasks | 9 files |
 | Phase 03-search-and-editing P03 | 10min | 2 tasks | 14 files |
+| Phase 03-search-and-editing P05 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 03-search-and-editing]: HashtagNode as atom Node (not Mark) — hashtags are atomic units, prevents partial text selection
 - [Phase 03-search-and-editing]: registerTagClickHandler in Zustand store — avoids prop drilling through react-arborist tree
 - [Phase 03-search-and-editing]: extractHashtags() walks ProseMirror JSON on frontend — keeps Rust decoupled from TipTap schema
+- [Phase 03-search-and-editing]: FTS5 external-content rebuild: INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild') is idempotent startup fix for existing databases, migration backfill handles fresh installs
+- [Phase 03-search-and-editing]: StarterKit history: false + no Mod-z in OutlinerKeys: single App.tsx capture-phase handler is sole source of Cmd+Z, eliminates double undo() per keypress
+- [Phase 03-search-and-editing]: undo() records pending flush before undoStepIpc: recordUndoStepIpc called with current node content as after_json to ensure active typing session is committed to DB before stepping back
 
 ### Pending Todos
 
@@ -115,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T11:01:46.939Z
-Stopped at: Completed 03-search-and-editing 03-03-PLAN.md
+Last session: 2026-03-25T20:52:17.305Z
+Stopped at: Completed 03-search-and-editing 03-05-PLAN.md
 Resume file: None
