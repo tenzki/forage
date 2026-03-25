@@ -395,10 +395,9 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
         editingNodeId: newNode.id,
       })
 
-      // Record undo step: before_json='{}' (node didn't exist), after_json=new node snapshot
-      recordUndoStepIpc('create', newNode.id, '{}', JSON.stringify(newNode)).catch((e) =>
-        console.warn('Failed to record undo step for createNode:', e)
-      )
+      // Record undo step: before_json='{}' (node didn't exist), after_json=new node snapshot.
+      // Awaited (not fire-and-forget) so the step is persisted before any Cmd+Z can run.
+      await recordUndoStepIpc('create', newNode.id, '{}', JSON.stringify(newNode))
 
       return newNode.id
     } catch (e) {
@@ -438,10 +437,9 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
         editingNodeId: focusId,
       })
 
-      // Record undo step: before_json=deleted node snapshot, after_json='{}'
-      recordUndoStepIpc('delete', id, beforeSnapshot, '{}').catch((e) =>
-        console.warn('Failed to record undo step for deleteNode:', e)
-      )
+      // Record undo step: before_json=deleted node snapshot, after_json='{}'.
+      // Awaited (not fire-and-forget) so the step is persisted before any Cmd+Z can run.
+      await recordUndoStepIpc('delete', id, beforeSnapshot, '{}')
 
       return focusId
     } catch (e) {
@@ -539,12 +537,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       const withRemoved = removeNodeFromTree(get().nodes, id)
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, prevSibling.id, lastChildId) })
 
-      // Record undo step
+      // Record undo step — awaited so the step is persisted before any Cmd+Z can run.
       const afterNode = await getNodeIpc(id).catch(() => null)
       if (afterNode) {
-        recordUndoStepIpc('indent', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
-          console.warn('Failed to record undo step for indentNode:', e)
-        )
+        await recordUndoStepIpc('indent', id, beforeSnapshot, JSON.stringify(afterNode))
       }
     } catch (e) {
       console.error('Failed to indent node:', e)
@@ -583,12 +579,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       const withRemoved = removeNodeFromTree(get().nodes, id)
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, grandParentId, parent.id) })
 
-      // Record undo step
+      // Record undo step — awaited so the step is persisted before any Cmd+Z can run.
       const afterNode = await getNodeIpc(id).catch(() => null)
       if (afterNode) {
-        recordUndoStepIpc('outdent', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
-          console.warn('Failed to record undo step for outdentNode:', e)
-        )
+        await recordUndoStepIpc('outdent', id, beforeSnapshot, JSON.stringify(afterNode))
       }
     } catch (e) {
       console.error('Failed to outdent node:', e)
@@ -634,12 +628,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, parentId, afterId) })
 
-      // Record undo step
+      // Record undo step — awaited so the step is persisted before any Cmd+Z can run.
       const afterNode = await getNodeIpc(id).catch(() => null)
       if (afterNode) {
-        recordUndoStepIpc('move', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
-          console.warn('Failed to record undo step for reorderNode:', e)
-        )
+        await recordUndoStepIpc('move', id, beforeSnapshot, JSON.stringify(afterNode))
       }
     } catch (e) {
       console.error('Failed to reorder node:', e)
@@ -783,6 +775,14 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   },
 
   undo: async () => {
+    // Cancel all pending content debounce timers. Without this, a timer that
+    // fires after undo() restores old DB state will re-write the new content,
+    // silently defeating the undo.
+    for (const [, timer] of updateDebounceTimers.entries()) {
+      clearTimeout(timer)
+    }
+    updateDebounceTimers.clear()
+
     // Flush any pending text edit group and RECORD it before undoing.
     // Without this, the active typing session is discarded and undoStepIpc
     // has nothing to step back to.
