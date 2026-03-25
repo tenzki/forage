@@ -64,7 +64,7 @@ Plans:
   3. User can use bold, italic, and inline code Markdown formatting within node text
   4. User can tag nodes with #hashtags by typing them inline, and tagged nodes are visually distinguished
   5. AI-generated content is visually styled differently from user-written content so the user always knows what the agent wrote
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 - [ ] 03-01-PLAN.md — Database migration (FTS5, undo, tags), Rust search backend, Cmd+K overlay
@@ -117,7 +117,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
 | 2. Core Outliner | 3/3 | Complete   | 2026-03-24 |
-| 3. Search and Editing | 2/4 | In Progress|  |
+| 3. Search and Editing | 3/4 | In Progress|  |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |
 | 6. iCloud Sync and Distribution | 0/TBD | Not started | - |
