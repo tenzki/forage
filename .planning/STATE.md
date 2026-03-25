@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 03-search-and-editing 03-02-PLAN.md
-last_updated: "2026-03-25T10:49:52.012Z"
+stopped_at: Completed 03-search-and-editing 03-03-PLAN.md
+last_updated: "2026-03-25T11:01:46.941Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03-search-and-editing P01 | 30min | 2 tasks | 13 files |
 | Phase 03-search-and-editing P04 | 3min | 1 tasks | 9 files |
 | Phase 03-search-and-editing P02 | 6min | 2 tasks | 9 files |
+| Phase 03-search-and-editing P03 | 10min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase 03-search-and-editing]: change_node_type dedicated command updates only node_type + updated_at — avoids update_node dynamic SET complexity
 - [Phase 03-search-and-editing]: ON DELETE CASCADE workaround in undo_history: read all entry data before node deletion, re-insert with PRAGMA foreign_keys=OFF after cascade to preserve redo stack
 - [Phase 03-search-and-editing]: UndoGroupTracker at module level in treeStore.ts to avoid React re-renders on every keystroke; 1s gap or nodeId change triggers new undo group
+- [Phase 03-search-and-editing]: HashtagNode as atom Node (not Mark) — hashtags are atomic units, prevents partial text selection
+- [Phase 03-search-and-editing]: registerTagClickHandler in Zustand store — avoids prop drilling through react-arborist tree
+- [Phase 03-search-and-editing]: extractHashtags() walks ProseMirror JSON on frontend — keeps Rust decoupled from TipTap schema
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T10:49:52.010Z
-Stopped at: Completed 03-search-and-editing 03-02-PLAN.md
+Last session: 2026-03-25T11:01:46.939Z
+Stopped at: Completed 03-search-and-editing 03-03-PLAN.md
 Resume file: None
