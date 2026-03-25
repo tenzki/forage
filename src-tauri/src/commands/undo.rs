@@ -66,10 +66,23 @@ pub async fn record_undo_step(
     Ok(())
 }
 
+/// Read a JSON field by trying snake_case first, then camelCase.
+/// Snapshots from the frontend use camelCase (Tauri IPC convention),
+/// while Rust field names are snake_case.
+fn get_str<'a>(node: &'a serde_json::Value, snake: &str, camel: &str) -> Option<&'a str> {
+    node[snake].as_str().or_else(|| node[camel].as_str())
+}
+
+fn get_value<'a>(node: &'a serde_json::Value, snake: &str, camel: &str) -> &'a serde_json::Value {
+    let v = &node[snake];
+    if v.is_null() { &node[camel] } else { v }
+}
+
 /// Apply a node snapshot (JSON string) back to the nodes table.
 ///
 /// Parses the JSON to extract all node fields and uses INSERT OR REPLACE
-/// to restore the row exactly as it was.
+/// to restore the row exactly as it was. Handles both camelCase (from
+/// frontend JSON.stringify) and snake_case (from Rust serialization) keys.
 async fn apply_node_snapshot(
     pool: &sqlx::SqlitePool,
     node_json: &str,
@@ -82,15 +95,14 @@ async fn apply_node_snapshot(
         .ok_or_else(|| AppError::InvalidInput("Snapshot missing 'id' field".to_string()))?
         .to_string();
 
-    let parent_id = node["parent_id"].as_str().map(|s| s.to_string());
-    let position = node["position"]
-        .as_str()
+    let parent_id = get_str(&node, "parent_id", "parentId").map(|s| s.to_string());
+    let position = get_str(&node, "position", "position")
         .ok_or_else(|| AppError::InvalidInput("Snapshot missing 'position'".to_string()))?
         .to_string();
-    let content = serde_json::to_string(&node["content"])
+    let content = serde_json::to_string(get_value(&node, "content", "content"))
         .map_err(|e| AppError::InvalidInput(e.to_string()))?;
-    let node_type = node["node_type"]
-        .as_str()
+    let node_type = get_str(&node, "node_type", "nodeType")
+        .or_else(|| get_str(&node, "node_type", "node_type"))
         .ok_or_else(|| AppError::InvalidInput("Snapshot missing 'node_type'".to_string()))?
         .to_string();
     let collapsed: i64 = if node["collapsed"].as_bool().unwrap_or(false) {
@@ -98,22 +110,21 @@ async fn apply_node_snapshot(
     } else {
         0
     };
-    let skill_id = node["skill_id"].as_str().map(|s| s.to_string());
-    let metadata = if node["metadata"].is_null() {
+    let skill_id = get_str(&node, "skill_id", "skillId").map(|s| s.to_string());
+    let meta = get_value(&node, "metadata", "metadata");
+    let metadata = if meta.is_null() {
         None
     } else {
         Some(
-            serde_json::to_string(&node["metadata"])
+            serde_json::to_string(meta)
                 .map_err(|e| AppError::InvalidInput(e.to_string()))?,
         )
     };
-    let content_text = node["content_text"].as_str().unwrap_or("").to_string();
-    let created_at = node["created_at"]
-        .as_str()
+    let content_text = get_str(&node, "content_text", "contentText").unwrap_or("").to_string();
+    let created_at = get_str(&node, "created_at", "createdAt")
         .unwrap_or("2026-01-01T00:00:00Z")
         .to_string();
-    let updated_at = node["updated_at"]
-        .as_str()
+    let updated_at = get_str(&node, "updated_at", "updatedAt")
         .unwrap_or("2026-01-01T00:00:00Z")
         .to_string();
 
