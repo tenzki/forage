@@ -19,6 +19,8 @@ pub fn run() {
         commands::nodes::update_node,
         commands::nodes::move_node,
         commands::nodes::delete_node,
+        commands::search::search_nodes,
+        commands::search::get_ancestors,
     ]);
 
     // Export TypeScript bindings in debug builds only.

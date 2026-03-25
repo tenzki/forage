@@ -52,6 +52,8 @@ interface TreeActions {
   batchDelete: () => Promise<void>
   // Editor focus
   setEditingNode: (id: string | null) => void
+  focusPrevNode: (currentId: string) => void
+  focusNextNode: (currentId: string) => void
 }
 
 export type TreeStore = TreeState & TreeActions
@@ -310,11 +312,13 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   },
 
   createNode: async (parentId: string | null, afterNodeId: string | null): Promise<string> => {
-    const { nodes } = get()
+    const { nodes, zoomedNodeId } = get()
 
     // Find siblings at the parent level
+    // When zoomed, the top-level `nodes` array contains children of the zoomed node.
+    // If parentId matches zoomedNodeId (or is null when not zoomed), use nodes directly.
     let siblings: TreeNode[]
-    if (parentId === null) {
+    if (parentId === null || parentId === zoomedNodeId) {
       siblings = nodes
     } else {
       const parent = findNodeById(nodes, parentId)
@@ -326,16 +330,23 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       ? siblings.findIndex((n) => n.id === afterNodeId)
       : siblings.length - 1
 
+    // Resolve the actual afterNodeId for local tree insertion
+    // When afterNodeId is null, insert after the last sibling (not at the start)
+    const effectiveAfterNodeId = afterNodeId ?? (siblings.length > 0 ? siblings[siblings.length - 1].id : null)
+
     const position = positionForInsertAfter(siblings, afterIndex)
 
     const emptyContent: JsonValue = { type: 'doc', content: [{ type: 'paragraph' }] }
 
     try {
-      const newNode = await createNodeIpc(parentId, position, 'note', emptyContent, null)
+      const newNode = await createNodeIpc(parentId, position, 'note', emptyContent, null, '')
       const treeNode = nodeToTreeNode(newNode)
 
+      // When zoomed and parentId is the zoomed node, insert at top level of visible tree
+      const insertParentId = (parentId === zoomedNodeId) ? null : parentId
+
       set({
-        nodes: insertNodeInTree(get().nodes, treeNode, parentId, afterNodeId),
+        nodes: insertNodeInTree(get().nodes, treeNode, insertParentId, effectiveAfterNodeId),
         editingNodeId: newNode.id,
       })
 
@@ -375,8 +386,9 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   },
 
   updateContent: (id: string, content: JsonValue) => {
+    const text = extractText(content)
     // Optimistic local update
-    set({ nodes: updateNodeInTree(get().nodes, id, { name: extractText(content), content }) })
+    set({ nodes: updateNodeInTree(get().nodes, id, { name: text, content }) })
 
     // Debounce IPC call (300ms)
     const existing = updateDebounceTimers.get(id)
@@ -385,7 +397,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     const timer = setTimeout(async () => {
       updateDebounceTimers.delete(id)
       try {
-        await updateNodeIpc(id, content, null, null, null)
+        await updateNodeIpc(id, content, null, null, null, text)
       } catch (e) {
         console.error('Failed to persist content update:', e)
       }
@@ -408,17 +420,18 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     // Position at end of prevSibling's children
     const prevSiblingChildren = prevSibling.children
     const newPosition = positionForInsertAfter(prevSiblingChildren, prevSiblingChildren.length - 1)
+    const lastChildId = prevSiblingChildren.length > 0 ? prevSiblingChildren[prevSiblingChildren.length - 1].id : null
 
     try {
       await moveNodeIpc(id, prevSibling.id, newPosition)
 
-      // Update local tree: remove from current location, add to prevSibling children
+      // Update local tree: remove from current location, add at end of prevSibling children
       const nodeToMove = findNodeById(nodes, id)
       if (!nodeToMove) return
 
       const updatedNode = { ...nodeToMove, parent_id: prevSibling.id, position: newPosition }
       const withRemoved = removeNodeFromTree(get().nodes, id)
-      set({ nodes: insertNodeInTree(withRemoved, updatedNode, prevSibling.id, null) })
+      set({ nodes: insertNodeInTree(withRemoved, updatedNode, prevSibling.id, lastChildId) })
     } catch (e) {
       console.error('Failed to indent node:', e)
     }
@@ -595,6 +608,24 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     set({ editingNodeId: id })
     if (id !== null) {
       set({ selectedNodeIds: new Set<string>(), anchorNodeId: null })
+    }
+  },
+
+  focusPrevNode: (currentId: string) => {
+    const { nodes } = get()
+    const flatIds = getFlatVisibleIds(nodes)
+    const idx = flatIds.indexOf(currentId)
+    if (idx > 0) {
+      set({ editingNodeId: flatIds[idx - 1], selectedNodeIds: new Set<string>(), anchorNodeId: null })
+    }
+  },
+
+  focusNextNode: (currentId: string) => {
+    const { nodes } = get()
+    const flatIds = getFlatVisibleIds(nodes)
+    const idx = flatIds.indexOf(currentId)
+    if (idx >= 0 && idx < flatIds.length - 1) {
+      set({ editingNodeId: flatIds[idx + 1], selectedNodeIds: new Set<string>(), anchorNodeId: null })
     }
   },
 }))

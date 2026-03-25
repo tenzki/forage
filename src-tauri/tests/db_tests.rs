@@ -529,6 +529,136 @@ async fn test_move_node_preserves_other_fields() {
     cleanup(&path);
 }
 
+// ─── TREE-05 FTS5 Search Tests ────────────────────────────────────────────────
+
+/// Helper: insert a node with content_text for FTS5 search tests.
+async fn insert_node_with_text(
+    pool: &sqlx::SqlitePool,
+    id: &str,
+    parent_id: Option<&str>,
+    position: &str,
+    content_text: &str,
+) {
+    sqlx::query(
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, content_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, '{}', 'note', 0, NULL, NULL, ?4, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(id)
+    .bind(parent_id)
+    .bind(position)
+    .bind(content_text)
+    .execute(pool)
+    .await
+    .unwrap_or_else(|e| panic!("insert_node_with_text failed for id={}: {}", id, e));
+}
+
+/// TREE-05: search_nodes FTS5 search returns matching nodes with snippets.
+///
+/// Creates 3 nodes with different content, searches for a term that matches only one,
+/// and asserts the correct node is returned with a non-empty snippet.
+#[tokio::test]
+async fn test_search_nodes() {
+    let path = temp_db_path("search_nodes");
+    let pool = create_test_pool(&path).await;
+
+    // Insert three nodes with distinct content.
+    insert_node_with_text(&pool, "search-node-1", None, "a0", "The quick brown fox jumps").await;
+    insert_node_with_text(&pool, "search-node-2", None, "a1", "A lazy dog sleeps all day").await;
+    insert_node_with_text(&pool, "search-node-3", None, "a2", "The fox ran over the hill quickly").await;
+
+    // Search for "fox" — should match node-1 and node-3, but not node-2.
+    let fts_query = "\"fox\"*";
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            n.id,
+            n.parent_id,
+            n.node_type,
+            snippet(nodes_fts, 0, '<mark>', '</mark>', '...', 20) AS snippet_text
+        FROM nodes_fts
+        JOIN nodes n ON n.rowid = nodes_fts.rowid
+        WHERE nodes_fts MATCH ?1
+        ORDER BY rank
+        LIMIT 20
+        "#,
+    )
+    .bind(fts_query)
+    .fetch_all(&pool)
+    .await
+    .expect("FTS5 search query failed");
+
+    // Should get 2 results (node-1 and node-3).
+    assert_eq!(rows.len(), 2, "Expected 2 search results for 'fox', got {}", rows.len());
+
+    // Collect ids.
+    let ids: Vec<String> = rows.iter().map(|r| r.get::<String, _>("id")).collect();
+    assert!(ids.contains(&"search-node-1".to_string()), "Expected search-node-1 in results");
+    assert!(ids.contains(&"search-node-3".to_string()), "Expected search-node-3 in results");
+    assert!(!ids.contains(&"search-node-2".to_string()), "search-node-2 should NOT match 'fox'");
+
+    // Verify snippets contain <mark> tags (FTS5 highlight).
+    for row in &rows {
+        let snippet: String = row.get("snippet_text");
+        assert!(
+            snippet.contains("<mark>"),
+            "Expected snippet to contain <mark> tags, got: {}",
+            snippet
+        );
+    }
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+/// TREE-05: FTS5 index is updated when content_text is updated via trigger.
+#[tokio::test]
+async fn test_search_nodes_fts_update_trigger() {
+    let path = temp_db_path("search_fts_update");
+    let pool = create_test_pool(&path).await;
+
+    // Insert a node with initial content.
+    insert_node_with_text(&pool, "update-node-1", None, "a0", "initial content here").await;
+
+    // Verify it appears in search.
+    let count_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '\"initial\"*'"
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count query failed");
+    assert_eq!(count_before, 1, "Expected 1 result before update");
+
+    // Update the content_text — trigger should update FTS index.
+    sqlx::query("UPDATE nodes SET content_text = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind("completely different words now")
+        .bind("2026-01-02T00:00:00Z")
+        .bind("update-node-1")
+        .execute(&pool)
+        .await
+        .expect("update failed");
+
+    // Old content should no longer match.
+    let count_old: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '\"initial\"*'"
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count query failed");
+    assert_eq!(count_old, 0, "Old content should not match after update");
+
+    // New content should match.
+    let count_new: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '\"different\"*'"
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("count query failed");
+    assert_eq!(count_new, 1, "New content should match after update");
+
+    pool.close().await;
+    cleanup(&path);
+}
+
 /// TREE-01: Attempting to move a non-existent node id returns no rows updated (simulates NotFound).
 #[tokio::test]
 async fn test_move_node_not_found() {

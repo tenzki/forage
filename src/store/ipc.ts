@@ -13,16 +13,32 @@ export async function loadChildren(parentId: string | null): Promise<Node[]> {
   return result.data
 }
 
+/**
+ * Create a new node.
+ * Uses direct invoke (not bindings) because bindings.ts regenerates only on
+ * cargo tauri dev/build and the Rust signature now includes contentText.
+ */
 export async function createNodeIpc(
   parentId: string | null,
   position: string,
   nodeType: NodeType,
   content: JsonValue,
-  metadata: JsonValue | null
+  metadata: JsonValue | null,
+  contentText: string | null = null
 ): Promise<Node> {
-  const result = await commands.createNode(parentId, position, nodeType, content, metadata)
-  if (result.status === 'error') throw new Error(JSON.stringify(result.error))
-  return result.data
+  try {
+    const data = await invoke<Node>('create_node', {
+      parentId,
+      position,
+      nodeType,
+      content,
+      metadata,
+      contentText,
+    })
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
 }
 
 export async function getNodeIpc(id: string): Promise<Node> {
@@ -31,16 +47,32 @@ export async function getNodeIpc(id: string): Promise<Node> {
   return result.data
 }
 
+/**
+ * Update a node's fields.
+ * Uses direct invoke (not bindings) because bindings.ts regenerates only on
+ * cargo tauri dev/build and the Rust signature now includes contentText.
+ */
 export async function updateNodeIpc(
   id: string,
   content: JsonValue | null,
   position: string | null,
   collapsed: boolean | null,
-  metadata: JsonValue | null
+  metadata: JsonValue | null,
+  contentText: string | null = null
 ): Promise<Node> {
-  const result = await commands.updateNode(id, content, position, collapsed, metadata)
-  if (result.status === 'error') throw new Error(JSON.stringify(result.error))
-  return result.data
+  try {
+    const data = await invoke<Node>('update_node', {
+      id,
+      content,
+      position,
+      collapsed,
+      metadata,
+      contentText,
+    })
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
 }
 
 export async function deleteNodeIpc(id: string): Promise<void> {
@@ -64,6 +96,46 @@ export async function moveNodeIpc(
       newParentId,
       newPosition,
     })
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+// ─── Search IPC ───────────────────────────────────────────────────────────────
+
+export interface SearchResult {
+  id: string
+  parentId: string | null
+  nodeType: string
+  snippet: string
+}
+
+export interface AncestorNode {
+  id: string
+  name: string
+}
+
+/**
+ * Search nodes using FTS5 full-text search.
+ * Returns up to 20 results with highlighted snippets.
+ */
+export async function searchNodesIpc(query: string): Promise<SearchResult[]> {
+  try {
+    const data = await invoke<SearchResult[]>('search_nodes', { query })
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+/**
+ * Get ancestors of a node for breadcrumb display.
+ * Returns ordered list from root to the node's direct parent.
+ */
+export async function getAncestorsIpc(nodeId: string): Promise<AncestorNode[]> {
+  try {
+    const data = await invoke<AncestorNode[]>('get_ancestors', { nodeId })
     return data
   } catch (e) {
     throw new Error(typeof e === 'string' ? e : JSON.stringify(e))

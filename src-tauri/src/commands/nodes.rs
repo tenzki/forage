@@ -68,6 +68,7 @@ pub async fn create_node(
     node_type: NodeType,
     content: serde_json::Value,
     metadata: Option<serde_json::Value>,
+    content_text: Option<String>,
 ) -> Result<Node, AppError> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -79,10 +80,11 @@ pub async fn create_node(
         .map(|m| serde_json::to_string(m))
         .transpose()
         .map_err(|e| AppError::InvalidInput(e.to_string()))?;
+    let text = content_text.unwrap_or_default();
 
     sqlx::query(
-        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?7, ?8)",
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, content_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, ?7, ?8, ?9)",
     )
     .bind(&id)
     .bind(&parent_id)
@@ -90,6 +92,7 @@ pub async fn create_node(
     .bind(&content_str)
     .bind(node_type_str)
     .bind(&metadata_str)
+    .bind(&text)
     .bind(&now)
     .bind(&now)
     .execute(&state.db)
@@ -145,6 +148,7 @@ pub async fn update_node(
     position: Option<String>,
     collapsed: Option<bool>,
     metadata: Option<serde_json::Value>,
+    content_text: Option<String>,
 ) -> Result<Node, AppError> {
     // Verify the node exists before attempting update.
     let _ = get_node(State::clone(&state), id.clone()).await?;
@@ -177,6 +181,9 @@ pub async fn update_node(
     if metadata_str.is_some() {
         set_parts.push("metadata = ?5");
     }
+    if content_text.is_some() {
+        set_parts.push("content_text = ?7");
+    }
 
     let sql = format!(
         "UPDATE nodes SET {} WHERE id = ?6",
@@ -192,6 +199,7 @@ pub async fn update_node(
         .bind(&collapsed_int)
         .bind(&metadata_str)
         .bind(&id)
+        .bind(&content_text)
         .execute(&state.db)
         .await?;
 
