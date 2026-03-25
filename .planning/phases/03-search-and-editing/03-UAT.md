@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 03-search-and-editing
 source: 03-01-SUMMARY.md, 03-02-SUMMARY.md, 03-03-SUMMARY.md, 03-04-SUMMARY.md
 started: 2026-03-25T13:00:00Z
@@ -87,57 +87,82 @@ skipped: 5
   reason: "User reported: cmd K popup shows, but search doesn't find anything"
   severity: major
   test: 1
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "User can type #hashtag inline and see autocomplete dropdown with matching tags"
-  status: failed
-  reason: "User reported: doesn't work"
-  severity: major
-  test: 7
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "Bold, italic, and inline code formatting persists when node loses focus"
-  status: failed
-  reason: "User reported: it's applied when node is selected. when I focus away from it, it returns to normal format."
-  severity: major
-  test: 6
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "User can undo text edits with Cmd+Z grouped by typing pauses"
-  status: failed
-  reason: "User reported: it's still not working"
-  severity: major
-  test: 4
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
-
-- truth: "User can undo structural operations (create, indent, move) with Cmd+Z and redo with Cmd+Shift+Z"
-  status: failed
-  reason: "User reported: cmd z doesn't do anything"
-  severity: major
-  test: 3
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Missing FTS5 backfill in migration 0002 — external content mode FTS5 does not auto-index pre-existing rows. Migration needs INSERT INTO nodes_fts(rowid, content_text) SELECT rowid, content_text FROM nodes."
+  artifacts:
+    - path: "src-tauri/migrations/0002_search_and_editing.sql"
+      issue: "Missing FTS5 backfill statement for existing nodes"
+  missing:
+    - "Add backfill INSERT INTO nodes_fts(rowid, content_text) SELECT rowid, content_text FROM nodes to migration"
+  debug_session: ".planning/debug/fts5-search-returns-no-results.md"
 
 - truth: "User can search for a word in node content and see the node in results with the matching word highlighted"
   status: failed
   reason: "User reported: search still doesn't return anything"
   severity: major
   test: 2
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Same as test 1 — FTS5 backfill missing. Also: newly created nodes pass empty string as contentText, only indexed after first debounced save."
+  artifacts:
+    - path: "src-tauri/migrations/0002_search_and_editing.sql"
+      issue: "Missing FTS5 backfill"
+    - path: "src/store/treeStore.ts"
+      issue: "createNode passes '' as contentText"
+  missing:
+    - "Add FTS5 backfill to migration"
+  debug_session: ".planning/debug/fts5-search-returns-no-results.md"
+
+- truth: "User can undo structural operations (create, indent, move) with Cmd+Z and redo with Cmd+Shift+Z"
+  status: failed
+  reason: "User reported: cmd z doesn't do anything"
+  severity: major
+  test: 3
+  root_cause: "Double-fire: App.tsx capture handler AND OutlinerKeys Mod-z both call undo() on every Cmd+Z, consuming two undo steps per keypress. Also recordUndoStepIpc is fire-and-forget — silent failures leave empty undo stack."
+  artifacts:
+    - path: "src/App.tsx"
+      issue: "Capture-phase Cmd+Z handler fires alongside OutlinerKeys Mod-z"
+    - path: "src/components/Outliner/NodeEditor.tsx"
+      issue: "OutlinerKeys Mod-z is redundant with App.tsx global handler"
+  missing:
+    - "Remove Mod-z/Mod-Shift-z from OutlinerKeys OR remove from App.tsx global handler"
+  debug_session: ".planning/debug/undo-cmd-z-not-working.md"
+
+- truth: "User can undo text edits with Cmd+Z grouped by typing pauses"
+  status: failed
+  reason: "User reported: it's still not working"
+  severity: major
+  test: 4
+  root_cause: "Active typing group is never recorded to DB — undo() calls undoTracker.flush() but discards the result instead of calling recordUndoStepIpc with it. The current typing session is permanently unrecoverable."
+  artifacts:
+    - path: "src/store/treeStore.ts"
+      issue: "undo() discards pending flush result instead of recording it via IPC"
+  missing:
+    - "In undo(), when flush() returns pending group, call recordUndoStepIpc with before/after snapshots before calling undoStepIpc"
+  debug_session: ".planning/debug/undo-cmd-z-not-working.md"
+
+- truth: "Bold, italic, and inline code formatting persists when node loses focus"
+  status: failed
+  reason: "User reported: it's applied when node is selected. when I focus away from it, it returns to normal format."
+  severity: major
+  test: 6
+  root_cause: "Non-editing nodes render node.data.name (plain text from extractText()) instead of ProseMirror JSON content. extractText() strips all marks. The rich content is saved correctly but never rendered when the node is not being edited."
+  artifacts:
+    - path: "src/components/Outliner/NodeRow.tsx"
+      issue: "Line 107 renders {node.data.name} — plain text, no formatting"
+    - path: "src/types/tree.ts"
+      issue: "extractText() strips marks, producing plain string"
+  missing:
+    - "Replace plain <span> in NodeRow with generateHTML(node.data.content, extensions) or similar rich text rendering for non-editing nodes"
+  debug_session: ".planning/debug/formatting-lost-on-blur.md"
+
+- truth: "User can type #hashtag inline and see autocomplete dropdown with matching tags"
+  status: failed
+  reason: "User reported: doesn't work"
+  severity: major
+  test: 7
+  root_cause: "Two issues: (1) Query length gate requires 2 chars after # but popup renders null when items is empty — popup invisible until 3 chars typed. (2) On fresh install no tags exist, so IPC always returns empty array and popup never shows. No 'create new tag' option."
+  artifacts:
+    - path: "src/extensions/HashtagNode.tsx"
+      issue: "Line 209: query.length < 2 guard too strict; SuggestionPopup returns null on empty items"
+  missing:
+    - "Lower query length gate to 0 or 1"
+    - "Show 'create new tag' option when no existing tags match"
+  debug_session: ".planning/debug/hashtag-autocomplete-not-triggering.md"
