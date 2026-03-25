@@ -545,3 +545,8 @@ body.is-dragging * {
 .suggestion-item--active {
   background: #f3f4f6;
 }
+
+.suggestion-item--create {
+  color: #2563eb;
+  border-top: 1px solid #f3f4f6;
+}

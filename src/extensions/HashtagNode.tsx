@@ -3,7 +3,7 @@ import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
 import Suggestion from '@tiptap/suggestion'
 import { createPortal } from 'react-dom'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getTagsMatchingIpc } from '../store/ipc'
 
 // ─── Suggestion Popup ─────────────────────────────────────────────────────────
@@ -67,18 +67,22 @@ function SuggestionPopup({ items, command, clientRect }: SuggestionPopupProps) {
 
   return createPortal(
     <div className="suggestion-popup" style={style}>
-      {items.map((item, index) => (
-        <div
-          key={item}
-          className={`suggestion-item${index === selectedIndex ? ' suggestion-item--active' : ''}`}
-          onMouseDown={(e) => {
-            e.preventDefault()
-            selectItem(index)
-          }}
-        >
-          #{item}
-        </div>
-      ))}
+      {items.map((item, index) => {
+        const isCreate = item.startsWith('__create__:')
+        const label = isCreate ? `Create #${item.slice('__create__:'.length)}` : `#${item}`
+        return (
+          <div
+            key={item}
+            className={`suggestion-item${index === selectedIndex ? ' suggestion-item--active' : ''}${isCreate ? ' suggestion-item--create' : ''}`}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              selectItem(index)
+            }}
+          >
+            {label}
+          </div>
+        )
+      })}
     </div>,
     document.body
   )
@@ -86,18 +90,13 @@ function SuggestionPopup({ items, command, clientRect }: SuggestionPopupProps) {
 
 // ─── Node View ────────────────────────────────────────────────────────────────
 
-interface HashtagNodeViewProps extends NodeViewProps {
-  extension: {
-    options: HashtagNodeOptions
-  }
-}
-
-function HashtagNodeView({ node, extension }: HashtagNodeViewProps) {
+function HashtagNodeView({ node, extension }: NodeViewProps) {
   const tag = node.attrs.tag as string
 
   const handleClick = () => {
-    if (extension.options.onTagClick) {
-      extension.options.onTagClick(tag)
+    const opts = extension.options as HashtagNodeOptions
+    if (opts.onTagClick) {
+      opts.onTagClick(tag)
     }
   }
 
@@ -120,23 +119,6 @@ function HashtagNodeView({ node, extension }: HashtagNodeViewProps) {
 export interface HashtagNodeOptions {
   onTagClick?: (tag: string) => void
   HTMLAttributes: Record<string, unknown>
-}
-
-// Module-level state for the suggestion popup
-let suggestionPopupRef: {
-  setProps: (props: SuggestionPopupProps | null) => void
-} | null = null
-
-// Rendered popup component host
-let popupContainer: HTMLDivElement | null = null
-
-function getOrCreatePopupContainer(): HTMLDivElement {
-  if (!popupContainer) {
-    popupContainer = document.createElement('div')
-    popupContainer.id = 'hashtag-suggestion-portal'
-    document.body.appendChild(popupContainer)
-  }
-  return popupContainer
 }
 
 // ─── HashtagNode Extension ────────────────────────────────────────────────────
@@ -189,20 +171,23 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
   },
 
   addProseMirrorPlugins() {
-    const extensionThis = this
-
-    // Popup state
-    let currentProps: SuggestionPopupProps | null = null
     let popupRoot: import('react-dom/client').Root | null = null
+    let popupContainer: HTMLDivElement | null = null
+
+    function getOrCreateContainer(): HTMLDivElement {
+      if (!popupContainer) {
+        popupContainer = document.createElement('div')
+        popupContainer.id = 'hashtag-suggestion-portal'
+        document.body.appendChild(popupContainer)
+      }
+      return popupContainer
+    }
 
     function renderPopup(props: SuggestionPopupProps | null) {
-      currentProps = props
-
       if (typeof window === 'undefined') return
 
-      // Lazy import react-dom/client to avoid SSR issues
       import('react-dom/client').then(({ createRoot }) => {
-        const container = getOrCreatePopupContainer()
+        const container = getOrCreateContainer()
 
         if (!popupRoot) {
           popupRoot = createRoot(container)
@@ -225,20 +210,32 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
         allowedPrefixes: null,
 
         items: async ({ query }) => {
-          if (query.length < 2) return []
+          if (query.length < 1) return []
           try {
-            return await getTagsMatchingIpc(query)
+            const matches = await getTagsMatchingIpc(query)
+            // If no exact match exists, offer to create
+            const exactMatch = matches.some(
+              (m) => m.toLowerCase() === query.toLowerCase()
+            )
+            if (!exactMatch && query.trim().length > 0) {
+              matches.push(`__create__:${query.trim()}`)
+            }
+            return matches
           } catch {
-            return []
+            // On error, still offer to create the tag
+            return query.trim().length > 0 ? [`__create__:${query.trim()}`] : []
           }
         },
 
         command: ({ editor, range, props: tag }) => {
+          const actualTag = typeof tag === 'string' && tag.startsWith('__create__:')
+            ? tag.slice('__create__:'.length)
+            : tag
           editor
             .chain()
             .focus()
             .deleteRange(range)
-            .insertContent({ type: 'hashtag', attrs: { tag } })
+            .insertContent({ type: 'hashtag', attrs: { tag: actualTag } })
             .run()
         },
 
@@ -249,7 +246,7 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
 
           return {
             onStart: (props) => {
-              clientRectFn = props.clientRect
+              clientRectFn = props.clientRect ?? null
               currentItems = props.items as string[]
               currentCommand = props.command as unknown as (item: string) => void
 
@@ -261,7 +258,7 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
             },
 
             onUpdate: (props) => {
-              clientRectFn = props.clientRect
+              clientRectFn = props.clientRect ?? null
               currentItems = props.items as string[]
               currentCommand = props.command as unknown as (item: string) => void
 
@@ -273,7 +270,6 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
             },
 
             onKeyDown: ({ event }) => {
-              // Arrow keys and Enter are handled in SuggestionPopup's own keydown handler
               if (event.key === 'Escape') {
                 renderPopup(null)
                 return true
