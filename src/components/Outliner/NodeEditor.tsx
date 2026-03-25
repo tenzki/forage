@@ -194,7 +194,7 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        history: false, // Disabled: App.tsx capture-phase handler manages undo/redo globally
+        undoRedo: false, // Disabled: App.tsx capture-phase handler manages undo/redo globally
         heading: false,
         blockquote: false,
         codeBlock: false,

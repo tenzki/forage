@@ -5,6 +5,22 @@ import Bullet from './Bullet'
 import NodeEditor from './NodeEditor'
 import { useTreeStore } from '../../store/treeStore'
 import { changeNodeTypeIpc } from '../../store/ipc'
+import { generateHTML } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import { HashtagNode } from '../../extensions/HashtagNode'
+
+const readOnlyExtensions = [
+  StarterKit.configure({
+    heading: false,
+    blockquote: false,
+    codeBlock: false,
+    horizontalRule: false,
+    bulletList: false,
+    orderedList: false,
+    listItem: false,
+  }),
+  HashtagNode,
+]
 
 /**
  * react-arborist node renderer for Workflowy-style outliner rows.
@@ -100,12 +116,19 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
         {isEditing ? (
           <NodeEditor node={node.data} />
         ) : (
-          <span
-            className="node-text"
-            onClick={handleTextClick}
-          >
-            {node.data.name || <span className="node-text--empty">Click to edit</span>}
-          </span>
+          node.data.content ? (
+            <span
+              className="node-text node-text--rich"
+              onClick={handleTextClick}
+              dangerouslySetInnerHTML={{
+                __html: generateHTML(node.data.content as any, readOnlyExtensions),
+              }}
+            />
+          ) : (
+            <span className="node-text" onClick={handleTextClick}>
+              {node.data.name || <span className="node-text--empty">Click to edit</span>}
+            </span>
+          )
         )}
       </div>
 

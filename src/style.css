@@ -99,6 +99,19 @@ body {
   font-style: italic;
 }
 
+.node-text--rich p {
+  margin: 0;
+  display: inline;
+}
+
+.node-text--rich code {
+  background: rgba(135, 131, 120, 0.15);
+  border-radius: 3px;
+  padding: 0.2em 0.4em;
+  font-size: 85%;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
 /* ============================================================
    Bullet component
    ============================================================ */
