@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Storage Foundation** - SQLite schema, UUID node identity, Tauri IPC layer, iCloud file placement (completed 2026-03-24)
 - [x] **Phase 2: Core Outliner** - Infinite nested tree, zoom/hoist, keyboard navigation, drag-to-reorder (completed 2026-03-24)
-- [x] **Phase 3: Search and Editing** - Global search, undo/redo, Markdown formatting, hashtags, AI content styling (completed 2026-03-25)
+- [ ] **Phase 3: Search and Editing** - Global search, undo/redo, Markdown formatting, hashtags, AI content styling (UAT gap closure in progress)
 - [ ] **Phase 4: Agent Infrastructure** - API key management, Node.js sidecar, LLM streaming, slash command core
 - [ ] **Phase 5: Skills and Agent UI** - Built-in research skill, custom skill configuration, slash command overlay
 - [ ] **Phase 6: iCloud Sync and Distribution** - Sync status, conflict resolution, macOS entitlements, notarization
@@ -64,13 +64,15 @@ Plans:
   3. User can use bold, italic, and inline code Markdown formatting within node text
   4. User can tag nodes with #hashtags by typing them inline, and tagged nodes are visually distinguished
   5. AI-generated content is visually styled differently from user-written content so the user always knows what the agent wrote
-**Plans:** 4/4 plans complete
+**Plans:** 6 plans (4 complete, 2 gap closure)
 
 Plans:
-- [ ] 03-01-PLAN.md — Database migration (FTS5, undo, tags), Rust search backend, Cmd+K overlay
-- [ ] 03-02-PLAN.md — Persistent undo/redo Rust backend + Zustand store wrapper
-- [ ] 03-03-PLAN.md — Hashtag TipTap extension, autocomplete, tag sidebar
-- [ ] 03-04-PLAN.md — Markdown formatting CSS, AI sparkle icon, context menu
+- [x] 03-01-PLAN.md — Database migration (FTS5, undo, tags), Rust search backend, Cmd+K overlay
+- [x] 03-02-PLAN.md — Persistent undo/redo Rust backend + Zustand store wrapper
+- [x] 03-03-PLAN.md — Hashtag TipTap extension, autocomplete, tag sidebar
+- [x] 03-04-PLAN.md — Markdown formatting CSS, AI sparkle icon, context menu
+- [ ] 03-05-PLAN.md — [GAP] FTS5 backfill + undo double-fire and pending group fixes
+- [ ] 03-06-PLAN.md — [GAP] Rich text rendering for non-editing nodes + hashtag autocomplete fixes
 
 ### Phase 4: Agent Infrastructure
 **Goal**: Pi agent SDK embedded as Node.js sidecar, wired to Tauri IPC — slash commands trigger Pi skills that stream results into the tree
@@ -117,7 +119,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
 | 2. Core Outliner | 3/3 | Complete   | 2026-03-24 |
-| 3. Search and Editing | 4/4 | Complete   | 2026-03-25 |
+| 3. Search and Editing | 4/6 | Gap closure | - |
 | 4. Agent Infrastructure | 0/TBD | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |
 | 6. iCloud Sync and Distribution | 0/TBD | Not started | - |
