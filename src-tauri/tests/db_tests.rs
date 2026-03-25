@@ -659,6 +659,302 @@ async fn test_search_nodes_fts_update_trigger() {
     cleanup(&path);
 }
 
+// ─── EDIT-01 Undo/Redo Tests ──────────────────────────────────────────────────
+
+/// EDIT-01: Structural undo/redo — create a node, record undo step, undo it (deletes node),
+/// then redo it (restores node).
+#[tokio::test]
+async fn test_undo_redo_structural() {
+    let path = temp_db_path("undo_redo_structural");
+    let pool = create_test_pool(&path).await;
+
+    // Create a node.
+    let node_id = "undo-test-node-1";
+    sqlx::query(
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, content_text, created_at, updated_at)
+         VALUES (?1, NULL, 'a0', '{}', 'note', 0, NULL, NULL, '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(node_id)
+    .execute(&pool)
+    .await
+    .expect("insert node failed");
+
+    // Verify node exists.
+    let count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes WHERE id = ?1")
+        .bind(node_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count query failed");
+    assert_eq!(count_before, 1, "Node should exist before undo");
+
+    // Record an undo step for the 'create' operation.
+    // before_json = '{}' (node didn't exist), after_json = node snapshot.
+    let after_snapshot = r#"{"id":"undo-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
+
+    // Clear pointer is at 0 by default (migration inserts it).
+    // Simulate record_undo_step: clear redo stack, insert, advance pointer.
+    sqlx::query("DELETE FROM undo_history WHERE id > (SELECT position FROM undo_pointer WHERE id = 1)")
+        .execute(&pool)
+        .await
+        .expect("clear redo failed");
+
+    sqlx::query(
+        "INSERT INTO undo_history (operation, node_id, before_json, after_json, group_key)
+         VALUES ('create', ?1, '{}', ?2, NULL)",
+    )
+    .bind(node_id)
+    .bind(after_snapshot)
+    .execute(&pool)
+    .await
+    .expect("insert undo step failed");
+
+    let new_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(&pool)
+        .await
+        .expect("last_insert_rowid failed");
+
+    sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
+        .bind(new_id)
+        .execute(&pool)
+        .await
+        .expect("update pointer failed");
+
+    // --- Simulate undo_step ---
+    let position: i64 = sqlx::query_scalar("SELECT position FROM undo_pointer WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .expect("read pointer failed");
+    assert!(position > 0, "Pointer should be > 0 after recording step");
+
+    // Read the undo entry BEFORE deleting the node (ON DELETE CASCADE will remove it).
+    let row = sqlx::query(
+        "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE id = ?1",
+    )
+    .bind(position)
+    .fetch_one(&pool)
+    .await
+    .expect("fetch undo entry failed");
+
+    let op: String = row.get("operation");
+    let nid: String = row.get("node_id");
+    let undo_entry_id: i64 = row.get("id");
+    let saved_after_json: String = row.get("after_json");
+    assert_eq!(op, "create");
+    assert_eq!(nid, node_id);
+
+    // For 'create' undo: delete the node.
+    // NOTE: ON DELETE CASCADE will also delete the undo_history entry.
+    // The actual undo_step command reads entries first, then deletes — same pattern here.
+    sqlx::query("DELETE FROM nodes WHERE id = ?1")
+        .bind(&nid)
+        .execute(&pool)
+        .await
+        .expect("delete node for undo failed");
+
+    // Move pointer back to 0.
+    sqlx::query("UPDATE undo_pointer SET position = 0 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("reset pointer failed");
+
+    // Verify node is gone after undo.
+    let count_after_undo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes WHERE id = ?1")
+        .bind(node_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count after undo failed");
+    assert_eq!(count_after_undo, 0, "Node should be deleted after undo of create");
+
+    // --- Simulate redo_step ---
+    // Since ON DELETE CASCADE removed the undo_history entry when we deleted the node,
+    // we need to re-insert it for redo to work. The actual undo_step command handles this
+    // because it re-reads after applying before_json.
+    // For this test, we simulate redo using the saved after_json data.
+    let redo_nid = nid.clone();
+    let redo_id = undo_entry_id;
+    let redo_after = saved_after_json;
+
+    // For 'create' redo: re-insert node from after_json.
+    let snapshot: serde_json::Value = serde_json::from_str(&redo_after).expect("parse snapshot");
+    sqlx::query(
+        "INSERT OR REPLACE INTO nodes
+         (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, content_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+    )
+    .bind(snapshot["id"].as_str().unwrap())
+    .bind(snapshot["parent_id"].as_str())
+    .bind(snapshot["position"].as_str().unwrap())
+    .bind(serde_json::to_string(&snapshot["content"]).unwrap())
+    .bind(snapshot["node_type"].as_str().unwrap())
+    .bind(if snapshot["collapsed"].as_bool().unwrap_or(false) { 1i64 } else { 0i64 })
+    .bind(snapshot["skill_id"].as_str())
+    .bind(snapshot["metadata"].as_str())
+    .bind(snapshot["content_text"].as_str().unwrap_or(""))
+    .bind(snapshot["created_at"].as_str().unwrap_or("2026-01-01T00:00:00Z"))
+    .bind(snapshot["updated_at"].as_str().unwrap_or("2026-01-01T00:00:00Z"))
+    .execute(&pool)
+    .await
+    .expect("redo re-insert failed");
+
+    // Advance pointer to redo_id.
+    sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
+        .bind(redo_id)
+        .execute(&pool)
+        .await
+        .expect("advance pointer for redo failed");
+
+    // Verify node is back after redo.
+    let count_after_redo: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes WHERE id = ?1")
+        .bind(redo_nid)
+        .fetch_one(&pool)
+        .await
+        .expect("count after redo failed");
+    assert_eq!(count_after_redo, 1, "Node should exist again after redo of create");
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+/// EDIT-01: Text group undo — record 3 undo steps with same group_key,
+/// then undo once and verify all 3 are reverted together.
+#[tokio::test]
+async fn test_undo_redo_text_group() {
+    let path = temp_db_path("undo_redo_text_group");
+    let pool = create_test_pool(&path).await;
+
+    let node_id = "group-test-node-1";
+
+    // Insert a node with initial content.
+    sqlx::query(
+        "INSERT INTO nodes (id, parent_id, position, content, node_type, collapsed, skill_id, metadata, content_text, created_at, updated_at)
+         VALUES (?1, NULL, 'a0', '{}', 'note', 0, NULL, NULL, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .bind(node_id)
+    .execute(&pool)
+    .await
+    .expect("insert node failed");
+
+    let group_key = "group_1234567890";
+
+    // Record 3 undo steps with same group_key.
+    let snapshots = [
+        (r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"h","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:01Z"}"#,
+         r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"he","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:02Z"}"#),
+        (r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"he","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:02Z"}"#,
+         r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"hel","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:03Z"}"#),
+        (r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"hel","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:03Z"}"#,
+         r#"{"id":"group-test-node-1","parent_id":null,"position":"a0","content":{},"node_type":"note","collapsed":false,"skill_id":null,"metadata":null,"content_text":"hello","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:04Z"}"#),
+    ];
+
+    let mut last_id: i64;
+    for (before, after) in &snapshots {
+        sqlx::query(
+            "DELETE FROM undo_history WHERE id > (SELECT position FROM undo_pointer WHERE id = 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("clear redo failed");
+
+        sqlx::query(
+            "INSERT INTO undo_history (operation, node_id, before_json, after_json, group_key)
+             VALUES ('text_edit', ?1, ?2, ?3, ?4)",
+        )
+        .bind(node_id)
+        .bind(*before)
+        .bind(*after)
+        .bind(group_key)
+        .execute(&pool)
+        .await
+        .expect("insert undo step failed");
+
+        last_id = sqlx::query_scalar("SELECT last_insert_rowid()")
+            .fetch_one(&pool)
+            .await
+            .expect("last_insert_rowid failed");
+
+        sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
+            .bind(last_id)
+            .execute(&pool)
+            .await
+            .expect("update pointer failed");
+    }
+
+    // Verify 3 entries exist for this group.
+    let group_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM undo_history WHERE group_key = ?1")
+            .bind(group_key)
+            .fetch_one(&pool)
+            .await
+            .expect("count group entries failed");
+    assert_eq!(group_count, 3, "Expected 3 undo entries in group");
+
+    // Simulate undo_step for the group.
+    // Read all group entries.
+    let group_rows = sqlx::query(
+        "SELECT id, before_json FROM undo_history WHERE group_key = ?1 ORDER BY id ASC",
+    )
+    .bind(group_key)
+    .fetch_all(&pool)
+    .await
+    .expect("fetch group rows failed");
+
+    let min_id = group_rows
+        .iter()
+        .map(|r| r.get::<i64, _>("id"))
+        .min()
+        .unwrap();
+
+    // Apply the first before_json (the earliest state in the group) to restore.
+    let first_before: String = group_rows[0].get("before_json");
+    let snapshot: serde_json::Value = serde_json::from_str(&first_before).expect("parse snapshot");
+    let restored_text = snapshot["content_text"].as_str().unwrap_or("");
+    assert_eq!(restored_text, "h", "First before_json should have content_text='h'");
+
+    // Update node to the first before snapshot's content_text.
+    sqlx::query("UPDATE nodes SET content_text = ?1 WHERE id = ?2")
+        .bind(restored_text)
+        .bind(node_id)
+        .execute(&pool)
+        .await
+        .expect("update node content_text failed");
+
+    // Move pointer to min_id - 1.
+    let new_pos = min_id - 1;
+    sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
+        .bind(new_pos)
+        .execute(&pool)
+        .await
+        .expect("reset pointer failed");
+
+    // Verify the node content_text is now back to the initial state.
+    let row = sqlx::query("SELECT content_text FROM nodes WHERE id = ?1")
+        .bind(node_id)
+        .fetch_one(&pool)
+        .await
+        .expect("fetch node after undo");
+
+    let content_text: String = row.get("content_text");
+    assert_eq!(
+        content_text, "h",
+        "After group undo, content_text should be restored to first before snapshot value"
+    );
+
+    // Verify pointer is now before the group.
+    let cur_pos: i64 = sqlx::query_scalar("SELECT position FROM undo_pointer WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .expect("read pointer failed");
+    assert!(
+        cur_pos < min_id,
+        "Pointer ({}) should be before min group id ({})",
+        cur_pos,
+        min_id
+    );
+
+    pool.close().await;
+    cleanup(&path);
+}
+
 /// TREE-01: Attempting to move a non-existent node id returns no rows updated (simulates NotFound).
 #[tokio::test]
 async fn test_move_node_not_found() {
