@@ -979,3 +979,95 @@ async fn test_move_node_not_found() {
     pool.close().await;
     cleanup(&path);
 }
+
+// ─── EDIT-03 Tag Indexing Tests ───────────────────────────────────────────────
+
+/// EDIT-03: Tag indexing and querying via node_tags table.
+///
+/// Creates nodes, syncs tags, asserts get_all_tags and get_tags_matching work correctly.
+#[tokio::test]
+async fn test_tag_indexing() {
+    let path = temp_db_path("tag_indexing");
+    let pool = create_test_pool(&path).await;
+
+    // Create two nodes.
+    insert_node(&pool, "tag-node-1", None, "a0", "note", "{}", None).await;
+    insert_node(&pool, "tag-node-2", None, "a1", "note", "{}", None).await;
+
+    // Sync tags for node-1: ["rust", "tauri"]
+    sqlx::query("DELETE FROM node_tags WHERE node_id = ?1")
+        .bind("tag-node-1")
+        .execute(&pool)
+        .await
+        .expect("delete tags failed");
+
+    for tag in &["rust", "tauri"] {
+        sqlx::query("INSERT INTO node_tags (node_id, tag) VALUES (?1, ?2)")
+            .bind("tag-node-1")
+            .bind(*tag)
+            .execute(&pool)
+            .await
+            .expect("insert tag failed");
+    }
+
+    // get_all_tags: both tags should appear with count 1
+    let rows = sqlx::query("SELECT tag, COUNT(*) as count FROM node_tags GROUP BY tag ORDER BY count DESC")
+        .fetch_all(&pool)
+        .await
+        .expect("get_all_tags query failed");
+
+    let tags: Vec<(String, i64)> = rows
+        .iter()
+        .map(|r| (r.get::<String, _>("tag"), r.get::<i64, _>("count")))
+        .collect();
+
+    assert_eq!(tags.len(), 2, "Expected 2 tags after syncing node-1");
+
+    let rust_entry = tags.iter().find(|(t, _)| t == "rust");
+    assert!(rust_entry.is_some(), "Expected 'rust' tag in results");
+    assert_eq!(rust_entry.unwrap().1, 1, "Expected 'rust' count = 1");
+
+    let tauri_entry = tags.iter().find(|(t, _)| t == "tauri");
+    assert!(tauri_entry.is_some(), "Expected 'tauri' tag in results");
+    assert_eq!(tauri_entry.unwrap().1, 1, "Expected 'tauri' count = 1");
+
+    // get_tags_matching("ru"): should return ["rust"]
+    let matching_rows = sqlx::query(
+        "SELECT DISTINCT tag FROM node_tags WHERE tag LIKE ?1 ORDER BY tag LIMIT 10",
+    )
+    .bind("ru%")
+    .fetch_all(&pool)
+    .await
+    .expect("get_tags_matching query failed");
+
+    let matching: Vec<String> = matching_rows
+        .iter()
+        .map(|r| r.get::<String, _>("tag"))
+        .collect();
+
+    assert_eq!(matching, vec!["rust"], "get_tags_matching('ru') should return ['rust']");
+
+    // Add node-2 with tag "rust" — rust count should become 2
+    sqlx::query("INSERT INTO node_tags (node_id, tag) VALUES (?1, ?2)")
+        .bind("tag-node-2")
+        .bind("rust")
+        .execute(&pool)
+        .await
+        .expect("insert rust tag for node-2 failed");
+
+    let count_rows = sqlx::query("SELECT tag, COUNT(*) as count FROM node_tags GROUP BY tag ORDER BY count DESC")
+        .fetch_all(&pool)
+        .await
+        .expect("count query failed");
+
+    let rust_count: i64 = count_rows
+        .iter()
+        .find(|r| r.get::<String, _>("tag") == "rust")
+        .map(|r| r.get::<i64, _>("count"))
+        .unwrap_or(0);
+
+    assert_eq!(rust_count, 2, "Expected 'rust' count = 2 after adding to node-2");
+
+    pool.close().await;
+    cleanup(&path);
+}

@@ -6,3 +6,6 @@ pub use search::*;
 
 pub mod undo;
 pub use undo::*;
+
+pub mod tags;
+pub use tags::*;

@@ -25,6 +25,9 @@ pub fn run() {
         commands::undo::record_undo_step,
         commands::undo::undo_step,
         commands::undo::redo_step,
+        commands::tags::get_all_tags,
+        commands::tags::get_tags_matching,
+        commands::tags::sync_node_tags,
     ]);
 
     // Export TypeScript bindings in debug builds only.

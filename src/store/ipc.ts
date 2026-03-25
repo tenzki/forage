@@ -202,6 +202,49 @@ export async function searchNodesIpc(query: string): Promise<SearchResult[]> {
   }
 }
 
+// ─── Tag IPC ──────────────────────────────────────────────────────────────────
+
+export interface TagCount {
+  tag: string
+  count: number
+}
+
+/**
+ * Get all tags with their node counts, ordered by count descending.
+ */
+export async function getAllTagsIpc(): Promise<TagCount[]> {
+  try {
+    const data = await invoke<TagCount[]>('get_all_tags', {})
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+/**
+ * Get tags matching a given prefix (for autocomplete suggestions).
+ * Returns up to 10 matches ordered alphabetically.
+ */
+export async function getTagsMatchingIpc(prefix: string): Promise<string[]> {
+  try {
+    const data = await invoke<string[]>('get_tags_matching', { prefix })
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+/**
+ * Sync all tags for a node. Replaces all existing tags with the provided list.
+ */
+export async function syncNodeTagsIpc(nodeId: string, tags: string[]): Promise<void> {
+  try {
+    await invoke<void>('sync_node_tags', { nodeId, tags })
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
 /**
  * Get ancestors of a node for breadcrumb display.
  * Returns ordered list from root to the node's direct parent.
