@@ -97,7 +97,7 @@ async fn apply_node_snapshot(
 
     let parent_id = get_str(&node, "parent_id", "parentId").map(|s| s.to_string());
     let position = get_str(&node, "position", "position")
-        .ok_or_else(|| AppError::InvalidInput("Snapshot missing 'position'".to_string()))?
+        .ok_or_else(|| AppError::InvalidInput(format!("V2: no position in keys: {:?}", node.as_object().map(|o| o.keys().collect::<Vec<_>>()))))?
         .to_string();
     let content = serde_json::to_string(get_value(&node, "content", "content"))
         .map_err(|e| AppError::InvalidInput(e.to_string()))?;
@@ -177,7 +177,7 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
     // The exact entry may have been cascade-deleted (ON DELETE CASCADE from nodes),
     // so we scan backwards to find the nearest surviving entry.
     let row = sqlx::query(
-        "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE id <= ?1 ORDER BY id DESC LIMIT 1",
+        "SELECT id, operation, node_id, before_json, group_key FROM undo_history WHERE id <= ?1 ORDER BY id DESC LIMIT 1",
     )
     .bind(position)
     .fetch_optional(&state.db)
@@ -207,14 +207,12 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         operation: String,
         node_id: String,
         before_json: String,
-        after_json: String,
-        group_key: Option<String>,
     }
 
     let entries: Vec<UndoEntry> = if let Some(ref gk) = group_key {
         // Group undo: fetch all entries with same group_key.
         let rows = sqlx::query(
-            "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE group_key = ?1 ORDER BY id ASC",
+            "SELECT id, operation, node_id, before_json FROM undo_history WHERE group_key = ?1 ORDER BY id ASC",
         )
         .bind(gk)
         .fetch_all(&state.db)
@@ -226,8 +224,6 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
                 operation: r.get("operation"),
                 node_id: r.get("node_id"),
                 before_json: r.get("before_json"),
-                after_json: r.get("after_json"),
-                group_key: r.get("group_key"),
             })
             .collect()
     } else {
@@ -236,8 +232,6 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
             operation: operation.clone(),
             node_id: row.get("node_id"),
             before_json: row.get("before_json"),
-            after_json: row.get("after_json"),
-            group_key: row.get("group_key"),
         }]
     };
 
@@ -261,8 +255,28 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
 
                 node_ids.push(entry.node_id.clone());
             }
+            "text_edit" => {
+                // Text edit snapshots only contain {id, content} — update content only.
+                let snap: serde_json::Value = serde_json::from_str(&entry.before_json)
+                    .map_err(|e| AppError::InvalidInput(format!("Invalid text snapshot: {}", e)))?;
+                let content = serde_json::to_string(&snap["content"])
+                    .map_err(|e| AppError::InvalidInput(e.to_string()))?;
+                let content_text = snap["content_text"].as_str()
+                    .or_else(|| snap["contentText"].as_str())
+                    .unwrap_or("");
+                sqlx::query(
+                    "UPDATE nodes SET content = ?1, content_text = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?3"
+                )
+                .bind(&content)
+                .bind(content_text)
+                .bind(&entry.node_id)
+                .execute(&state.db)
+                .await?;
+
+                node_ids.push(entry.node_id.clone());
+            }
             _ => {
-                // For delete, move, indent, outdent, text_edit: restore before snapshot.
+                // For delete, move, indent, outdent: restore full before snapshot.
                 if entry.before_json != "{}" && !entry.before_json.is_empty() {
                     let restored_id = apply_node_snapshot(&state.db, &entry.before_json).await?;
                     node_ids.push(restored_id);
@@ -324,14 +338,12 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         id: i64,
         operation: String,
         node_id: String,
-        before_json: String,
         after_json: String,
-        group_key: Option<String>,
     }
 
     let entries: Vec<RedoEntry> = if let Some(ref gk) = group_key {
         let rows = sqlx::query(
-            "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE group_key = ?1 ORDER BY id ASC",
+            "SELECT id, operation, node_id, after_json FROM undo_history WHERE group_key = ?1 ORDER BY id ASC",
         )
         .bind(gk)
         .fetch_all(&state.db)
@@ -342,9 +354,7 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
                 id: r.get("id"),
                 operation: r.get("operation"),
                 node_id: r.get("node_id"),
-                before_json: r.get("before_json"),
                 after_json: r.get("after_json"),
-                group_key: r.get("group_key"),
             })
             .collect()
     } else {
@@ -352,9 +362,7 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
             id: next_row.get("id"),
             operation: operation.clone(),
             node_id: next_row.get("node_id"),
-            before_json: next_row.get("before_json"),
             after_json: next_row.get("after_json"),
-            group_key: next_row.get("group_key"),
         }]
     };
 
@@ -378,8 +386,28 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
 
                 node_ids.push(entry.node_id.clone());
             }
+            "text_edit" => {
+                // Text edit snapshots only contain {id, content} — update content only.
+                let snap: serde_json::Value = serde_json::from_str(&entry.after_json)
+                    .map_err(|e| AppError::InvalidInput(format!("Invalid text snapshot: {}", e)))?;
+                let content = serde_json::to_string(&snap["content"])
+                    .map_err(|e| AppError::InvalidInput(e.to_string()))?;
+                let content_text = snap["content_text"].as_str()
+                    .or_else(|| snap["contentText"].as_str())
+                    .unwrap_or("");
+                sqlx::query(
+                    "UPDATE nodes SET content = ?1, content_text = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?3"
+                )
+                .bind(&content)
+                .bind(content_text)
+                .bind(&entry.node_id)
+                .execute(&state.db)
+                .await?;
+
+                node_ids.push(entry.node_id.clone());
+            }
             _ => {
-                // For create, move, indent, outdent, text_edit: apply after snapshot.
+                // For create, move, indent, outdent: apply full after snapshot.
                 if entry.after_json != "{}" && !entry.after_json.is_empty() {
                     let restored_id = apply_node_snapshot(&state.db, &entry.after_json).await?;
                     node_ids.push(restored_id);
