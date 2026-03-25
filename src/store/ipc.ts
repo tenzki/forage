@@ -115,6 +115,66 @@ export async function changeNodeTypeIpc(id: string, nodeType: string): Promise<v
   }
 }
 
+// ─── Undo/Redo IPC ────────────────────────────────────────────────────────────
+
+export interface UndoResult {
+  node_ids: string[]
+  operation: string
+}
+
+/**
+ * Record an undo step with before/after snapshots.
+ * operation: 'text_edit' | 'create' | 'delete' | 'move' | 'indent' | 'outdent'
+ * beforeJson: JSON.stringify of node state before mutation (or '{}' for create)
+ * afterJson: JSON.stringify of node state after mutation (or '{}' for delete)
+ * groupKey: optional string to group text edits by 1-second buckets
+ */
+export async function recordUndoStepIpc(
+  operation: string,
+  nodeId: string,
+  beforeJson: string,
+  afterJson: string,
+  groupKey?: string
+): Promise<void> {
+  try {
+    await invoke<void>('record_undo_step', {
+      operation,
+      nodeId,
+      beforeJson,
+      afterJson,
+      groupKey: groupKey ?? null,
+    })
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+/**
+ * Undo the last recorded step (or group).
+ * Returns UndoResult with affected node IDs and operation name, or null if nothing to undo.
+ */
+export async function undoStepIpc(): Promise<UndoResult | null> {
+  try {
+    const data = await invoke<UndoResult | null>('undo_step', {})
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
+/**
+ * Redo the last undone step (or group).
+ * Returns UndoResult with affected node IDs and operation name, or null if nothing to redo.
+ */
+export async function redoStepIpc(): Promise<UndoResult | null> {
+  try {
+    const data = await invoke<UndoResult | null>('redo_step', {})
+    return data
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
+  }
+}
+
 // ─── Search IPC ───────────────────────────────────────────────────────────────
 
 export interface SearchResult {

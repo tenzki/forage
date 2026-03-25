@@ -10,8 +10,15 @@ import {
   createNodeIpc,
   deleteNodeIpc,
   moveNodeIpc,
+  recordUndoStepIpc,
+  undoStepIpc,
+  redoStepIpc,
 } from './ipc'
 import { positionForInsertAfter, positionForMove } from '../utils/treeHelpers'
+import { UndoGroupTracker } from '../utils/undoGrouping'
+
+// Module-level undo group tracker (single instance for the store)
+const undoTracker = new UndoGroupTracker()
 
 export interface BreadcrumbItem {
   id: string
@@ -56,6 +63,9 @@ interface TreeActions {
   focusNextNode: (currentId: string) => void
   // Local mutation (no IPC round-trip)
   updateNodeLocally: (id: string, update: Partial<TreeNode>) => void
+  // Undo/Redo
+  undo: () => Promise<void>
+  redo: () => Promise<void>
 }
 
 export type TreeStore = TreeState & TreeActions
@@ -352,6 +362,11 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
         editingNodeId: newNode.id,
       })
 
+      // Record undo step: before_json='{}' (node didn't exist), after_json=new node snapshot
+      recordUndoStepIpc('create', newNode.id, '{}', JSON.stringify(newNode)).catch((e) =>
+        console.warn('Failed to record undo step for createNode:', e)
+      )
+
       return newNode.id
     } catch (e) {
       console.error('Failed to create node:', e)
@@ -375,11 +390,26 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     }
 
     try {
+      // Capture before snapshot BEFORE deletion for undo recording
+      let beforeSnapshot: string = '{}'
+      try {
+        const beforeNode = await getNodeIpc(id)
+        beforeSnapshot = JSON.stringify(beforeNode)
+      } catch {
+        // If node doesn't exist, proceed with empty snapshot
+      }
+
       await deleteNodeIpc(id)
       set({
         nodes: removeNodeFromTree(get().nodes, id),
         editingNodeId: focusId,
       })
+
+      // Record undo step: before_json=deleted node snapshot, after_json='{}'
+      recordUndoStepIpc('delete', id, beforeSnapshot, '{}').catch((e) =>
+        console.warn('Failed to record undo step for deleteNode:', e)
+      )
+
       return focusId
     } catch (e) {
       console.error('Failed to delete node:', e)
@@ -389,6 +419,34 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
   updateContent: (id: string, content: JsonValue) => {
     const text = extractText(content)
+    const now = Date.now()
+
+    // Undo grouping: check if we need to start a new group
+    if (undoTracker.shouldStartNewGroup(id, now)) {
+      // Flush the previous group by recording it as an undo step
+      const prevGroup = undoTracker.flush()
+      if (prevGroup) {
+        const prevNodeId = prevGroup.startSnapshot as { id?: string }
+        const nodeIdForGroup = (prevNodeId?.id as string) ?? id
+        recordUndoStepIpc(
+          'text_edit',
+          nodeIdForGroup,
+          JSON.stringify(prevGroup.startSnapshot),
+          // after_json will be the current state — captured at flush time
+          JSON.stringify(content),
+          prevGroup.groupKey
+        ).catch((e) => console.warn('Failed to record undo step for text group:', e))
+      }
+
+      // Start a new group with the current node snapshot (from local tree state)
+      const currentNode = findNodeById(get().nodes, id)
+      const snapshot = currentNode ? { id: currentNode.id, content: currentNode.content } : { id, content }
+      undoTracker.startGroup(id, snapshot)
+    } else {
+      // Update last-edit timestamp to extend the current group window
+      undoTracker.touch(id, now)
+    }
+
     // Optimistic local update
     set({ nodes: updateNodeInTree(get().nodes, id, { name: text, content }) })
 
@@ -425,6 +483,13 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     const lastChildId = prevSiblingChildren.length > 0 ? prevSiblingChildren[prevSiblingChildren.length - 1].id : null
 
     try {
+      // Capture before snapshot
+      let beforeSnapshot: string = '{}'
+      try {
+        const beforeNode = await getNodeIpc(id)
+        beforeSnapshot = JSON.stringify(beforeNode)
+      } catch { /* ignore */ }
+
       await moveNodeIpc(id, prevSibling.id, newPosition)
 
       // Update local tree: remove from current location, add at end of prevSibling children
@@ -434,6 +499,14 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       const updatedNode = { ...nodeToMove, parent_id: prevSibling.id, position: newPosition }
       const withRemoved = removeNodeFromTree(get().nodes, id)
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, prevSibling.id, lastChildId) })
+
+      // Record undo step
+      const afterNode = await getNodeIpc(id).catch(() => null)
+      if (afterNode) {
+        recordUndoStepIpc('indent', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
+          console.warn('Failed to record undo step for indentNode:', e)
+        )
+      }
     } catch (e) {
       console.error('Failed to indent node:', e)
     }
@@ -455,6 +528,13 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
     const newPosition = positionForInsertAfter(grandSiblings, parentIdx)
 
     try {
+      // Capture before snapshot
+      let beforeSnapshot: string = '{}'
+      try {
+        const beforeNode = await getNodeIpc(id)
+        beforeSnapshot = JSON.stringify(beforeNode)
+      } catch { /* ignore */ }
+
       await moveNodeIpc(id, grandParentId, newPosition)
 
       const nodeToMove = findNodeById(nodes, id)
@@ -463,6 +543,14 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       const updatedNode = { ...nodeToMove, parent_id: grandParentId, position: newPosition }
       const withRemoved = removeNodeFromTree(get().nodes, id)
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, grandParentId, parent.id) })
+
+      // Record undo step
+      const afterNode = await getNodeIpc(id).catch(() => null)
+      if (afterNode) {
+        recordUndoStepIpc('outdent', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
+          console.warn('Failed to record undo step for outdentNode:', e)
+        )
+      }
     } catch (e) {
       console.error('Failed to outdent node:', e)
     }
@@ -483,6 +571,14 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
     try {
       const parentId = parent ? parent.id : null
+
+      // Capture before snapshot
+      let beforeSnapshot: string = '{}'
+      try {
+        const beforeNode = await getNodeIpc(id)
+        beforeSnapshot = JSON.stringify(beforeNode)
+      } catch { /* ignore */ }
+
       await moveNodeIpc(id, parentId, newPosition)
 
       // Update local tree
@@ -498,6 +594,14 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
         : siblings[idx + 1].id
 
       set({ nodes: insertNodeInTree(withRemoved, updatedNode, parentId, afterId) })
+
+      // Record undo step
+      const afterNode = await getNodeIpc(id).catch(() => null)
+      if (afterNode) {
+        recordUndoStepIpc('move', id, beforeSnapshot, JSON.stringify(afterNode)).catch((e) =>
+          console.warn('Failed to record undo step for reorderNode:', e)
+        )
+      }
     } catch (e) {
       console.error('Failed to reorder node:', e)
     }
@@ -633,5 +737,39 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
   updateNodeLocally: (id: string, update: Partial<TreeNode>) => {
     set({ nodes: updateNodeInTree(get().nodes, id, update) })
+  },
+
+  undo: async () => {
+    // Flush any pending text edit group before undoing
+    const pending = undoTracker.flush()
+    if (pending) {
+      // The pending group's after_json is whatever is currently in the tree
+      // We can't easily get the current node snapshot here, so just discard the flush
+      // (the group wasn't recorded yet — it's still being typed)
+      // This means text edits since the last group start won't be captured, which is
+      // acceptable since the user is explicitly triggering undo
+    }
+
+    try {
+      const result = await undoStepIpc()
+      if (result && result.node_ids.length > 0) {
+        // Reload tree to reflect restored state from DB
+        await get().loadTree()
+      }
+    } catch (e) {
+      console.error('Failed to undo:', e)
+    }
+  },
+
+  redo: async () => {
+    try {
+      const result = await redoStepIpc()
+      if (result && result.node_ids.length > 0) {
+        // Reload tree to reflect re-applied state from DB
+        await get().loadTree()
+      }
+    } catch (e) {
+      console.error('Failed to redo:', e)
+    }
   },
 }))

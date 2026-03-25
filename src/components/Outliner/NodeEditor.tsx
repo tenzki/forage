@@ -14,12 +14,16 @@ interface OutlinerKeysOptions {
   onMoveDown: () => void
   onMoveLeft: () => void
   onMoveRight: () => void
+  onFocusPrev: () => void
+  onFocusNext: () => void
   onSelectRangeUp: () => void
   onSelectRangeDown: () => void
   hasSelection: () => boolean
   onBatchIndent: () => void
   onBatchOutdent: () => void
   onBatchDelete: () => void
+  onUndo: () => void
+  onRedo: () => void
 }
 
 /**
@@ -39,12 +43,16 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
       onMoveDown: () => {},
       onMoveLeft: () => {},
       onMoveRight: () => {},
+      onFocusPrev: () => {},
+      onFocusNext: () => {},
       onSelectRangeUp: () => {},
       onSelectRangeDown: () => {},
       hasSelection: () => false,
       onBatchIndent: () => {},
       onBatchOutdent: () => {},
       onBatchDelete: () => {},
+      onUndo: () => {},
+      onRedo: () => {},
     }
   },
 
@@ -98,12 +106,30 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
       },
 
       'Alt-ArrowLeft': () => {
-        opts.onMoveLeft()
+        if (opts.hasSelection()) {
+          opts.onBatchOutdent()
+        } else {
+          opts.onMoveLeft()
+        }
         return true
       },
 
       'Alt-ArrowRight': () => {
-        opts.onMoveRight()
+        if (opts.hasSelection()) {
+          opts.onBatchIndent()
+        } else {
+          opts.onMoveRight()
+        }
+        return true
+      },
+
+      ArrowUp: () => {
+        opts.onFocusPrev()
+        return true
+      },
+
+      ArrowDown: () => {
+        opts.onFocusNext()
         return true
       },
 
@@ -115,6 +141,16 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
       'Shift-ArrowDown': () => {
         opts.onSelectRangeDown()
         return true // Prevent cursor movement
+      },
+
+      'Mod-z': () => {
+        opts.onUndo()
+        return true // Prevent browser/TipTap default undo
+      },
+
+      'Mod-Shift-z': () => {
+        opts.onRedo()
+        return true // Prevent browser/TipTap default redo
       },
     }
   },
@@ -143,6 +179,10 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   const batchDelete = useTreeStore((s) => s.batchDelete)
   const selectedNodeIds = useTreeStore((s) => s.selectedNodeIds)
   const setEditingNode = useTreeStore((s) => s.setEditingNode)
+  const focusPrevNode = useTreeStore((s) => s.focusPrevNode)
+  const focusNextNode = useTreeStore((s) => s.focusNextNode)
+  const undo = useTreeStore((s) => s.undo)
+  const redo = useTreeStore((s) => s.redo)
 
   // Use refs for callbacks to avoid stale closures in extension
   const nodeRef = useRef(node)
@@ -196,6 +236,14 @@ export default function NodeEditor({ node }: NodeEditorProps) {
           indentNode(nodeRef.current.id).catch(console.error)
         },
 
+        onFocusPrev: () => {
+          focusPrevNode(nodeRef.current.id)
+        },
+
+        onFocusNext: () => {
+          focusNextNode(nodeRef.current.id)
+        },
+
         onSelectRangeUp: () => {
           selectRange(nodeRef.current.id, 'up')
         },
@@ -217,6 +265,14 @@ export default function NodeEditor({ node }: NodeEditorProps) {
         onBatchDelete: () => {
           batchDelete().catch(console.error)
         },
+
+        onUndo: () => {
+          undo().catch(console.error)
+        },
+
+        onRedo: () => {
+          redo().catch(console.error)
+        },
       }),
     ],
     content: node.content as object,
@@ -232,6 +288,20 @@ export default function NodeEditor({ node }: NodeEditorProps) {
       attributes: {
         class: 'node-editor-content',
         'data-node-id': node.id,
+        autocomplete: 'off',
+        autocorrect: 'off',
+        autocapitalize: 'off',
+        spellcheck: 'false',
+      },
+      handleKeyDown: (_view, event) => {
+        // Stop ALL key events from bubbling to react-arborist.
+        // react-arborist intercepts characters (type-ahead), Enter, arrows, etc.
+        // TipTap/ProseMirror already processed the event at this point.
+        event.stopPropagation()
+        // Prevent browser Tab focus traversal
+        if (event.key === 'Tab') {
+          event.preventDefault()
+        }
       },
     },
   })
@@ -244,7 +314,13 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   }, [editor])
 
   return (
-    <div className="node-editor">
+    <div className="node-editor" onKeyDown={(e) => {
+      // Redundant safety net — stop any key events that escape ProseMirror's handleKeyDown
+      e.stopPropagation()
+      if (e.key === 'Tab') {
+        e.preventDefault()
+      }
+    }}>
       <EditorContent editor={editor} />
     </div>
   )
