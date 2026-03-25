@@ -143,16 +143,10 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
         opts.onSelectRangeDown()
         return true // Prevent cursor movement
       },
-
-      'Mod-z': () => {
-        opts.onUndo()
-        return true // Prevent browser/TipTap default undo
-      },
-
-      'Mod-Shift-z': () => {
-        opts.onRedo()
-        return true // Prevent browser/TipTap default redo
-      },
+      // Mod-z and Mod-Shift-z are intentionally NOT handled here.
+      // App.tsx registers a capture-phase keydown handler that fires undo/redo
+      // globally before TipTap receives the event. Handling them here would
+      // cause undo() to fire twice per keypress.
     }
   },
 })
@@ -200,6 +194,7 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
+        history: false, // Disabled: App.tsx capture-phase handler manages undo/redo globally
         heading: false,
         blockquote: false,
         codeBlock: false,

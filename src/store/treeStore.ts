@@ -783,14 +783,29 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   },
 
   undo: async () => {
-    // Flush any pending text edit group before undoing
+    // Flush any pending text edit group and RECORD it before undoing.
+    // Without this, the active typing session is discarded and undoStepIpc
+    // has nothing to step back to.
     const pending = undoTracker.flush()
     if (pending) {
-      // The pending group's after_json is whatever is currently in the tree
-      // We can't easily get the current node snapshot here, so just discard the flush
-      // (the group wasn't recorded yet — it's still being typed)
-      // This means text edits since the last group start won't be captured, which is
-      // acceptable since the user is explicitly triggering undo
+      const prevNodeId = pending.startSnapshot as { id?: string }
+      const nodeIdForGroup = prevNodeId?.id ?? ''
+      if (nodeIdForGroup) {
+        const currentNode = findNodeById(get().nodes, nodeIdForGroup)
+        if (currentNode) {
+          try {
+            await recordUndoStepIpc(
+              'text_edit',
+              nodeIdForGroup,
+              JSON.stringify(pending.startSnapshot),
+              JSON.stringify({ id: currentNode.id, content: currentNode.content }),
+              pending.groupKey
+            )
+          } catch (e) {
+            console.warn('Failed to record pending undo group:', e)
+          }
+        }
+      }
     }
 
     try {
