@@ -39,5 +39,13 @@ pub async fn init_db(app: &tauri::App) -> Result<SqlitePool, Box<dyn std::error:
     // Run embedded SQL migrations from src-tauri/migrations/
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    // Rebuild FTS5 index on every startup to ensure all nodes are searchable.
+    // This is idempotent and fast for small datasets.
+    // Non-fatal: FTS table may not exist yet on first run before migration 0002.
+    sqlx::query("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+        .execute(&pool)
+        .await
+        .ok();
+
     Ok(pool)
 }

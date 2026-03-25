@@ -33,6 +33,9 @@ CREATE TRIGGER nodes_fts_au AFTER UPDATE ON nodes BEGIN
     INSERT INTO nodes_fts(rowid, content_text) VALUES (new.rowid, new.content_text);
 END;
 
+-- Backfill FTS5 index with any rows that existed before this migration
+INSERT INTO nodes_fts(rowid, content_text) SELECT rowid, content_text FROM nodes;
+
 -- ─── Undo/Redo History ────────────────────────────────────────────────────────
 
 CREATE TABLE undo_history (
