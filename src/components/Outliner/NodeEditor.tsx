@@ -4,6 +4,7 @@ import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import type { TreeNode } from '../../types/tree'
 import { useTreeStore } from '../../store/treeStore'
+import { HashtagNode } from '../../extensions/HashtagNode'
 
 interface OutlinerKeysOptions {
   onEnter: () => void
@@ -183,6 +184,7 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   const focusNextNode = useTreeStore((s) => s.focusNextNode)
   const undo = useTreeStore((s) => s.undo)
   const redo = useTreeStore((s) => s.redo)
+  const onTagClick = useTreeStore((s) => s.onTagClick)
 
   // Use refs for callbacks to avoid stale closures in extension
   const nodeRef = useRef(node)
@@ -190,6 +192,10 @@ export default function NodeEditor({ node }: NodeEditorProps) {
 
   const selectedIdsRef = useRef(selectedNodeIds)
   selectedIdsRef.current = selectedNodeIds
+
+  // Use ref for onTagClick to avoid stale closures in extension
+  const onTagClickRef = useRef(onTagClick)
+  onTagClickRef.current = onTagClick
 
   const editor = useEditor({
     extensions: [
@@ -201,6 +207,11 @@ export default function NodeEditor({ node }: NodeEditorProps) {
         bulletList: false,
         orderedList: false,
         listItem: false,
+      }),
+      HashtagNode.configure({
+        onTagClick: (tag: string) => {
+          onTagClickRef.current?.(tag)
+        },
       }),
       OutlinerKeys.configure({
         onEnter: () => {

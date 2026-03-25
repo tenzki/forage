@@ -444,3 +444,91 @@ body.is-dragging * {
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* ============================================================
+   Hashtag inline nodes
+   ============================================================ */
+.hashtag {
+  display: inline;
+  color: #2563eb;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 2px;
+  transition: background 100ms ease;
+}
+
+.hashtag:hover {
+  background: #dbeafe;
+}
+
+/* ============================================================
+   Tag sidebar
+   ============================================================ */
+.tag-sidebar {
+  width: 200px;
+  border-right: 1px solid #e5e7eb;
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.tag-sidebar-header {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+
+.tag-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: background 100ms ease;
+}
+
+.tag-list-item:hover {
+  background: #f3f4f6;
+}
+
+.tag-list-count {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+/* ============================================================
+   Hashtag suggestion popup
+   ============================================================ */
+.suggestion-popup {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 120px;
+}
+
+.suggestion-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1a1a1a;
+  transition: background 80ms ease;
+}
+
+.suggestion-item:hover {
+  background: #f3f4f6;
+}
+
+.suggestion-item--active {
+  background: #f3f4f6;
+}

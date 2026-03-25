@@ -8,6 +8,7 @@ import SearchResultItem from './SearchResultItem'
 interface SearchOverlayProps {
   open: boolean
   onClose: () => void
+  initialQuery?: string
 }
 
 interface SearchResultWithAncestors {
@@ -23,7 +24,7 @@ interface SearchResultWithAncestors {
  * - Arrow keys + Enter handled by cmdk automatically.
  * - Escape closes via onOpenChange.
  */
-export default function SearchOverlay({ open, onClose }: SearchOverlayProps) {
+export default function SearchOverlay({ open, onClose, initialQuery }: SearchOverlayProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResultWithAncestors[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -40,6 +41,14 @@ export default function SearchOverlay({ open, onClose }: SearchOverlayProps) {
       }
     }
   }, [open])
+
+  // Pre-fill and trigger search when initialQuery is provided on open.
+  useEffect(() => {
+    if (open && initialQuery) {
+      handleValueChange(initialQuery)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialQuery])
 
   function handleValueChange(value: string) {
     setQuery(value)

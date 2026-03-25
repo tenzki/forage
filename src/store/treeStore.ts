@@ -13,12 +13,40 @@ import {
   recordUndoStepIpc,
   undoStepIpc,
   redoStepIpc,
+  syncNodeTagsIpc,
 } from './ipc'
 import { positionForInsertAfter, positionForMove } from '../utils/treeHelpers'
 import { UndoGroupTracker } from '../utils/undoGrouping'
 
 // Module-level undo group tracker (single instance for the store)
 const undoTracker = new UndoGroupTracker()
+
+/**
+ * Walk a ProseMirror JSON doc and extract all hashtag node tag values.
+ * Hashtag nodes have type === 'hashtag' and attrs.tag.
+ */
+function extractHashtags(content: JsonValue): string[] {
+  const tags: string[] = []
+
+  function walk(node: JsonValue) {
+    if (!node || typeof node !== 'object') return
+    const obj = node as Record<string, JsonValue>
+    if (obj.type === 'hashtag' && obj.attrs && typeof obj.attrs === 'object') {
+      const attrs = obj.attrs as Record<string, JsonValue>
+      if (typeof attrs.tag === 'string' && attrs.tag) {
+        tags.push(attrs.tag)
+      }
+    }
+    if (Array.isArray(obj.content)) {
+      for (const child of obj.content) {
+        walk(child)
+      }
+    }
+  }
+
+  walk(content)
+  return tags
+}
 
 export interface BreadcrumbItem {
   id: string
@@ -36,6 +64,8 @@ interface TreeState {
   anchorNodeId: string | null
   // Editor focus
   editingNodeId: string | null
+  // Tag click handler (registered by App, called by HashtagNode)
+  onTagClick: ((tag: string) => void) | null
 }
 
 interface TreeActions {
@@ -66,6 +96,8 @@ interface TreeActions {
   // Undo/Redo
   undo: () => Promise<void>
   redo: () => Promise<void>
+  // Tag click handler registration
+  registerTagClickHandler: (handler: (tag: string) => void) => void
 }
 
 export type TreeStore = TreeState & TreeActions
@@ -223,6 +255,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   selectedNodeIds: new Set<string>(),
   anchorNodeId: null,
   editingNodeId: null,
+  onTagClick: null,
 
   loadTree: async () => {
     const { zoomedNodeId } = get()
@@ -458,6 +491,12 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       updateDebounceTimers.delete(id)
       try {
         await updateNodeIpc(id, content, null, null, null, text)
+
+        // Extract hashtag nodes from content JSON and sync to node_tags table
+        const tags = extractHashtags(content)
+        syncNodeTagsIpc(id, tags).catch((e) =>
+          console.warn('Failed to sync node tags:', e)
+        )
       } catch (e) {
         console.error('Failed to persist content update:', e)
       }
@@ -737,6 +776,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
   updateNodeLocally: (id: string, update: Partial<TreeNode>) => {
     set({ nodes: updateNodeInTree(get().nodes, id, update) })
+  },
+
+  registerTagClickHandler: (handler: (tag: string) => void) => {
+    set({ onTagClick: handler })
   },
 
   undo: async () => {
