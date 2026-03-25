@@ -165,14 +165,26 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         return Ok(None); // Nothing to undo
     }
 
-    // Fetch the entry at current position.
+    // Fetch the entry at or before current position.
+    // The exact entry may have been cascade-deleted (ON DELETE CASCADE from nodes),
+    // so we scan backwards to find the nearest surviving entry.
     let row = sqlx::query(
-        "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE id = ?1",
+        "SELECT id, operation, node_id, before_json, after_json, group_key FROM undo_history WHERE id <= ?1 ORDER BY id DESC LIMIT 1",
     )
     .bind(position)
     .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("Undo entry not found at position {}", position)))?;
+    .await?;
+
+    let row = match row {
+        Some(r) => r,
+        None => {
+            // No entries at or before position — reset pointer to 0
+            sqlx::query("UPDATE undo_pointer SET position = 0 WHERE id = 1")
+                .execute(&state.db)
+                .await?;
+            return Ok(None);
+        }
+    };
 
     let operation: String = row.get("operation");
     let group_key: Option<String> = row.get("group_key");
