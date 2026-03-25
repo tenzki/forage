@@ -42,24 +42,21 @@ pub async fn record_undo_step(
         .execute(&state.db)
         .await?;
 
-    // Insert the new undo step.
-    sqlx::query(
+    // Insert the new undo step and get its id in a single query.
+    // Using RETURNING avoids a separate last_insert_rowid() call which can
+    // return wrong results when the connection pool assigns different connections.
+    let new_id: i64 = sqlx::query_scalar(
         "INSERT INTO undo_history (operation, node_id, before_json, after_json, group_key)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id",
     )
     .bind(&operation)
     .bind(&node_id)
     .bind(&before_json)
     .bind(&after_json)
     .bind(&group_key)
-    .execute(&state.db)
-    .await?;
-
-    // Advance pointer to the newly inserted row id.
-    let new_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
-        .fetch_one(&state.db)
-        .await
-        .map_err(|e| AppError::Db(e.to_string()))?;
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| AppError::Db(e.to_string()))?;
 
     sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
         .bind(new_id)
@@ -245,34 +242,9 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         match entry.operation.as_str() {
             "create" => {
                 // Before create: node didn't exist — delete it.
-                // ON DELETE CASCADE will also remove the undo_history entry.
-                // We re-insert the undo_history entry afterward (with FK checks disabled)
-                // to preserve redo ability.
+                // No FK cascade since migration 0003 removed the FK constraint.
                 sqlx::query("DELETE FROM nodes WHERE id = ?1")
                     .bind(&entry.node_id)
-                    .execute(&state.db)
-                    .await?;
-
-                // Re-insert the undo_history entry with its original id so redo can find it.
-                // Temporarily disable FK checks because the referenced node no longer exists.
-                sqlx::query("PRAGMA foreign_keys = OFF")
-                    .execute(&state.db)
-                    .await?;
-
-                sqlx::query(
-                    "INSERT OR REPLACE INTO undo_history (id, operation, node_id, before_json, after_json, group_key)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                )
-                .bind(entry.id)
-                .bind(&entry.operation)
-                .bind(&entry.node_id)
-                .bind(&entry.before_json)
-                .bind(&entry.after_json)
-                .bind(&entry.group_key)
-                .execute(&state.db)
-                .await?;
-
-                sqlx::query("PRAGMA foreign_keys = ON")
                     .execute(&state.db)
                     .await?;
 
@@ -387,33 +359,9 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         match entry.operation.as_str() {
             "delete" => {
                 // After delete: node should be gone — delete it again.
-                // ON DELETE CASCADE will also remove the undo_history entry.
-                // Re-insert the entry afterward (with FK checks disabled) to preserve
-                // further undo ability after redo.
+                // No FK cascade since migration 0003 removed the FK constraint.
                 sqlx::query("DELETE FROM nodes WHERE id = ?1")
                     .bind(&entry.node_id)
-                    .execute(&state.db)
-                    .await?;
-
-                // Re-insert the undo_history entry with its original id.
-                sqlx::query("PRAGMA foreign_keys = OFF")
-                    .execute(&state.db)
-                    .await?;
-
-                sqlx::query(
-                    "INSERT OR REPLACE INTO undo_history (id, operation, node_id, before_json, after_json, group_key)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                )
-                .bind(entry.id)
-                .bind(&entry.operation)
-                .bind(&entry.node_id)
-                .bind(&entry.before_json)
-                .bind(&entry.after_json)
-                .bind(&entry.group_key)
-                .execute(&state.db)
-                .await?;
-
-                sqlx::query("PRAGMA foreign_keys = ON")
                     .execute(&state.db)
                     .await?;
 
