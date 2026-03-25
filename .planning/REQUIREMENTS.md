@@ -19,9 +19,9 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Editing
 
 - [ ] **EDIT-01**: User can undo and redo structural and text operations
-- [ ] **EDIT-02**: User can use inline Markdown formatting (bold, italic, code)
+- [x] **EDIT-02**: User can use inline Markdown formatting (bold, italic, code)
 - [ ] **EDIT-03**: User can tag nodes with #hashtags parsed from content
-- [ ] **EDIT-04**: AI-generated content is visually distinguished from user-written content
+- [x] **EDIT-04**: AI-generated content is visually distinguished from user-written content
 
 ### Agent
 
@@ -85,9 +85,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TREE-05 | Phase 3 | Complete |
 | TREE-06 | Phase 2 | Complete |
 | EDIT-01 | Phase 3 | Pending |
-| EDIT-02 | Phase 3 | Pending |
+| EDIT-02 | Phase 3 | Complete |
 | EDIT-03 | Phase 3 | Pending |
-| EDIT-04 | Phase 3 | Pending |
+| EDIT-04 | Phase 3 | Complete |
 | AGNT-01 | Phase 4 | Pending |
 | AGNT-02 | Phase 4 | Pending |
 | AGNT-03 | Phase 5 | Pending |

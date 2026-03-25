@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Completed 03-search-and-editing 03-01-PLAN.md
-last_updated: "2026-03-25T10:32:20.560Z"
+stopped_at: Completed 03-search-and-editing 03-04-PLAN.md
+last_updated: "2026-03-25T10:39:00.963Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -57,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-core-outliner P02 | 45min | 3 tasks | 9 files |
 | Phase 02-core-outliner P03 | 4min | 2 tasks | 5 files |
 | Phase 03-search-and-editing P01 | 30min | 2 tasks | 13 files |
+| Phase 03-search-and-editing P04 | 3min | 1 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,10 @@ Recent decisions affecting current work:
 - [Phase 03-search-and-editing]: shouldFilter=false on cmdk: server-side FTS5 search requires disabling cmdk's built-in UUID-based item filtering
 - [Phase 03-search-and-editing]: Direct invoke() for create_node/update_node in ipc.ts: bindings.ts stale (gitignored), content_text param needs bypass
 - [Phase 03-search-and-editing]: content_text extracted on frontend via extractText(): Rust has no ProseMirror parser, keeps Rust decoupled from TipTap schema
+- [Phase 03-search-and-editing]: SparkleIcon inline SVG in Bullet.tsx — no external icon library for single icon
+- [Phase 03-search-and-editing]: Make mine uses optimistic updateNodeLocally() — sparkle disappears immediately without IPC round-trip
+- [Phase 03-search-and-editing]: Global contextmenu preventDefault removed from main.tsx — AI nodes require legitimate context menu
+- [Phase 03-search-and-editing]: change_node_type dedicated command updates only node_type + updated_at — avoids update_node dynamic SET complexity
 
 ### Pending Todos
 
@@ -103,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T10:32:20.558Z
-Stopped at: Completed 03-search-and-editing 03-01-PLAN.md
+Last session: 2026-03-25T10:39:00.961Z
+Stopped at: Completed 03-search-and-editing 03-04-PLAN.md
 Resume file: None
