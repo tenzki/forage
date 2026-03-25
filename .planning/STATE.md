@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Phase 3 context gathered
-last_updated: "2026-03-25T09:09:56.072Z"
+stopped_at: Completed 03-search-and-editing 03-01-PLAN.md
+last_updated: "2026-03-25T10:32:20.560Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 9
+  completed_plans: 6
   percent: 0
 ---
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-core-outliner P02 | 3min | 2 tasks | 9 files |
 | Phase 02-core-outliner P02 | 45min | 3 tasks | 9 files |
 | Phase 02-core-outliner P03 | 4min | 2 tasks | 5 files |
+| Phase 03-search-and-editing P01 | 30min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 02-core-outliner]: TipTap Extension options via configure() for keyboard handler callbacks to prevent stale closures in React
 - [Phase 02-core-outliner]: editingNodeId in zustand store (not local state) enables single TipTap instance pattern — one active editor at a time
 - [Phase 02-core-outliner]: batchOutdent processes bottom-to-top to prevent parent conflicts during sequential outdents
+- [Phase 03-search-and-editing]: shouldFilter=false on cmdk: server-side FTS5 search requires disabling cmdk's built-in UUID-based item filtering
+- [Phase 03-search-and-editing]: Direct invoke() for create_node/update_node in ipc.ts: bindings.ts stale (gitignored), content_text param needs bypass
+- [Phase 03-search-and-editing]: content_text extracted on frontend via extractText(): Rust has no ProseMirror parser, keeps Rust decoupled from TipTap schema
 
 ### Pending Todos
 
@@ -99,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T09:09:56.065Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-search-and-editing/03-CONTEXT.md
+Last session: 2026-03-25T10:32:20.558Z
+Stopped at: Completed 03-search-and-editing 03-01-PLAN.md
+Resume file: None
