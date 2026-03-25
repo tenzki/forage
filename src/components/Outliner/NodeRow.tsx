@@ -18,7 +18,6 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
   const selectedNodeIds = useTreeStore((s) => s.selectedNodeIds)
   const setEditingNode = useTreeStore((s) => s.setEditingNode)
   const clearSelection = useTreeStore((s) => s.clearSelection)
-  const createNode = useTreeStore((s) => s.createNode)
 
   const isEditing = editingNodeId === node.data.id
   const isRangeSelected = selectedNodeIds.has(node.data.id)
@@ -33,20 +32,11 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
     clearSelection()
   }
 
-  async function handleEmptyAreaClick(e: React.MouseEvent) {
-    // Click on empty area below tree — create a root node
-    e.stopPropagation()
-    clearSelection()
-    setEditingNode(null)
-    try {
-      await createNode(null, null)
-    } catch {
-      // Ignore
-    }
-  }
 
   let className = 'node-row'
   if (isRangeSelected) className += ' node-row-range-selected'
+  if (node.isDragging) className += ' node-row-dragging'
+  if (node.willReceiveDrop) className += ' node-row-drop-target'
 
   return (
     <div

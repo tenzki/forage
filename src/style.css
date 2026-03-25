@@ -37,6 +37,8 @@ body {
 .outliner-tree {
   flex: 1;
   transition: opacity 150ms ease;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .outliner-loading {
@@ -228,26 +230,15 @@ body {
    ============================================================ */
 
 /* Dragged item opacity */
-[data-dragging="true"] {
-  opacity: 0.5;
+.node-row-dragging {
+  opacity: 0.4;
 }
 
-/* Drop line indicator (reorder) */
-.drop-target-above::before,
-.drop-target-below::after {
-  content: '';
-  display: block;
-  height: 2px;
-  background: #2563eb;
-  border-radius: 1px;
-  margin: 0 4px;
-}
-
-/* Drop-into highlight (nesting) */
-.drop-target-inside {
+/* Drop-into highlight (nesting) — node will receive the drop */
+.node-row-drop-target {
   background: rgba(37, 99, 235, 0.08);
   border-radius: 3px;
-  outline: 1px solid rgba(37, 99, 235, 0.3);
+  outline: 2px solid rgba(37, 99, 235, 0.4);
 }
 
 /* Cursor during drag */
@@ -265,12 +256,7 @@ body.is-dragging * {
   cursor: grab;
 }
 
-/* react-arborist drop cursor line */
-[class*="drop-line"] {
-  background: #2563eb;
-  height: 2px;
-  border-radius: 1px;
-}
+/* Drop cursor is rendered via custom DropCursor component with inline styles */
 
 /* react-arborist drag preview */
 [class*="drag-preview"] {
@@ -279,4 +265,123 @@ body.is-dragging * {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   border-radius: 4px;
   padding: 2px 8px;
+}
+
+/* ============================================================
+   Search overlay (cmdk)
+   ============================================================ */
+
+/* Semi-transparent backdrop behind the cmdk dialog */
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 998;
+}
+
+/* Centered modal container */
+[cmdk-dialog] {
+  position: fixed;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -30%);
+  width: 100%;
+  max-width: 560px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 999;
+  overflow: hidden;
+}
+
+/* Search input at top of modal */
+[cmdk-input] {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  border-bottom: 1px solid #eee;
+  font-size: 16px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: transparent;
+  outline: none;
+}
+
+[cmdk-input]::placeholder {
+  color: #bbb;
+}
+
+/* Scrollable results list */
+[cmdk-list] {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+/* Individual result rows */
+[cmdk-item] {
+  padding: 8px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+}
+
+[cmdk-item][data-selected="true"] {
+  background: #f0f0f0;
+}
+
+[cmdk-item]:hover {
+  background: #f7f7f5;
+}
+
+/* "No results found." empty state */
+[cmdk-empty] {
+  padding: 20px 16px;
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+}
+
+/* Loading indicator */
+[cmdk-loading] {
+  padding: 16px;
+  text-align: center;
+  color: #bbb;
+  font-size: 13px;
+}
+
+/* Search result item layout */
+.search-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+}
+
+/* Breadcrumb path above the snippet */
+.search-result-breadcrumb {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Snippet with highlighted matches */
+.search-result-snippet {
+  font-size: 13px;
+  color: #333;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FTS5 match highlight */
+.search-result-snippet mark {
+  background: #fef3c7;
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }
