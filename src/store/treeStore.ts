@@ -397,7 +397,10 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
       // Record undo step: before_json='{}' (node didn't exist), after_json=new node snapshot.
       // Awaited (not fire-and-forget) so the step is persisted before any Cmd+Z can run.
-      await recordUndoStepIpc('create', newNode.id, '{}', JSON.stringify(newNode))
+      const snapshot = JSON.stringify(newNode)
+      console.log('[undo] recording create step for', newNode.id, 'snapshot keys:', Object.keys(newNode), 'snapshot:', snapshot.substring(0, 200))
+      await recordUndoStepIpc('create', newNode.id, '{}', snapshot)
+      console.log('[undo] create step recorded')
 
       return newNode.id
     } catch (e) {
@@ -459,19 +462,26 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
       if (prevGroup) {
         const prevNodeId = prevGroup.startSnapshot as { id?: string }
         const nodeIdForGroup = (prevNodeId?.id as string) ?? id
+        // Look up the node's current content from tree state (before optimistic update)
+        const prevGroupNode = findNodeById(get().nodes, nodeIdForGroup)
+        const afterSnapshot = prevGroupNode
+          ? { id: nodeIdForGroup, content: prevGroupNode.content, content_text: extractText(prevGroupNode.content) }
+          : { id: nodeIdForGroup, content, content_text: extractText(content) }
+        console.log('[undo] flush text group:', nodeIdForGroup, 'before keys:', Object.keys(prevGroup.startSnapshot as object))
         recordUndoStepIpc(
           'text_edit',
           nodeIdForGroup,
           JSON.stringify(prevGroup.startSnapshot),
-          // after_json will be the current state — captured at flush time
-          JSON.stringify(content),
+          JSON.stringify(afterSnapshot),
           prevGroup.groupKey
         ).catch((e) => console.warn('Failed to record undo step for text group:', e))
       }
 
       // Start a new group with the current node snapshot (from local tree state)
       const currentNode = findNodeById(get().nodes, id)
-      const snapshot = currentNode ? { id: currentNode.id, content: currentNode.content } : { id, content }
+      const snapshot = currentNode
+        ? { id: currentNode.id, content: currentNode.content, content_text: extractText(currentNode.content) }
+        : { id, content, content_text: extractText(content) }
       undoTracker.startGroup(id, snapshot)
     } else {
       // Update last-edit timestamp to extend the current group window
@@ -798,7 +808,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
               'text_edit',
               nodeIdForGroup,
               JSON.stringify(pending.startSnapshot),
-              JSON.stringify({ id: currentNode.id, content: currentNode.content }),
+              JSON.stringify({ id: currentNode.id, content: currentNode.content, content_text: extractText(currentNode.content) }),
               pending.groupKey
             )
           } catch (e) {
@@ -810,6 +820,7 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
     try {
       const result = await undoStepIpc()
+      console.log('[undo] result:', result)
       if (result && result.node_ids.length > 0) {
         // Reload tree to reflect restored state from DB
         await get().loadTree()
