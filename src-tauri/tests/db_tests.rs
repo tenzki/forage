@@ -855,22 +855,18 @@ async fn test_undo_redo_text_group() {
         .await
         .expect("clear redo failed");
 
-        sqlx::query(
+        // Use RETURNING id instead of last_insert_rowid() to avoid connection pool issues
+        last_id = sqlx::query_scalar(
             "INSERT INTO undo_history (operation, node_id, before_json, after_json, group_key)
-             VALUES ('text_edit', ?1, ?2, ?3, ?4)",
+             VALUES ('text_edit', ?1, ?2, ?3, ?4) RETURNING id",
         )
         .bind(node_id)
         .bind(*before)
         .bind(*after)
         .bind(group_key)
-        .execute(&pool)
+        .fetch_one(&pool)
         .await
         .expect("insert undo step failed");
-
-        last_id = sqlx::query_scalar("SELECT last_insert_rowid()")
-            .fetch_one(&pool)
-            .await
-            .expect("last_insert_rowid failed");
 
         sqlx::query("UPDATE undo_pointer SET position = ?1 WHERE id = 1")
             .bind(last_id)

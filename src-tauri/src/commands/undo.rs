@@ -173,6 +173,8 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         return Ok(None); // Nothing to undo
     }
 
+    println!("[undo] undo_step called, position={}", position);
+
     // Fetch the entry at or before current position.
     // The exact entry may have been cascade-deleted (ON DELETE CASCADE from nodes),
     // so we scan backwards to find the nearest surviving entry.
@@ -264,6 +266,7 @@ pub async fn undo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
                 let content_text = snap["content_text"].as_str()
                     .or_else(|| snap["contentText"].as_str())
                     .unwrap_or("");
+                println!("[undo] text_edit undo for node={}, content_text={}", &entry.node_id, content_text);
                 sqlx::query(
                     "UPDATE nodes SET content = ?1, content_text = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?3"
                 )
@@ -315,6 +318,8 @@ pub async fn redo_step(state: State<'_, AppState>) -> Result<Option<UndoResult>,
         .await
         .map(|r| r.get::<i64, _>("position"))
         .unwrap_or(0);
+
+    println!("[undo] redo_step called, position={}", position);
 
     // Find the next entry after current position.
     let next_row = sqlx::query(
