@@ -412,6 +412,33 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
   deleteNode: async (id: string): Promise<string | null> => {
     const { nodes } = get()
 
+    // Cancel any pending debounce timer for this node to prevent
+    // "Node not found" errors from updateNodeIpc firing after deletion
+    const pendingTimer = updateDebounceTimers.get(id)
+    if (pendingTimer) {
+      clearTimeout(pendingTimer)
+      updateDebounceTimers.delete(id)
+    }
+
+    // If the undo tracker has a pending text group for this node, flush it
+    // before deletion so the text edits are recorded in undo history
+    const pendingGroup = undoTracker.flush()
+    if (pendingGroup) {
+      const prevNodeId = pendingGroup.startSnapshot as { id?: string }
+      const nodeIdForGroup = (prevNodeId?.id as string) ?? id
+      const prevGroupNode = findNodeById(get().nodes, nodeIdForGroup)
+      if (prevGroupNode) {
+        const afterSnapshot = { id: nodeIdForGroup, content: prevGroupNode.content, content_text: extractText(prevGroupNode.content) }
+        await recordUndoStepIpc(
+          'text_edit',
+          nodeIdForGroup,
+          JSON.stringify(pendingGroup.startSnapshot),
+          JSON.stringify(afterSnapshot),
+          pendingGroup.groupKey
+        ).catch((e) => console.warn('Failed to record text group before delete:', e))
+      }
+    }
+
     // Find what should receive focus after deletion (previous sibling or parent)
     const parent = findParentOf(nodes, id)
     const siblings = parent ? parent.children : nodes

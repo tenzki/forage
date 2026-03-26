@@ -180,6 +180,9 @@ export default function NodeEditor({ node }: NodeEditorProps) {
   const redo = useTreeStore((s) => s.redo)
   const onTagClick = useTreeStore((s) => s.onTagClick)
 
+  // Track whether a content change originated from the editor (typing) vs externally (undo)
+  const isInternalUpdate = useRef(false)
+
   // Use refs for callbacks to avoid stale closures in extension
   const nodeRef = useRef(node)
   nodeRef.current = node
@@ -283,6 +286,11 @@ export default function NodeEditor({ node }: NodeEditorProps) {
     ],
     content: node.content as object,
     onUpdate: ({ editor }) => {
+      // Skip store update when content was set externally (undo/redo sync)
+      if (isInternalUpdate.current) {
+        isInternalUpdate.current = false
+        return
+      }
       updateContent(nodeRef.current.id, editor.getJSON() as unknown as import('../../lib/bindings').JsonValue)
     },
     onBlur: () => {
@@ -318,6 +326,22 @@ export default function NodeEditor({ node }: NodeEditorProps) {
       editor.commands.focus('end')
     }
   }, [editor])
+
+  // Sync external content changes (e.g. undo/redo) into the TipTap editor.
+  // TipTap manages its own internal state, so store changes from loadTree()
+  // don't automatically appear. Uses a single ProseMirror transaction to
+  // replace content AND set cursor position atomically.
+  useEffect(() => {
+    if (editor && node.content) {
+      const editorJson = JSON.stringify(editor.getJSON())
+      const storeJson = JSON.stringify(node.content)
+      if (editorJson !== storeJson) {
+        // Flag tells onUpdate to skip updateContent for this setContent call
+        isInternalUpdate.current = true
+        editor.commands.setContent(node.content as object)
+      }
+    }
+  }, [editor, node.content])
 
   return (
     <div className="node-editor" onKeyDown={(e) => {
