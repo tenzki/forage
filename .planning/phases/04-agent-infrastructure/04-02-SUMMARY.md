@@ -36,13 +36,14 @@ key-files:
     - src/style.css
 
 key-decisions:
-  - "Settings trigger moved to sidebar item (user feedback) — gear icon approach removed"
-  - "TagSidebar always renders (not null when closed) to show persistent Settings footer item"
-  - "Collapsed sidebar (44px) shows only Settings icon; expanded (200px) shows label + icon"
-  - "Cmd+, shortcut retained alongside sidebar navigation"
+  - "Settings moved fully into sidebar panel (user feedback) — no separate page/route"
+  - "TagSidebar has two tabs: Tags and Settings; both live in the same 200px sidebar"
+  - "Cmd+, opens sidebar AND switches to Settings tab via focusSettings prop"
+  - "Collapsed sidebar shows stacked icon buttons (tag + gear) instead of footer nav"
+  - "SettingsPage.tsx retained as dead code for now; App.tsx no longer imports it"
 
 patterns-established:
-  - "Sidebar footer nav: persistent actions at bottom of left sidebar regardless of open/closed state"
+  - "Sidebar panel sections: use state-based tabs within a single sidebar component instead of separate page routes"
 
 requirements-completed: [INFR-01]
 
@@ -112,8 +113,27 @@ Each task was committed atomically:
 
 ---
 
-**Total deviations:** 1 user-directed change (sidebar placement vs gear icon)
-**Impact on plan:** Navigation change only — no functional change to settings store, IPC, or key persistence logic.
+**2. [User Feedback] Settings moved from separate full-page view into sidebar panel**
+- **Found during:** Post-checkpoint review
+- **Issue:** User reviewed the settings page (separate full-screen view with Back button) and requested settings live inside the tag sidebar — not a standalone page. Settings should coexist with Tags as a section/tab within the sidebar.
+- **Fix:**
+  - Added `SidebarSection` state (`'tags' | 'settings'`) to TagSidebar
+  - TagSidebar now renders two tabs at the top: "Tags" and "Settings"
+  - Settings content (provider key inputs + model selector) renders inline in the sidebar panel
+  - Removed `currentView` state and `'outliner' | 'settings'` routing from App.tsx
+  - Removed `SettingsPage` import and conditional render from App.tsx
+  - Cmd+, now opens the sidebar AND switches to the Settings tab (via `focusSettings` prop + `onSettingsFocused` callback)
+  - Collapsed sidebar replaced footer button with stacked icon buttons (tag icon + gear icon)
+  - Added sidebar tab and settings panel CSS classes (`.tag-sidebar-tabs`, `.tag-sidebar-tab`, `.tag-sidebar-settings`, `.sidebar-settings-section`, `.sidebar-settings-model-select`, `.sidebar-icon-btn`)
+  - `SettingsPage.tsx` retained but no longer routed to
+- **Files modified:** src/App.tsx, src/components/TagSidebar/TagSidebar.tsx, src/style.css
+- **Verification:** TypeScript compiles without errors (only pre-existing bindings.ts errors remain)
+- **Committed in:** c3907e3
+
+---
+
+**Total deviations:** 2 user-directed changes (gear icon → sidebar footer → sidebar panel/tab)
+**Impact on plan:** Navigation change only — no functional change to settings store, IPC, or key persistence logic. SettingsPage.tsx remains as dead code (can be removed later).
 
 ## Issues Encountered
 
