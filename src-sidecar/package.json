@@ -1,0 +1,19 @@
+{
+  "name": "ai-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node --test keystore.test.ts"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.58.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  }
+}
