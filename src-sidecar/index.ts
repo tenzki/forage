@@ -10,11 +10,21 @@
  *   { type: 'get_settings' }                      -> { type: 'settings', data: {...} }
  *   { type: 'save_settings', data: {...} }        -> { type: 'settings_saved' }
  *   { type: 'summarize', id?, messages: [...] }  -> { type: 'summary', id?, content: '...' }
- *   { type: 'prompt', id?, text: '...' }          -> { type: 'prompt_ack', id? } (placeholder)
+ *   { type: 'prompt', id, text, skill, messages, systemPrompt }
+ *     -> streams: { type: 'message_update', id, assistantMessageEvent: { type: 'text_delta', delta } }
+ *     -> then:   { type: 'turn_end', id }
+ *     -> then:   { type: 'agent_end', id }
+ *   { type: 'abort' }                             -> cancels current generation
  */
 
 import { createInterface } from 'node:readline'
 import { loadSettings, saveSettings } from './keystore.ts'
+import { streamSimple } from '@mariozechner/pi-ai'
+import { getModel } from '@mariozechner/pi-ai'
+import type { Message } from '@mariozechner/pi-ai'
+import { askSkill } from './skills/ask.ts'
+import { researchSkill } from './skills/research.ts'
+import { brainstormSkill } from './skills/brainstorm.ts'
 
 // APP_DATA_DIR must be set by Tauri when spawning the sidecar
 const APP_DATA_DIR = process.env['APP_DATA_DIR'] ?? ''
@@ -22,6 +32,20 @@ const APP_DATA_DIR = process.env['APP_DATA_DIR'] ?? ''
 if (!APP_DATA_DIR) {
   process.stderr.write('[sidecar] WARNING: APP_DATA_DIR is not set. Settings will use empty string as path.\n')
 }
+
+// ---------- Skills registry ----------
+
+type SkillDef = { id: string; systemPrompt: string }
+
+const SKILLS: Record<string, SkillDef> = {
+  ask: askSkill,
+  research: researchSkill,
+  brainstorm: brainstormSkill,
+}
+
+// ---------- Abort controller (single active generation) ----------
+
+let currentAbortController: AbortController | null = null
 
 // ---------- Utilities ----------
 
@@ -41,15 +65,178 @@ function respondError(message: string, id?: string): void {
   respond(res)
 }
 
-// ---------- Command Handlers ----------
+// ---------- Command Types ----------
 
 type BaseCommand = { type: string; id?: string }
 type PingCommand = BaseCommand & { type: 'ping' }
 type GetSettingsCommand = BaseCommand & { type: 'get_settings' }
 type SaveSettingsCommand = BaseCommand & { type: 'save_settings'; data: Record<string, unknown> }
-type SummarizeCommand = BaseCommand & { type: 'summarize'; messages: Array<{ role: string; content: string }>}
-type PromptCommand = BaseCommand & { type: 'prompt'; text: string }
-type Command = PingCommand | GetSettingsCommand | SaveSettingsCommand | SummarizeCommand | PromptCommand | BaseCommand
+type SummarizeCommand = BaseCommand & {
+  type: 'summarize'
+  messages: Array<{ role: string; content: string }>
+}
+type PromptCommand = BaseCommand & {
+  type: 'prompt'
+  id: string
+  text: string
+  skill?: string
+  messages?: Array<{ role: 'user' | 'assistant'; content: string }>
+  systemPrompt?: string
+}
+type AbortCommand = BaseCommand & { type: 'abort' }
+type Command =
+  | PingCommand
+  | GetSettingsCommand
+  | SaveSettingsCommand
+  | SummarizeCommand
+  | PromptCommand
+  | AbortCommand
+  | BaseCommand
+
+// ---------- Prompt handler using pi-ai ----------
+
+async function handlePrompt(cmd: PromptCommand): Promise<void> {
+  const { id, text, skill, messages: contextMessages } = cmd
+
+  // Load settings to get API key and model
+  const settings = loadSettings(APP_DATA_DIR) as Record<string, unknown>
+  const providers = (settings['providers'] ?? {}) as Record<string, { apiKey?: string; enabled?: boolean }>
+  const defaultModel = (settings['defaultModel'] as string | undefined) ?? ''
+
+  // Find active provider
+  let apiKey: string | undefined
+  let providerName: string | undefined
+
+  for (const [name, cfg] of Object.entries(providers)) {
+    if (cfg.enabled && cfg.apiKey) {
+      apiKey = cfg.apiKey
+      providerName = name
+      break
+    }
+  }
+
+  if (!apiKey || !providerName) {
+    respondError(
+      'No API key configured. Open Settings to add one.',
+      id
+    )
+    return
+  }
+
+  // Look up skill system prompt
+  const skillDef = skill ? SKILLS[skill] : SKILLS['ask']
+  const systemPrompt = skillDef?.systemPrompt ?? 'You are a helpful assistant.'
+
+  // Build messages array for pi-ai
+  // Context messages come first, then the user's current text
+  const piMessages: Message[] = []
+
+  if (contextMessages && contextMessages.length > 0) {
+    for (const m of contextMessages) {
+      if (m.role === 'assistant') {
+        piMessages.push({
+          role: 'user',
+          content: `[Assistant's previous response]: ${m.content}`,
+          timestamp: Date.now(),
+        })
+      } else {
+        piMessages.push({
+          role: 'user',
+          content: m.content,
+          timestamp: Date.now(),
+        })
+      }
+    }
+  }
+
+  // Add the actual user prompt as final message
+  piMessages.push({
+    role: 'user',
+    content: text,
+    timestamp: Date.now(),
+  })
+
+  // Determine model based on provider and settings
+  let model
+  try {
+    if (providerName === 'anthropic') {
+      const modelId = (defaultModel || 'claude-3-5-haiku-20241022') as Parameters<typeof getModel>[1] & string
+      try {
+        model = getModel('anthropic', modelId as any)
+      } catch {
+        model = getModel('anthropic', 'claude-3-5-haiku-20241022')
+      }
+    } else if (providerName === 'openai') {
+      const modelId = (defaultModel || 'gpt-4o-mini') as any
+      try {
+        model = getModel('openai', modelId)
+      } catch {
+        model = getModel('openai', 'gpt-4o-mini' as any)
+      }
+    } else if (providerName === 'google') {
+      const modelId = (defaultModel || 'gemini-1.5-flash') as any
+      try {
+        model = getModel('google', modelId)
+      } catch {
+        model = getModel('google', 'gemini-1.5-flash' as any)
+      }
+    } else {
+      respondError(`Unsupported provider: ${providerName}. Configure Anthropic, OpenAI, or Google.`, id)
+      return
+    }
+  } catch (e) {
+    respondError(`Failed to get model for provider ${providerName}: ${String(e)}`, id)
+    return
+  }
+
+  // Create abort controller for this generation
+  const abortController = new AbortController()
+  currentAbortController = abortController
+
+  try {
+    const eventStream = streamSimple(model, {
+      systemPrompt,
+      messages: piMessages,
+    }, {
+      apiKey,
+      signal: abortController.signal,
+    })
+
+    for await (const event of eventStream) {
+      if (abortController.signal.aborted) break
+
+      if (event.type === 'text_delta') {
+        respond({
+          type: 'message_update',
+          id,
+          assistantMessageEvent: {
+            type: 'text_delta',
+            delta: event.delta,
+          },
+        })
+      }
+    }
+
+    if (!abortController.signal.aborted) {
+      respond({ type: 'turn_end', id })
+      respond({ type: 'agent_end', id })
+    }
+  } catch (e: unknown) {
+    const err = e as Error
+    if (err?.name === 'AbortError' || abortController.signal.aborted) {
+      // Cancelled — don't send error
+      process.stderr.write(`[sidecar] Generation ${id} aborted.\n`)
+    } else {
+      respondError(`Generation failed: ${String(e)}`, id)
+    }
+  } finally {
+    if (currentAbortController === abortController) {
+      currentAbortController = null
+    }
+  }
+}
+
+// ---------- Command Handlers ----------
 
 async function handleCommand(cmd: Command): Promise<void> {
   switch (cmd.type) {
@@ -99,11 +286,16 @@ async function handleCommand(cmd: Command): Promise<void> {
     }
 
     case 'prompt': {
-      // Placeholder — full pi integration in Plan 04
-      // For now, echo back an acknowledgment
-      const res: Record<string, unknown> = { type: 'prompt_ack', text: (cmd as PromptCommand).text }
-      if (cmd.id !== undefined) res['id'] = cmd.id
-      respond(res)
+      await handlePrompt(cmd as PromptCommand)
+      break
+    }
+
+    case 'abort': {
+      if (currentAbortController) {
+        currentAbortController.abort()
+        currentAbortController = null
+        process.stderr.write('[sidecar] Aborted current generation.\n')
+      }
       break
     }
 
@@ -160,7 +352,7 @@ async function summarizeMessages(
 
   // Use fetch (available in Node 18+) to call the provider API
   if (provider === 'anthropic') {
-    const model = defaultModel || 'claude-haiku-3-5'
+    const model = defaultModel || 'claude-3-5-haiku-20241022'
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {

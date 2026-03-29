@@ -12,6 +12,6 @@
     "noEmit": false,
     "rewriteRelativeImportExtensions": true
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "skills/*.ts"],
   "exclude": ["node_modules", "dist", "*.test.ts"]
 }
