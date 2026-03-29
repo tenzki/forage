@@ -19,11 +19,13 @@
     ],
     "security": {
       "csp": null
-    }
+    },
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png"],
+    "externalBin": ["binaries/ai-sidecar"]
   }
 }

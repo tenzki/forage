@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [{ "name": "binaries/ai-sidecar", "sidecar": true }]
+    },
+    "shell:allow-stdin-write",
+    "shell:allow-kill"
+  ]
+}
