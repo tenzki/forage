@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { listen } from '@tauri-apps/api/event'
-import { extractText } from '../types/tree'
+import { extractText, nodeToTreeNode } from '../types/tree'
+import type { TreeNode } from '../types/tree'
 import type { JsonValue } from '../lib/bindings'
 import {
   getAncestorsIpc,
@@ -302,6 +303,28 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         JSON.stringify({ partial: true }),
         ''
       )
+
+      // Insert ghost node into the visible tree immediately so streaming updates are visible.
+      // updateNodeLocally finds the triggering node and appends the ghost as a new child.
+      // If the triggering node is collapsed, un-collapse it so the child is visible.
+      const ghostTreeNode = nodeToTreeNode(ghostNode)
+      const treeStore = useTreeStore.getState()
+
+      // Find the triggering node in the flat tree to get its current children
+      function findInTree(nodes: TreeNode[], id: string): TreeNode | null {
+        for (const n of nodes) {
+          if (n.id === id) return n
+          const found = findInTree(n.children, id)
+          if (found) return found
+        }
+        return null
+      }
+
+      const parent = findInTree(treeStore.nodes, nodeId)
+      treeStore.updateNodeLocally(nodeId, {
+        collapsed: false,
+        children: [...(parent?.children ?? []), ghostTreeNode],
+      })
 
       // 4. Track active generation
       const requestId = `prompt-${nodeId}-${Date.now()}`
