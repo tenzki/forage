@@ -5,6 +5,8 @@ import StarterKit from '@tiptap/starter-kit'
 import type { TreeNode } from '../../types/tree'
 import { useTreeStore } from '../../store/treeStore'
 import { HashtagNode } from '../../extensions/HashtagNode'
+import { SlashCommand } from '../../extensions/SlashCommand'
+import { useAgentStore } from '../../store/agentStore'
 
 interface OutlinerKeysOptions {
   onEnter: () => void
@@ -209,6 +211,11 @@ export default function NodeEditor({ node }: NodeEditorProps) {
       HashtagNode.configure({
         onTagClick: (tag: string) => {
           onTagClickRef.current?.(tag)
+        },
+      }),
+      SlashCommand.configure({
+        onSkillInvoked: (skillId: string, args: string) => {
+          useAgentStore.getState().invokeSkill(nodeRef.current.id, skillId, args).catch(console.error)
         },
       }),
       OutlinerKeys.configure({
