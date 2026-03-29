@@ -859,3 +859,33 @@ body.is-dragging * {
   background: #fef2f2;
   border-color: #f87171;
 }
+
+/* ============================================================
+   Agent streaming and partial node states
+   ============================================================ */
+
+/* Ghost node during active streaming — pulse animation */
+@keyframes node-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.node-generating {
+  animation: node-pulse 1.4s ease-in-out infinite;
+}
+
+.node-generating .node-text,
+.node-generating .node-text--rich {
+  color: #6b7280;
+}
+
+/* Partial/cancelled node — dimmed appearance */
+.node-partial {
+  opacity: 0.55;
+}
+
+.node-partial .node-text,
+.node-partial .node-text--rich {
+  color: #9ca3af;
+  font-style: italic;
+}

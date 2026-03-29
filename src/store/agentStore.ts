@@ -1,13 +1,16 @@
 import { create } from 'zustand'
 import { listen } from '@tauri-apps/api/event'
 import { extractText } from '../types/tree'
+import type { JsonValue } from '../lib/bindings'
 import {
   getAncestorsIpc,
   getNodeIpc,
   agentCommandIpc,
   createNodeIpc,
   updateNodeIpc,
+  deleteNodeIpc,
 } from './ipc'
+import { useTreeStore } from './treeStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -26,11 +29,13 @@ export interface ContextMessage {
 
 export interface ActiveGeneration {
   nodeId: string       // triggering node
-  ghostNodeId: string  // child node receiving streamed content
+  ghostNodeId: string  // child node receiving streamed content (or same as nodeId for replace mode)
   skillId: string
   args: string
   tokens: string       // accumulated streamed text
   status: 'streaming' | 'complete' | 'error' | 'cancelled'
+  outputMode: 'child' | 'replace'
+  requestId: string   // sidecar prompt request id
 }
 
 interface AgentState {
@@ -38,6 +43,9 @@ interface AgentState {
 }
 
 interface AgentActions {
+  /** Sets up listener for agent-event from Tauri. Call once on mount. */
+  initAgentListener(): Promise<() => void>
+
   /** Core action: triggered by slash command selection */
   invokeSkill(nodeId: string, skillId: string, args: string): Promise<void>
 
@@ -47,8 +55,8 @@ interface AgentActions {
   /** Streaming: accumulate token delta into ghost node */
   appendToken(nodeId: string, delta: string): void
 
-  /** Mark generation as complete */
-  finalizeGeneration(nodeId: string): void
+  /** Mark generation as complete and persist */
+  finalizeGeneration(nodeId: string): Promise<void>
 
   /** Cancel an active generation */
   cancelGeneration(nodeId: string): Promise<void>
@@ -64,6 +72,23 @@ export type AgentStore = AgentState & AgentActions
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
+}
+
+// ─── Content Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Convert plain text to a TipTap-compatible ProseMirror doc JSON.
+ */
+function textToTipTapContent(text: string): JsonValue {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: text ? [{ type: 'text', text }] : [],
+      },
+    ],
+  }
 }
 
 // ─── Context Building ─────────────────────────────────────────────────────────
@@ -182,6 +207,71 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   buildContextMessages,
 
+  initAgentListener: async () => {
+    const unlisten = await listen<string>('agent-event', (event) => {
+      try {
+        const data = typeof event.payload === 'string'
+          ? JSON.parse(event.payload)
+          : event.payload
+
+        const { id } = data as { id?: string }
+        if (!id) return
+
+        // Find generation by requestId
+        const { activeGenerations } = get()
+        let matchedNodeId: string | null = null
+        for (const [nodeId, gen] of activeGenerations.entries()) {
+          if (gen.requestId === id) {
+            matchedNodeId = nodeId
+            break
+          }
+        }
+
+        if (!matchedNodeId) return
+
+        if (data.type === 'message_update') {
+          const delta = data.assistantMessageEvent?.delta as string | undefined
+          if (delta) {
+            get().appendToken(matchedNodeId, delta)
+          }
+        } else if (data.type === 'turn_end') {
+          get().finalizeGeneration(matchedNodeId).catch((e) =>
+            console.error('[agent] finalizeGeneration failed:', e)
+          )
+        } else if (data.type === 'agent_end') {
+          // Clear generation from map
+          set((state) => {
+            const newMap = new Map(state.activeGenerations)
+            newMap.delete(matchedNodeId!)
+            return { activeGenerations: newMap }
+          })
+        } else if (data.type === 'error') {
+          const errorMsg = data.message as string
+          console.error('[agent] Error from sidecar:', errorMsg)
+          // Set error status and show in ghost node
+          set((state) => {
+            const newMap = new Map(state.activeGenerations)
+            const gen = newMap.get(matchedNodeId!)
+            if (gen) {
+              newMap.set(matchedNodeId!, { ...gen, status: 'error' })
+            }
+            return { activeGenerations: newMap }
+          })
+          const gen = get().activeGenerations.get(matchedNodeId!)
+          if (gen) {
+            const errorContent = textToTipTapContent(`[Error: ${errorMsg}]`)
+            useTreeStore.getState().updateNodeLocally(gen.ghostNodeId, { content: errorContent })
+          }
+        }
+      } catch (e) {
+        // ignore parse errors for unrelated events
+        console.warn('[agent] Failed to parse agent-event:', e)
+      }
+    })
+
+    return unlisten
+  },
+
   invokeSkill: async (nodeId: string, skillId: string, args: string) => {
     const { activeGenerations } = get()
 
@@ -190,6 +280,9 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       console.warn(`[agent] Skill already active for node ${nodeId}`)
       return
     }
+
+    // Determine output mode (brainstorm splits into multiple children; replace mode for future skills)
+    const outputMode: 'child' | 'replace' = 'child'
 
     try {
       // 1. Build context messages (with summarization if needed)
@@ -211,6 +304,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       )
 
       // 4. Track active generation
+      const requestId = `prompt-${nodeId}-${Date.now()}`
       const generation: ActiveGeneration = {
         nodeId,
         ghostNodeId: ghostNode.id,
@@ -218,6 +312,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
         args,
         tokens: '',
         status: 'streaming',
+        outputMode,
+        requestId,
       }
 
       set((state) => {
@@ -227,12 +323,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       })
 
       // 5. Send prompt to sidecar
-      const requestId = `prompt-${nodeId}-${Date.now()}`
       await agentCommandIpc({
         type: 'prompt',
         id: requestId,
         text: args,
-        systemPrompt: 'You are a helpful assistant.',
         messages: contextMessages,
         skill: skillId,
       })
@@ -252,9 +346,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const generation = activeGenerations.get(nodeId)
     if (!generation) return
 
+    const newTokens = generation.tokens + delta
     const updated: ActiveGeneration = {
       ...generation,
-      tokens: generation.tokens + delta,
+      tokens: newTokens,
     }
 
     set((state) => {
@@ -262,23 +357,90 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       newMap.set(nodeId, updated)
       return { activeGenerations: newMap }
     })
+
+    // Convert accumulated text to TipTap JSON and update the ghost node locally
+    const tiptapContent = textToTipTapContent(newTokens)
+    useTreeStore.getState().updateNodeLocally(generation.ghostNodeId, { content: tiptapContent })
   },
 
-  finalizeGeneration: (nodeId: string) => {
+  finalizeGeneration: async (nodeId: string) => {
     const { activeGenerations } = get()
     const generation = activeGenerations.get(nodeId)
     if (!generation) return
 
-    const updated: ActiveGeneration = {
-      ...generation,
-      status: 'complete',
-    }
+    const finalText = generation.tokens
 
+    // Mark as complete
     set((state) => {
       const newMap = new Map(state.activeGenerations)
-      newMap.set(nodeId, updated)
+      newMap.set(nodeId, { ...generation, status: 'complete' })
       return { activeGenerations: newMap }
     })
+
+    if (generation.skillId === 'brainstorm') {
+      // Parse bullet points and create separate child nodes
+      const lines = finalText
+        .split('\n')
+        .map(l => l.replace(/^[\s-*•]+/, '').trim())
+        .filter(l => l.length > 0)
+
+      if (lines.length === 0) {
+        // No ideas parsed — delete ghost node
+        await deleteNodeIpc(generation.ghostNodeId).catch((e) =>
+          console.warn('[agent] Failed to delete empty ghost node:', e)
+        )
+        useTreeStore.getState().updateNodeLocally(generation.ghostNodeId, { content: null as any })
+        await useTreeStore.getState().loadTree()
+        return
+      }
+
+      // Delete the ghost node (it was just a placeholder during streaming)
+      await deleteNodeIpc(generation.ghostNodeId).catch((e) =>
+        console.warn('[agent] Failed to delete brainstorm ghost node:', e)
+      )
+
+      // Create separate child nodes for each idea
+      for (let i = 0; i < lines.length; i++) {
+        const ideaContent = textToTipTapContent(lines[i])
+        const position = String(i + 1) // simple sequential positions
+        try {
+          await createNodeIpc(
+            nodeId,
+            position,
+            'agent_response',
+            ideaContent,
+            null,
+            lines[i]
+          )
+        } catch (e) {
+          console.warn('[agent] Failed to create brainstorm idea node:', e)
+        }
+      }
+
+      // Reload tree to show all new child nodes
+      await useTreeStore.getState().loadTree()
+    } else {
+      // children mode (ask, research): persist ghost node content to DB
+      const finalContent = textToTipTapContent(finalText)
+
+      try {
+        // Persist content to DB
+        await updateNodeIpc(
+          generation.ghostNodeId,
+          finalContent,
+          null,
+          null,
+          JSON.stringify({ partial: false }), // remove partial flag
+          finalText
+        )
+        // Update local tree content visually (metadata not tracked in TreeNode)
+        useTreeStore.getState().updateNodeLocally(generation.ghostNodeId, {
+          content: finalContent,
+        })
+      } catch (e) {
+        console.error('[agent] Failed to persist ghost node content:', e)
+      }
+    }
   },
 
   cancelGeneration: async (nodeId: string) => {
@@ -286,11 +448,47 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const generation = activeGenerations.get(nodeId)
     if (!generation) return
 
+    // Mark as cancelled immediately
+    set((state) => {
+      const newMap = new Map(state.activeGenerations)
+      newMap.set(nodeId, { ...generation, status: 'cancelled' })
+      return { activeGenerations: newMap }
+    })
+
     try {
       // Send abort command to sidecar
       await agentCommandIpc({ type: 'abort', nodeId })
     } catch (e) {
       console.warn('[agent] Failed to send abort command:', e)
+    }
+
+    // Handle ghost node based on whether any content was streamed
+    const hasContent = generation.tokens.trim().length > 0
+
+    if (hasContent) {
+      // Keep partial content with partial metadata
+      const partialContent = textToTipTapContent(generation.tokens)
+      try {
+        await updateNodeIpc(
+          generation.ghostNodeId,
+          partialContent,
+          null,
+          null,
+          JSON.stringify({ partial: true, cancelled: true }),
+          generation.tokens
+        )
+      } catch (e) {
+        console.warn('[agent] Failed to persist partial content on cancel:', e)
+      }
+    } else {
+      // No content streamed yet — delete empty ghost node
+      try {
+        await deleteNodeIpc(generation.ghostNodeId)
+        useTreeStore.getState().updateNodeLocally(generation.ghostNodeId, { content: null as any })
+        await useTreeStore.getState().loadTree()
+      } catch (e) {
+        console.warn('[agent] Failed to delete empty ghost node on cancel:', e)
+      }
     }
 
     // Remove from active generations

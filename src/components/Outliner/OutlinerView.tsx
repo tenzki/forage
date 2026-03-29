@@ -3,6 +3,7 @@ import { Tree } from 'react-arborist'
 import { createDragDropManager } from 'dnd-core'
 import { TouchBackend } from 'react-dnd-touch-backend'
 import { useTreeStore } from '../../store/treeStore'
+import { useAgentStore } from '../../store/agentStore'
 import NodeRow from './NodeRow'
 import Breadcrumb from './Breadcrumb'
 import { positionForMove } from '../../utils/treeHelpers'
@@ -80,10 +81,48 @@ export default function OutlinerView() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight })
 
+  const editingNodeId = useTreeStore((s) => s.editingNodeId)
+  const cleanupPartialNodes = useTreeStore((s) => s.cleanupPartialNodes)
+  const cancelGeneration = useAgentStore((s) => s.cancelGeneration)
+  const initAgentListener = useAgentStore((s) => s.initAgentListener)
+  const activeGenerations = useAgentStore((s) => s.activeGenerations)
+
   // Load tree on mount
   useEffect(() => {
-    loadTree()
-  }, [loadTree])
+    loadTree().then(() => {
+      // After tree loads, cleanup any partial nodes from interrupted generations
+      cleanupPartialNodes().catch((e) =>
+        console.warn('[agent] Partial node cleanup failed:', e)
+      )
+    })
+  }, [loadTree, cleanupPartialNodes])
+
+  // Initialize agent event listener on mount
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    initAgentListener().then((fn) => {
+      unlisten = fn
+    }).catch((e) => console.warn('[agent] Failed to init agent listener:', e))
+    return () => {
+      unlisten?.()
+    }
+  }, [initAgentListener])
+
+  // Escape key: cancel active generation for currently focused node
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (!editingNodeId) return
+      if (activeGenerations.has(editingNodeId)) {
+        e.preventDefault()
+        cancelGeneration(editingNodeId).catch((err) =>
+          console.warn('[agent] Cancel generation failed:', err)
+        )
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [editingNodeId, activeGenerations, cancelGeneration])
 
   // Update dimensions on resize
   useEffect(() => {

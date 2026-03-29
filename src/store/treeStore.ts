@@ -98,6 +98,8 @@ interface TreeActions {
   redo: () => Promise<void>
   // Tag click handler registration
   registerTagClickHandler: (handler: (tag: string) => void) => void
+  // Cleanup partial nodes from interrupted generations
+  cleanupPartialNodes: () => Promise<void>
 }
 
 export type TreeStore = TreeState & TreeActions
@@ -805,6 +807,46 @@ export const useTreeStore = create<TreeStore>((set, get) => ({
 
   updateNodeLocally: (id: string, update: Partial<TreeNode>) => {
     set({ nodes: updateNodeInTree(get().nodes, id, update) })
+  },
+
+  cleanupPartialNodes: async () => {
+    // Find all agent_response nodes in the loaded tree
+    const { nodes } = get()
+    const agentResponseIds: string[] = []
+
+    function collectAgentResponseIds(list: TreeNode[]) {
+      for (const n of list) {
+        if (n.node_type === 'agent_response') {
+          agentResponseIds.push(n.id)
+        }
+        collectAgentResponseIds(n.children)
+      }
+    }
+
+    collectAgentResponseIds(nodes)
+
+    if (agentResponseIds.length === 0) return
+
+    // Check each agent_response node's metadata for partial: true
+    let deletedAny = false
+    for (const id of agentResponseIds) {
+      try {
+        const node = await getNodeIpc(id)
+        const meta = node.metadata as Record<string, unknown> | null
+        if (meta && meta['partial'] === true) {
+          await deleteNodeIpc(id)
+          deletedAny = true
+          console.log('[agent] Cleaned up partial node:', id)
+        }
+      } catch (e) {
+        console.warn('[agent] Failed to check/cleanup partial node:', id, e)
+      }
+    }
+
+    if (deletedAny) {
+      // Reload tree to remove deleted nodes from view
+      await get().loadTree()
+    }
   },
 
   registerTagClickHandler: (handler: (tag: string) => void) => {

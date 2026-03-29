@@ -4,6 +4,7 @@ import type { TreeNode } from '../../types/tree'
 import Bullet from './Bullet'
 import NodeEditor from './NodeEditor'
 import { useTreeStore } from '../../store/treeStore'
+import { useAgentStore } from '../../store/agentStore'
 import { changeNodeTypeIpc } from '../../store/ipc'
 import { generateHTML } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -33,6 +34,9 @@ const readOnlyExtensions = [
  *
  * Context menu: right-clicking an agent_response node shows a "Make mine" option
  * that converts it to a regular note, removing the sparkle icon immediately.
+ *
+ * Streaming indicator: ghost nodes with an active generation show a pulsing
+ * animation. Cancelled/partial nodes show a dimmed appearance.
  */
 export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<TreeNode>) {
   const editingNodeId = useTreeStore((s) => s.editingNodeId)
@@ -40,9 +44,15 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
   const setEditingNode = useTreeStore((s) => s.setEditingNode)
   const clearSelection = useTreeStore((s) => s.clearSelection)
   const updateNodeLocally = useTreeStore((s) => s.updateNodeLocally)
+  const activeGenerations = useAgentStore((s) => s.activeGenerations)
 
   const isEditing = editingNodeId === node.data.id
   const isRangeSelected = selectedNodeIds.has(node.data.id)
+
+  // Check if this node is the ghost node of an active generation
+  const isGenerating = Array.from(activeGenerations.values()).some(
+    (gen) => gen.ghostNodeId === node.data.id && gen.status === 'streaming'
+  )
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
@@ -58,8 +68,9 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
   }
 
   function handleContextMenu(e: React.MouseEvent) {
-    // Only show context menu for AI nodes
+    // Only show context menu for AI nodes that are not currently generating
     if (node.data.node_type !== 'agent_response') return
+    if (isGenerating) return
     e.preventDefault()
     e.stopPropagation()
     setCtxMenu({ x: e.clientX, y: e.clientY })
@@ -101,6 +112,7 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
   if (isRangeSelected) className += ' node-row-range-selected'
   if (node.isDragging) className += ' node-row-dragging'
   if (node.willReceiveDrop) className += ' node-row-drop-target'
+  if (isGenerating) className += ' node-generating'
 
   return (
     <>
@@ -116,12 +128,18 @@ export default function NodeRow({ node, style, dragHandle }: NodeRendererProps<T
         {isEditing ? (
           <NodeEditor node={node.data} />
         ) : (
-          node.data.content ? (
+          node.data.content && typeof node.data.content === 'object' && (node.data.content as any).type === 'doc' ? (
             <span
               className="node-text node-text--rich"
               onClick={handleTextClick}
               dangerouslySetInnerHTML={{
-                __html: generateHTML(node.data.content as any, readOnlyExtensions),
+                __html: (() => {
+                  try {
+                    return generateHTML(node.data.content as any, readOnlyExtensions)
+                  } catch {
+                    return node.data.name || ''
+                  }
+                })(),
               }}
             />
           ) : (
