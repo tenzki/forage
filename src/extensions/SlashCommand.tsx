@@ -72,6 +72,24 @@ export function parseSlashInput(input: string): { skillName: string; args: strin
   }
 }
 
+/**
+ * Detect if text contains a complete slash command ready to invoke.
+ * A complete slash command is: /skillname <space> <non-empty query>
+ * Returns { skillId, args } if matched, or null if not a valid slash command invocation.
+ */
+export function detectSlashCommand(text: string): { skillId: string; args: string } | null {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('/')) return null
+  const { skillName, args } = parseSlashInput(trimmed)
+  if (!skillName) return null
+  // Require at least one known skill name (exact match)
+  const skill = SKILLS.find((s) => s.name === skillName)
+  if (!skill) return null
+  // Require non-empty args — user must have typed something after "/skillname "
+  if (!args.trim()) return null
+  return { skillId: skill.id, args: args.trim() }
+}
+
 // ─── Suggestion Popup ─────────────────────────────────────────────────────────
 
 interface SlashSuggestionPopupProps {
@@ -163,6 +181,7 @@ export let isSlashSuggestionActive = false
 // ─── Extension Options ────────────────────────────────────────────────────────
 
 export interface SlashCommandOptions {
+  /** @deprecated Use onSkillInvoked in NodeEditor Enter handler — not called by extension anymore */
   onSkillInvoked: (skillId: string, args: string) => void
 }
 
@@ -221,15 +240,13 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
       })
     }
 
-    const { onSkillInvoked } = this.options
-
     return [
       Suggestion({
         pluginKey: new PluginKey('slashSuggestion'),
         editor: this.editor,
         char: '/',
         startOfLine: false,
-        allowSpaces: true,
+        allowSpaces: false,
         allowedPrefixes: null,
 
         allow: ({ state, range }) => {
@@ -247,24 +264,16 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
         },
 
         command: ({ editor, range, props: skill }) => {
-          // Capture the full text between range.from and range.to
-          const state = editor.state
-          let fullText = ''
-          state.doc.nodesBetween(range.from, range.to, (node) => {
-            if (node.isText) fullText += node.text ?? ''
-          })
-
-          // Parse args: text after skill name and space
-          const parsed = parseSlashInput(fullText)
-          const args = parsed.skillName === (skill as Skill).name
-            ? parsed.args
-            : fullText.slice(fullText.indexOf(' ') + 1)
-
-          // Remove the typed slash text from the editor
-          editor.chain().focus().deleteRange(range).run()
-
-          // Dispatch to callback
-          onSkillInvoked((skill as Skill).id, args)
+          // Selection from dropdown: replace the typed "/" (and any partial skill name)
+          // with "/skillname " so the user can type their query after it.
+          // Do NOT invoke the skill here — invocation happens on Enter.
+          const skillName = (skill as Skill).name
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range)
+            .insertContent(`/${skillName} `)
+            .run()
         },
 
         render: () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { SKILLS, filterSkills, shouldAllowSlash, parseSlashInput } from './SlashCommand'
+import { SKILLS, filterSkills, shouldAllowSlash, parseSlashInput, detectSlashCommand } from './SlashCommand'
 
 describe('SKILLS registry', () => {
   it('contains ask, research, brainstorm entries', () => {
@@ -88,5 +88,52 @@ describe('parseSlashInput', () => {
     const result = parseSlashInput('research quantum')
     expect(result.skillName).toBe('research')
     expect(result.args).toBe('quantum')
+  })
+})
+
+describe('detectSlashCommand', () => {
+  it('returns skillId and args for a complete slash command', () => {
+    const result = detectSlashCommand('/ask what year is it?')
+    expect(result).not.toBeNull()
+    expect(result!.skillId).toBe('ask')
+    expect(result!.args).toBe('what year is it?')
+  })
+
+  it('returns null when text does not start with slash', () => {
+    expect(detectSlashCommand('hello world')).toBeNull()
+  })
+
+  it('returns null when skill name is unknown', () => {
+    expect(detectSlashCommand('/unknown do something')).toBeNull()
+  })
+
+  it('returns null when args are empty (skill typed but no query yet)', () => {
+    expect(detectSlashCommand('/ask')).toBeNull()
+    expect(detectSlashCommand('/ask ')).toBeNull()
+  })
+
+  it('detects research skill with args', () => {
+    const result = detectSlashCommand('/research quantum computing')
+    expect(result).not.toBeNull()
+    expect(result!.skillId).toBe('research')
+    expect(result!.args).toBe('quantum computing')
+  })
+
+  it('detects brainstorm skill with args', () => {
+    const result = detectSlashCommand('/brainstorm startup ideas for 2026')
+    expect(result).not.toBeNull()
+    expect(result!.skillId).toBe('brainstorm')
+    expect(result!.args).toBe('startup ideas for 2026')
+  })
+
+  it('returns null for empty string', () => {
+    expect(detectSlashCommand('')).toBeNull()
+  })
+
+  it('trims leading/trailing whitespace from the full text', () => {
+    const result = detectSlashCommand('  /ask what is the answer?  ')
+    expect(result).not.toBeNull()
+    expect(result!.skillId).toBe('ask')
+    expect(result!.args).toBe('what is the answer?')
   })
 })

@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import type { TreeNode } from '../../types/tree'
 import { useTreeStore } from '../../store/treeStore'
 import { HashtagNode } from '../../extensions/HashtagNode'
-import { SlashCommand, isSlashSuggestionActive } from '../../extensions/SlashCommand'
+import { SlashCommand, isSlashSuggestionActive, detectSlashCommand } from '../../extensions/SlashCommand'
 import { useAgentStore } from '../../store/agentStore'
 
 interface OutlinerKeysOptions {
@@ -27,6 +27,8 @@ interface OutlinerKeysOptions {
   onBatchDelete: () => void
   onUndo: () => void
   onRedo: () => void
+  /** Called when Enter is pressed on a node containing a complete slash command */
+  onSlashCommandEnter: (skillId: string, args: string) => void
 }
 
 /**
@@ -56,6 +58,7 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
       onBatchDelete: () => {},
       onUndo: () => {},
       onRedo: () => {},
+      onSlashCommandEnter: () => {},
     }
   },
 
@@ -63,9 +66,18 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
     const opts = this.options
 
     return {
-      Enter: () => {
+      Enter: ({ editor }) => {
         // Yield to slash suggestion popup when active — its onKeyDown handles Enter
         if (isSlashSuggestionActive) return false
+
+        // Check if the node contains a complete slash command (e.g. "/ask what year?")
+        const text = editor.getText()
+        const slashCmd = detectSlashCommand(text)
+        if (slashCmd) {
+          opts.onSlashCommandEnter(slashCmd.skillId, slashCmd.args)
+          return true // Prevent default new-node creation
+        }
+
         opts.onEnter()
         return true // Prevent TipTap from inserting a paragraph
       },
@@ -219,11 +231,7 @@ export default function NodeEditor({ node }: NodeEditorProps) {
           onTagClickRef.current?.(tag)
         },
       }),
-      SlashCommand.configure({
-        onSkillInvoked: (skillId: string, args: string) => {
-          useAgentStore.getState().invokeSkill(nodeRef.current.id, skillId, args).catch(console.error)
-        },
-      }),
+      SlashCommand.configure({}),
       OutlinerKeys.configure({
         onEnter: () => {
           const n = nodeRef.current
@@ -294,6 +302,10 @@ export default function NodeEditor({ node }: NodeEditorProps) {
 
         onRedo: () => {
           redo().catch(console.error)
+        },
+
+        onSlashCommandEnter: (skillId: string, args: string) => {
+          useAgentStore.getState().invokeSkill(nodeRef.current.id, skillId, args).catch(console.error)
         },
       }),
     ],
