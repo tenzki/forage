@@ -591,3 +591,260 @@ body.is-dragging * {
   font-size: 12px;
   color: #9ca3af;
 }
+
+/* ============================================================
+   Gear icon (settings trigger)
+   ============================================================ */
+.gear-icon {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: #ccc;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 150ms ease, color 150ms ease, background 150ms ease;
+  z-index: 10;
+}
+
+.gear-icon:hover {
+  opacity: 1;
+  color: #555;
+  background: #f3f4f6;
+}
+
+/* ============================================================
+   Settings page
+   ============================================================ */
+.settings-page {
+  width: 100vw;
+  height: 100vh;
+  overflow-y: auto;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.settings-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.btn-back:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.settings-loading {
+  padding: 32px 24px;
+  color: #999;
+  font-size: 13px;
+}
+
+.settings-content {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.settings-section-desc {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: -6px;
+}
+
+.settings-model-row {
+  display: flex;
+  align-items: center;
+}
+
+.settings-model-select {
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #fff;
+  cursor: pointer;
+  min-width: 220px;
+  outline: none;
+}
+
+.settings-model-select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+/* ============================================================
+   Provider key input
+   ============================================================ */
+.provider-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.provider-input-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.provider-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.provider-status--active {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.provider-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-key-masked {
+  font-size: 13px;
+  color: #6b7280;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  flex: 1;
+  letter-spacing: 0.05em;
+}
+
+.provider-key-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1a1a1a;
+  outline: none;
+}
+
+.provider-key-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.btn-primary {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 5px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 100ms ease;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  background: #4f46e5;
+}
+
+.btn-primary:disabled {
+  background: #c7d2fe;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  padding: 6px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.btn-danger {
+  padding: 6px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 5px;
+  background: #fff;
+  color: #dc2626;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+  white-space: nowrap;
+}
+
+.btn-danger:hover {
+  background: #fef2f2;
+  border-color: #f87171;
+}

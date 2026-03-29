@@ -47,7 +47,7 @@ const defaultSettings: Settings = {
  * Send a command to the sidecar and wait for the matching response on 'agent-event'.
  * Commands include a request ID; responses are matched by ID to handle out-of-order delivery.
  */
-async function sendAndReceive<T>(command: object & { id: string }): Promise<T> {
+async function sendAndReceive<T>(command: Record<string, unknown> & { id: string }): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {
       unlisten()
