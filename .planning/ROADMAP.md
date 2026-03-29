@@ -88,7 +88,13 @@ Plans:
   5. Agent generates structured child notes under the triggered node using ancestors as Pi session context
   6. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
   7. User can cancel an in-progress generation cleanly
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Node.js sidecar scaffold, Rust bridge commands, encrypted keystore, Tauri shell capabilities
+- [ ] 04-02-PLAN.md — Settings page UI with API key management and gear icon navigation
+- [ ] 04-03-PLAN.md — Slash command TipTap extension, agent store, context building from ancestors
+- [ ] 04-04-PLAN.md — Sidecar skill dispatch, streaming into tree, cancellation, inline generation mode
 
 ### Phase 5: Skills and Agent UI
 **Goal**: Users can run the built-in research skill out of the box and configure their own custom skills using Pi's skill/extension system
@@ -114,14 +120,14 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
 | 2. Core Outliner | 3/3 | Complete   | 2026-03-24 |
 | 3. Search and Editing | 6/7 | In Progress|  |
-| 4. Agent Infrastructure | 0/TBD | Not started | - |
+| 4. Agent Infrastructure | 0/4 | Not started | - |
 | 5. Skills and Agent UI | 0/TBD | Not started | - |
 | 6. iCloud Sync and Distribution | 0/TBD | Not started | - |
 
