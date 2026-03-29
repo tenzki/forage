@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Phase 4 context gathered
-last_updated: "2026-03-29T06:30:48.708Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-29T07:04:41.171Z"
 last_activity: 2026-03-24 — Roadmap created, ready for Phase 1 planning
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 12
-  completed_plans: 11
+  total_plans: 16
+  completed_plans: 12
   percent: 0
 ---
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03-search-and-editing P03 | 10min | 2 tasks | 14 files |
 | Phase 03-search-and-editing P05 | 15min | 2 tasks | 4 files |
 | Phase 03-search-and-editing P06 | 20min | 2 tasks | 4 files |
+| Phase 04-agent-infrastructure P01 | 5min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -109,6 +110,9 @@ Recent decisions affecting current work:
 - [Phase 03-search-and-editing]: readOnlyExtensions array defined outside NodeRow component for stable TipTap extension reference
 - [Phase 03-search-and-editing]: __create__:tagname prefix convention signals create-new action in hashtag suggestion items without changing string[] type contract
 - [Phase 03-search-and-editing]: StarterKit undoRedo:false replaces history:false — API renamed in installed version
+- [Phase 04-agent-infrastructure]: Agent commands excluded from tauri-specta collect_commands — tauri::State and AppHandle don't derive Specta; registered in tauri::generate_handler\! instead
+- [Phase 04-agent-infrastructure]: Placeholder binary ai-sidecar-aarch64-apple-darwin required for Tauri externalBin build validation — real pkg binary added in Plan 04
+- [Phase 04-agent-infrastructure]: rewriteRelativeImportExtensions in tsconfig for NodeNext .ts imports — rewrites to .js in output without noEmit
 
 ### Pending Todos
 
@@ -123,6 +127,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-29T06:30:48.699Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-agent-infrastructure/04-CONTEXT.md
+Last session: 2026-03-29T07:04:41.169Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
