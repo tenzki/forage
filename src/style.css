@@ -536,6 +536,122 @@ body.is-dragging * {
   letter-spacing: 0.05em;
 }
 
+/* Sidebar section tabs (Tags / Settings) */
+.tag-sidebar-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.tag-sidebar-tab {
+  flex: 1;
+  padding: 5px 8px;
+  border: none;
+  background: none;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+  font-family: inherit;
+}
+
+.tag-sidebar-tab:hover {
+  background: #f3f4f6;
+  color: #1a1a1a;
+}
+
+.tag-sidebar-tab--active {
+  background: #f3f4f6;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* Settings panel inside the sidebar */
+.tag-sidebar-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 2px;
+}
+
+.sidebar-settings-loading {
+  color: #9ca3af;
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.sidebar-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-settings-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.sidebar-settings-section-desc {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-top: -4px;
+  line-height: 1.4;
+}
+
+.sidebar-settings-model-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1a1a1a;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+
+.sidebar-settings-model-select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+/* Collapsed sidebar: stacked icon buttons */
+.tag-sidebar-collapsed-icons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.sidebar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: none;
+  color: #6b7280;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.sidebar-icon-btn:hover {
+  background: #f3f4f6;
+  color: #1a1a1a;
+}
+
 .tag-list-item {
   display: flex;
   justify-content: space-between;

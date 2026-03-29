@@ -2,16 +2,13 @@ import { useEffect, useState } from 'react'
 import OutlinerView from './components/Outliner/OutlinerView'
 import SearchOverlay from './components/Search/SearchOverlay'
 import TagSidebar from './components/TagSidebar/TagSidebar'
-import SettingsPage from './components/Settings/SettingsPage'
 import { useTreeStore } from './store/treeStore'
 
-type CurrentView = 'outliner' | 'settings'
-
 export default function App() {
-  const [currentView, setCurrentView] = useState<CurrentView>('outliner')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [focusSettings, setFocusSettings] = useState(false)
   const undo = useTreeStore((s) => s.undo)
   const redo = useTreeStore((s) => s.redo)
   const registerTagClickHandler = useTreeStore((s) => s.registerTagClickHandler)
@@ -46,10 +43,11 @@ export default function App() {
         e.preventDefault()
         redo().catch(console.error)
       }
-      // Cmd+, opens settings
+      // Cmd+, opens settings section in sidebar
       if (e.metaKey && e.key === ',') {
         e.preventDefault()
-        setCurrentView((v) => v === 'settings' ? 'outliner' : 'settings')
+        setSidebarOpen(true)
+        setFocusSettings(true)
       }
     }
     window.addEventListener('keydown', handler, { capture: true })
@@ -66,16 +64,13 @@ export default function App() {
     setSearchQuery('')
   }
 
-  if (currentView === 'settings') {
-    return <SettingsPage onBack={() => setCurrentView('outliner')} />
-  }
-
   return (
     <div id="app" style={{ display: 'flex', flexDirection: 'row', position: 'relative' }}>
       <TagSidebar
         open={sidebarOpen}
         onTagClick={handleTagClick}
-        onSettingsClick={() => setCurrentView('settings')}
+        focusSettings={focusSettings}
+        onSettingsFocused={() => setFocusSettings(false)}
       />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <OutlinerView />
