@@ -45,9 +45,21 @@ const defaultSettings: Settings = {
 
 /**
  * Send a command to the sidecar and wait for the matching response on 'agent-event'.
- * Commands include a request ID; responses are matched by ID to handle out-of-order delivery.
+ * Commands include a request ID; responses are matched by both type and ID to avoid
+ * spurious resolution from unrelated events that lack an id field.
+ *
+ * Expected response types per command:
+ *   get_settings  -> 'settings'
+ *   save_settings -> 'settings_saved'
  */
+const RESPONSE_TYPES: Record<string, string> = {
+  get_settings: 'settings',
+  save_settings: 'settings_saved',
+}
+
 async function sendAndReceive<T>(command: Record<string, unknown> & { id: string }): Promise<T> {
+  const expectedType = RESPONSE_TYPES[command.type as string]
+
   return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {
       unlisten()
@@ -58,12 +70,17 @@ async function sendAndReceive<T>(command: Record<string, unknown> & { id: string
 
     listen<{ type: string; id?: string; data?: T; error?: string }>('agent-event', (event) => {
       const payload = event.payload
-      // Match by request ID if present
-      if (payload.id && payload.id !== command.id) return
+
+      // Must match by request ID — reject events without an id or with a different id
+      if (!payload.id || payload.id !== command.id) return
+
+      // Must match expected response type (if known) to avoid reacting to unrelated events
+      if (expectedType && payload.type !== expectedType && payload.type !== 'error') return
+
       clearTimeout(timeout)
       unlisten()
-      if (payload.error) {
-        reject(new Error(payload.error))
+      if (payload.type === 'error' || payload.error) {
+        reject(new Error(payload.error ?? `Sidecar returned error for command ${command.type}`))
       } else {
         resolve(payload.data as T)
       }
@@ -81,7 +98,8 @@ async function sendAndReceive<T>(command: Record<string, unknown> & { id: string
 }
 
 async function persistSettings(settings: Settings): Promise<void> {
-  await agentCommandIpc({ type: 'save_settings', data: settings })
+  const id = crypto.randomUUID()
+  await sendAndReceive<void>({ type: 'save_settings', id, data: settings })
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -91,26 +109,43 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   isLoaded: false,
 
   async loadSettings() {
-    try {
-      const id = crypto.randomUUID()
-      const data = await sendAndReceive<Settings>({ type: 'get_settings', id })
-      if (data && typeof data === 'object') {
-        // Merge with defaults to handle partial saved settings
-        const merged: Settings = {
-          providers: {
-            anthropic: { ...defaultSettings.providers.anthropic, ...data.providers?.anthropic },
-            openai:    { ...defaultSettings.providers.openai,    ...data.providers?.openai },
-            google:    { ...defaultSettings.providers.google,    ...data.providers?.google },
-          },
-          defaultModel: data.defaultModel ?? defaultSettings.defaultModel,
+    // Retry up to 5 times with 500ms delay to handle the startup race where the
+    // sidecar hasn't been spawned yet when the Settings page first mounts.
+    const MAX_ATTEMPTS = 5
+    const RETRY_DELAY_MS = 500
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const id = crypto.randomUUID()
+        const data = await sendAndReceive<Settings>({ type: 'get_settings', id })
+        if (data && typeof data === 'object') {
+          // Merge with defaults to handle partial saved settings
+          const merged: Settings = {
+            providers: {
+              anthropic: { ...defaultSettings.providers.anthropic, ...data.providers?.anthropic },
+              openai:    { ...defaultSettings.providers.openai,    ...data.providers?.openai },
+              google:    { ...defaultSettings.providers.google,    ...data.providers?.google },
+            },
+            defaultModel: data.defaultModel ?? defaultSettings.defaultModel,
+          }
+          set({ settings: merged, isLoaded: true })
+        } else {
+          // Sidecar returned empty/null data — no saved settings, use defaults
+          set({ isLoaded: true })
         }
-        set({ settings: merged, isLoaded: true })
-      } else {
+        return  // Success — stop retrying
+      } catch (err) {
+        const isSidecarNotRunning =
+          err instanceof Error && err.message.includes('Sidecar is not running')
+        if (isSidecarNotRunning && attempt < MAX_ATTEMPTS) {
+          // Sidecar still starting up — wait and retry
+          await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+          continue
+        }
+        // Non-retryable error or max retries exceeded — fall back to defaults silently
         set({ isLoaded: true })
+        return
       }
-    } catch {
-      // Sidecar not running or no settings yet — use defaults
-      set({ isLoaded: true })
     }
   },
 
