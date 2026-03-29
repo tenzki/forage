@@ -482,10 +482,49 @@ body.is-dragging * {
   width: 200px;
   border-right: 1px solid #e5e7eb;
   padding: 12px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   flex-shrink: 0;
   background: #fff;
+}
+
+.tag-sidebar--collapsed {
+  width: 44px;
+  padding: 8px 6px;
+}
+
+.tag-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tag-sidebar-footer {
+  flex-shrink: 0;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 8px;
+}
+
+.sidebar-settings-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: #6b7280;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+  text-align: left;
+}
+
+.sidebar-settings-item:hover {
+  background: #f3f4f6;
+  color: #1a1a1a;
 }
 
 .tag-sidebar-header {
@@ -590,34 +629,6 @@ body.is-dragging * {
 .slash-suggestion-description {
   font-size: 12px;
   color: #9ca3af;
-}
-
-/* ============================================================
-   Gear icon (settings trigger)
-   ============================================================ */
-.gear-icon {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: none;
-  color: #ccc;
-  border-radius: 5px;
-  cursor: pointer;
-  opacity: 0.4;
-  transition: opacity 150ms ease, color 150ms ease, background 150ms ease;
-  z-index: 10;
-}
-
-.gear-icon:hover {
-  opacity: 1;
-  color: #555;
-  background: #f3f4f6;
 }
 
 /* ============================================================

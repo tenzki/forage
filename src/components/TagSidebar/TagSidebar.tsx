@@ -6,13 +6,15 @@ import TagList from './TagList'
 interface TagSidebarProps {
   open: boolean
   onTagClick: (tag: string) => void
+  onSettingsClick: () => void
 }
 
 /**
  * Toggleable left sidebar showing all tags with node counts.
+ * Always renders — shows collapsed state (just footer nav) when closed.
  * Loads tags from the database on mount and whenever it becomes open.
  */
-export default function TagSidebar({ open, onTagClick }: TagSidebarProps) {
+export default function TagSidebar({ open, onTagClick, onSettingsClick }: TagSidebarProps) {
   const [tags, setTags] = useState<TagCount[]>([])
 
   useEffect(() => {
@@ -23,12 +25,39 @@ export default function TagSidebar({ open, onTagClick }: TagSidebarProps) {
       .catch((e) => console.error('Failed to load tags:', e))
   }, [open])
 
-  if (!open) return null
-
   return (
-    <div className="tag-sidebar">
-      <div className="tag-sidebar-header">Tags</div>
-      <TagList tags={tags} onTagClick={onTagClick} />
+    <div className={`tag-sidebar${open ? '' : ' tag-sidebar--collapsed'}`}>
+      {open && (
+        <>
+          <div className="tag-sidebar-header">Tags</div>
+          <div className="tag-sidebar-content">
+            <TagList tags={tags} onTagClick={onTagClick} />
+          </div>
+        </>
+      )}
+      <div className="tag-sidebar-footer">
+        <button
+          className="sidebar-settings-item"
+          onClick={onSettingsClick}
+          title="Settings (Cmd+,)"
+          aria-label="Open settings"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          {open && <span>Settings</span>}
+        </button>
+      </div>
     </div>
   )
 }
