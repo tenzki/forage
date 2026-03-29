@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import OutlinerView from './components/Outliner/OutlinerView'
 import SearchOverlay from './components/Search/SearchOverlay'
 import TagSidebar from './components/TagSidebar/TagSidebar'
+import SettingsPage from './components/Settings/SettingsPage'
 import { useTreeStore } from './store/treeStore'
+
+type MainView = 'outliner' | 'settings'
 
 export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [focusSettings, setFocusSettings] = useState(false)
+  const [mainView, setMainView] = useState<MainView>('outliner')
   const undo = useTreeStore((s) => s.undo)
   const redo = useTreeStore((s) => s.redo)
   const registerTagClickHandler = useTreeStore((s) => s.registerTagClickHandler)
@@ -18,6 +21,8 @@ export default function App() {
     registerTagClickHandler((tag: string) => {
       setSearchQuery('#' + tag)
       setSearchOpen(true)
+      // Clicking a tag returns to outliner view
+      setMainView('outliner')
     })
   }, [registerTagClickHandler])
 
@@ -43,11 +48,10 @@ export default function App() {
         e.preventDefault()
         redo().catch(console.error)
       }
-      // Cmd+, opens settings section in sidebar
+      // Cmd+, toggles settings view in the main panel
       if (e.metaKey && e.key === ',') {
         e.preventDefault()
-        setSidebarOpen(true)
-        setFocusSettings(true)
+        setMainView((v) => (v === 'settings' ? 'outliner' : 'settings'))
       }
     }
     window.addEventListener('keydown', handler, { capture: true })
@@ -57,11 +61,21 @@ export default function App() {
   function handleTagClick(tag: string) {
     setSearchQuery('#' + tag)
     setSearchOpen(true)
+    // Clicking a tag returns to outliner view
+    setMainView('outliner')
   }
 
   function handleSearchClose() {
     setSearchOpen(false)
     setSearchQuery('')
+  }
+
+  function handleSettingsClick() {
+    setMainView((v) => (v === 'settings' ? 'outliner' : 'settings'))
+  }
+
+  function handleSettingsBack() {
+    setMainView('outliner')
   }
 
   return (
@@ -70,11 +84,15 @@ export default function App() {
         open={sidebarOpen}
         onTagClick={handleTagClick}
         onToggle={() => setSidebarOpen((o) => !o)}
-        focusSettings={focusSettings}
-        onSettingsFocused={() => setFocusSettings(false)}
+        onSettingsClick={handleSettingsClick}
+        settingsActive={mainView === 'settings'}
       />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <OutlinerView />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+        {mainView === 'settings' ? (
+          <SettingsPage onBack={handleSettingsBack} />
+        ) : (
+          <OutlinerView />
+        )}
       </div>
 
       <SearchOverlay

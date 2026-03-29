@@ -764,12 +764,18 @@ body.is-dragging * {
    Settings page
    ============================================================ */
 .settings-page {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow-y: auto;
   background: #fff;
   display: flex;
   flex-direction: column;
+}
+
+/* Active state for the collapsed sidebar settings icon button */
+.sidebar-icon-btn--active {
+  background: #f3f4f6;
+  color: #1a1a1a;
 }
 
 .settings-header {

@@ -2,58 +2,25 @@ import { useEffect, useState } from 'react'
 import { getAllTagsIpc } from '../../store/ipc'
 import type { TagCount } from '../../store/ipc'
 import TagList from './TagList'
-import { useSettingsStore } from '../../store/settingsStore'
-import ProviderKeyInput from '../Settings/ProviderKeyInput'
 
 interface TagSidebarProps {
   open: boolean
   onTagClick: (tag: string) => void
   onToggle: () => void
-  /** If true, open the sidebar and switch to the settings section */
-  focusSettings?: boolean
-  onSettingsFocused?: () => void
+  /** Called when user clicks the Settings item */
+  onSettingsClick: () => void
+  /** Whether the settings view is currently active (for active state styling) */
+  settingsActive?: boolean
 }
-
-const ANTHROPIC_MODELS = [
-  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-  { value: 'claude-opus-4-20250514',   label: 'Claude Opus 4' },
-]
-
-const OPENAI_MODELS = [
-  { value: 'gpt-4o',      label: 'GPT-4o' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-]
-
-const GOOGLE_MODELS = [
-  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-  { value: 'gemini-2.5-pro',   label: 'Gemini 2.5 Pro' },
-]
-
-const ALL_MODELS = [...ANTHROPIC_MODELS, ...OPENAI_MODELS, ...GOOGLE_MODELS]
 
 /**
  * Toggleable left sidebar showing the tag list.
- * A "Settings" item at the bottom of the list expands a settings panel inline.
+ * A "Settings" item at the bottom calls onSettingsClick to swap the main panel.
+ * Settings does NOT render inside the sidebar.
  * Always renders — shows collapsed state (icon strip) when closed.
  */
-export default function TagSidebar({ open, onTagClick, onToggle, focusSettings, onSettingsFocused }: TagSidebarProps) {
+export default function TagSidebar({ open, onTagClick, onToggle, onSettingsClick, settingsActive }: TagSidebarProps) {
   const [tags, setTags] = useState<TagCount[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
-
-  const settings = useSettingsStore((s) => s.settings)
-  const isLoaded = useSettingsStore((s) => s.isLoaded)
-  const loadSettings = useSettingsStore((s) => s.loadSettings)
-  const saveProviderKey = useSettingsStore((s) => s.saveProviderKey)
-  const removeProviderKey = useSettingsStore((s) => s.removeProviderKey)
-  const setDefaultModel = useSettingsStore((s) => s.setDefaultModel)
-
-  // When focusSettings signal arrives, open sidebar and expand settings
-  useEffect(() => {
-    if (focusSettings) {
-      setSettingsOpen(true)
-      onSettingsFocused?.()
-    }
-  }, [focusSettings, onSettingsFocused])
 
   // Load tags whenever the sidebar becomes open
   useEffect(() => {
@@ -62,17 +29,6 @@ export default function TagSidebar({ open, onTagClick, onToggle, focusSettings, 
       .then(setTags)
       .catch((e) => console.error('Failed to load tags:', e))
   }, [open])
-
-  // Load settings whenever the settings panel is expanded
-  useEffect(() => {
-    if (settingsOpen) {
-      loadSettings()
-    }
-  }, [settingsOpen, loadSettings])
-
-  function handleSettingsItemClick() {
-    setSettingsOpen((prev) => !prev)
-  }
 
   return (
     <div className={`tag-sidebar${open ? '' : ' tag-sidebar--collapsed'}`}>
@@ -83,12 +39,12 @@ export default function TagSidebar({ open, onTagClick, onToggle, focusSettings, 
             <TagList tags={tags} onTagClick={onTagClick} />
           </div>
 
-          {/* Settings list item — styled like a tag item */}
+          {/* Settings list item — styled like a tag item, at the bottom */}
           <div className="tag-sidebar-footer">
             <button
-              className={`sidebar-settings-item${settingsOpen ? ' sidebar-settings-item--active' : ''}`}
-              onClick={handleSettingsItemClick}
-              aria-expanded={settingsOpen}
+              className={`sidebar-settings-item${settingsActive ? ' sidebar-settings-item--active' : ''}`}
+              onClick={onSettingsClick}
+              aria-pressed={settingsActive}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="3" />
@@ -96,63 +52,6 @@ export default function TagSidebar({ open, onTagClick, onToggle, focusSettings, 
               </svg>
               Settings
             </button>
-
-            {/* Inline settings panel — expands below the Settings item */}
-            {settingsOpen && (
-              <div className="tag-sidebar-settings">
-                {!isLoaded ? (
-                  <div className="sidebar-settings-loading">Loading...</div>
-                ) : (
-                  <>
-                    <div className="sidebar-settings-section">
-                      <div className="sidebar-settings-section-title">API Keys</div>
-                      <p className="sidebar-settings-section-desc">
-                        Stored encrypted on your device.
-                      </p>
-                      <ProviderKeyInput
-                        provider="anthropic"
-                        label="Anthropic"
-                        config={settings.providers.anthropic}
-                        onSave={(key) => saveProviderKey('anthropic', key)}
-                        onRemove={() => removeProviderKey('anthropic')}
-                      />
-                      <ProviderKeyInput
-                        provider="openai"
-                        label="OpenAI"
-                        config={settings.providers.openai}
-                        onSave={(key) => saveProviderKey('openai', key)}
-                        onRemove={() => removeProviderKey('openai')}
-                      />
-                      <ProviderKeyInput
-                        provider="google"
-                        label="Google"
-                        config={settings.providers.google}
-                        onSave={(key) => saveProviderKey('google', key)}
-                        onRemove={() => removeProviderKey('google')}
-                      />
-                    </div>
-
-                    <div className="sidebar-settings-section">
-                      <div className="sidebar-settings-section-title">Default Model</div>
-                      <p className="sidebar-settings-section-desc">
-                        Used when no model is specified.
-                      </p>
-                      <select
-                        className="sidebar-settings-model-select"
-                        value={settings.defaultModel}
-                        onChange={(e) => setDefaultModel(e.target.value)}
-                      >
-                        {ALL_MODELS.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </>
       )}
@@ -172,13 +71,10 @@ export default function TagSidebar({ open, onTagClick, onToggle, focusSettings, 
             </svg>
           </button>
           <button
-            className="sidebar-icon-btn"
+            className={`sidebar-icon-btn${settingsActive ? ' sidebar-icon-btn--active' : ''}`}
             title="Settings (Cmd+,)"
             aria-label="Open settings"
-            onClick={() => {
-              onToggle()
-              setSettingsOpen(true)
-            }}
+            onClick={onSettingsClick}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
