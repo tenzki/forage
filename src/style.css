@@ -497,6 +497,7 @@ body.is-dragging * {
 .tag-sidebar-content {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .tag-sidebar-footer {
@@ -504,6 +505,11 @@ body.is-dragging * {
   padding-top: 8px;
   border-top: 1px solid #e5e7eb;
   margin-top: 8px;
+  /* When settings panel expands, allow it to take space and scroll */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 70%;
 }
 
 .sidebar-settings-item {
@@ -511,7 +517,7 @@ body.is-dragging * {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 4px 8px;
   border: none;
   background: none;
   color: #6b7280;
@@ -520,9 +526,15 @@ body.is-dragging * {
   cursor: pointer;
   transition: background 100ms ease, color 100ms ease;
   text-align: left;
+  font-family: inherit;
 }
 
 .sidebar-settings-item:hover {
+  background: #f3f4f6;
+  color: #1a1a1a;
+}
+
+.sidebar-settings-item--active {
   background: #f3f4f6;
   color: #1a1a1a;
 }
@@ -571,12 +583,13 @@ body.is-dragging * {
   font-weight: 600;
 }
 
-/* Settings panel inside the sidebar */
+/* Settings panel inside the sidebar — expands inline below the Settings item */
 .tag-sidebar-settings {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-right: 2px;
+  padding: 10px 4px 4px 4px;
+  overflow-y: auto;
 }
 
 .sidebar-settings-loading {

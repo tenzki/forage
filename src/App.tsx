@@ -69,6 +69,7 @@ export default function App() {
       <TagSidebar
         open={sidebarOpen}
         onTagClick={handleTagClick}
+        onToggle={() => setSidebarOpen((o) => !o)}
         focusSettings={focusSettings}
         onSettingsFocused={() => setFocusSettings(false)}
       />
