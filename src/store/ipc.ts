@@ -257,3 +257,14 @@ export async function getAncestorsIpc(nodeId: string): Promise<AncestorNode[]> {
     throw new Error(typeof e === 'string' ? e : JSON.stringify(e))
   }
 }
+
+// ─── Agent IPC ────────────────────────────────────────────────────────────────
+
+/**
+ * Send a JSON command to the Node.js sidecar via the Rust bridge.
+ * Fire-and-forget: responses arrive asynchronously on the 'agent-event' channel.
+ * Use listen('agent-event', callback) to receive responses.
+ */
+export async function agentCommandIpc(command: object): Promise<void> {
+  await invoke('agent_command', { command: JSON.stringify(command) })
+}
