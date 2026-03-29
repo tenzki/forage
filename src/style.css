@@ -550,3 +550,44 @@ body.is-dragging * {
   color: #2563eb;
   border-top: 1px solid #f3f4f6;
 }
+
+/* ============================================================
+   Slash command suggestion popup
+   ============================================================ */
+.slash-suggestion-popup {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  max-height: 240px;
+  overflow-y: auto;
+  min-width: 220px;
+}
+
+.slash-suggestion-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 80ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.slash-suggestion-item:hover {
+  background: #f3f4f6;
+}
+
+.slash-suggestion-item--active {
+  background: #f3f4f6;
+}
+
+.slash-suggestion-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.slash-suggestion-description {
+  font-size: 12px;
+  color: #9ca3af;
+}
