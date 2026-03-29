@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import type { TreeNode } from '../../types/tree'
 import { useTreeStore } from '../../store/treeStore'
 import { HashtagNode } from '../../extensions/HashtagNode'
-import { SlashCommand } from '../../extensions/SlashCommand'
+import { SlashCommand, isSlashSuggestionActive } from '../../extensions/SlashCommand'
 import { useAgentStore } from '../../store/agentStore'
 
 interface OutlinerKeysOptions {
@@ -64,6 +64,8 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
 
     return {
       Enter: () => {
+        // Yield to slash suggestion popup when active — its onKeyDown handles Enter
+        if (isSlashSuggestionActive) return false
         opts.onEnter()
         return true // Prevent TipTap from inserting a paragraph
       },
@@ -127,11 +129,15 @@ const OutlinerKeys = Extension.create<OutlinerKeysOptions>({
       },
 
       ArrowUp: () => {
+        // Yield to slash suggestion popup when active — its onKeyDown handles navigation
+        if (isSlashSuggestionActive) return false
         opts.onFocusPrev()
         return true
       },
 
       ArrowDown: () => {
+        // Yield to slash suggestion popup when active — its onKeyDown handles navigation
+        if (isSlashSuggestionActive) return false
         opts.onFocusNext()
         return true
       },

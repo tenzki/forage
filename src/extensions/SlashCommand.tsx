@@ -1,4 +1,5 @@
 import { Node } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
 import Suggestion from '@tiptap/suggestion'
 import { createPortal } from 'react-dom'
 import { useState, useEffect, useCallback } from 'react'
@@ -150,6 +151,15 @@ function SlashSuggestionPopup({ items, command, clientRect }: SlashSuggestionPop
   )
 }
 
+// ─── Active Suggestion State ──────────────────────────────────────────────────
+
+/**
+ * Module-level flag: true while the slash suggestion popup is visible.
+ * Read by OutlinerKeys to yield Enter/Arrow events to the suggestion plugin
+ * instead of consuming them for node navigation.
+ */
+export let isSlashSuggestionActive = false
+
 // ─── Extension Options ────────────────────────────────────────────────────────
 
 export interface SlashCommandOptions {
@@ -215,6 +225,7 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
 
     return [
       Suggestion({
+        pluginKey: new PluginKey('slashSuggestion'),
         editor: this.editor,
         char: '/',
         startOfLine: false,
@@ -263,6 +274,7 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
 
           return {
             onStart: (props) => {
+              isSlashSuggestionActive = true
               clientRectFn = props.clientRect ?? null
               currentItems = props.items as Skill[]
               currentCommand = props.command as unknown as (skill: Skill) => void
@@ -275,6 +287,7 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
             },
 
             onUpdate: (props) => {
+              isSlashSuggestionActive = true
               clientRectFn = props.clientRect ?? null
               currentItems = props.items as Skill[]
               currentCommand = props.command as unknown as (skill: Skill) => void
@@ -301,6 +314,7 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
             },
 
             onExit: () => {
+              isSlashSuggestionActive = false
               renderPopup(null)
             },
           }
