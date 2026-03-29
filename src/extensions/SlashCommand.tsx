@@ -324,6 +324,11 @@ export const SlashCommand = Node.create<SlashCommandOptions>({
 
             onExit: () => {
               isSlashSuggestionActive = false
+              // Clear stale references BEFORE the async unmount so the still-mounted
+              // popup's capture-phase Enter listener cannot re-invoke the command
+              // with a stale range while React schedules the component unmount.
+              currentItems = []
+              currentCommand = null
               renderPopup(null)
             },
           }
