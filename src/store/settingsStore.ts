@@ -68,8 +68,17 @@ async function sendAndReceive<T>(command: Record<string, unknown> & { id: string
 
     let unlisten: () => void = () => {}
 
-    listen<{ type: string; id?: string; data?: T; error?: string }>('agent-event', (event) => {
-      const payload = event.payload
+    // The Rust bridge emits raw JSON strings on 'agent-event', not parsed objects.
+    // Parse the string payload before inspecting fields (same pattern as agentStore.ts).
+    listen<string>('agent-event', (event) => {
+      let payload: { type: string; id?: string; data?: T; error?: string }
+      try {
+        payload = typeof event.payload === 'string'
+          ? JSON.parse(event.payload)
+          : (event.payload as typeof payload)
+      } catch {
+        return // malformed JSON — ignore this event
+      }
 
       // Must match by request ID — reject events without an id or with a different id
       if (!payload.id || payload.id !== command.id) return
