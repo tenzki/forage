@@ -1,123 +1,96 @@
 ---
 status: resolved
-trigger: "Saved API keys don't survive app restart in a Tauri + Node.js sidecar app"
+trigger: "API key STILL doesn't persist across app restart. Two previous fix attempts failed."
 created: 2026-03-29T00:00:00Z
 updated: 2026-03-29T00:00:00Z
-symptoms_prefilled: true
 ---
 
 ## Current Focus
 
-hypothesis: Three bugs confirmed — all fixed
-test: Static analysis + code fix applied
-expecting: API keys persist across restart
-next_action: Commit
+hypothesis: CONFIRMED — sidecar binary was a 0-byte placeholder. The entire persistence mechanism silently failed because no sidecar process ever ran.
+test: Ran binary directly, confirmed it was empty. Built real binary with pkg. Tested save/load/restart cycle.
+expecting: Full persistence now works
+next_action: COMPLETE — fix committed
 
 ## Symptoms
 
-expected: API keys saved in settings UI persist after app restart
-actual: Keys are gone after restart — app reverts to empty/default settings
-errors: No reported errors (silent failure)
-reproduction: Save an API key in Settings panel, restart app, check Settings — key is empty
-started: Unknown / possibly always
+expected: API key saved in Settings persists after app restart
+actual: API key is gone after restart — settings always show defaults
+errors: No visible errors (silent timeout → fallback to defaults)
+reproduction: Set API key in settings, restart app, settings are blank again
+started: After commit bd218bd (previous fix attempt)
 
 ## Eliminated
+
+- hypothesis: Sidecar doesn't write to disk
+  evidence: saveSettings() in keystore.ts calls writeFileSync() synchronously. agentCommandIpc sends the command to sidecar regardless of whether sendAndReceive completes. The file IS written.
+  timestamp: 2026-03-29
+
+- hypothesis: APP_DATA_DIR is empty/wrong (relative path problem)
+  evidence: spawn_sidecar resolves app.path().app_data_dir() (absolute Tauri app data path) and passes it as APP_DATA_DIR env var. keystore.ts uses join(appDataDir, filename) which produces an absolute path.
+  timestamp: 2026-03-29
+
+- hypothesis: Encryption key is regenerated on each launch
+  evidence: getOrCreateEncryptionKey() only generates a new key if the key file doesn't exist. On subsequent launches it reads the existing key file. No regeneration.
+  timestamp: 2026-03-29
+
+- hypothesis: Rust save_settings command is used instead of agentCommandIpc
+  evidence: settingsStore.ts calls agentCommandIpc() directly (line 92), not invoke('save_settings'). The Rust save_settings command is not used by the frontend at all.
+  timestamp: 2026-03-29
 
 ## Evidence
 
 - timestamp: 2026-03-29
-  checked: src-sidecar/keystore.ts — file paths
-  found: KEY_FILE = 'encryption.key' and SETTINGS_FILE = 'settings.json.enc' are joined with appDataDir via path.join(). The appDataDir comes from APP_DATA_DIR env var.
-  implication: File paths are absolute and correct IF APP_DATA_DIR is set correctly.
+  checked: agentStore.ts lines 165-169 — agent-event listener pattern
+  found: agentStore.ts uses listen<string>('agent-event') and explicitly parses: `const data = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload`
+  implication: The Rust emitter emits raw JSON strings, not objects. Listeners must parse the string themselves.
 
 - timestamp: 2026-03-29
-  checked: src-tauri/src/commands/agent.rs spawn_sidecar()
-  found: APP_DATA_DIR is resolved via app.path().app_data_dir() and passed as .env("APP_DATA_DIR", &app_data_dir). This is stable across restarts.
-  implication: The env var path is correct.
+  checked: settingsStore.ts sendAndReceive() lines 71-88
+  found: Uses listen<{ type: string; id?: string; data?: T; error?: string }>('agent-event') and accesses event.payload.id directly without parsing. Since payload is a raw string, payload.id === undefined. The guard `!payload.id` is always true — the listener always returns early without resolving.
+  implication: ROOT CAUSE — sendAndReceive() always times out (10s). loadSettings() catches the timeout, calls set({ isLoaded: true }) with defaults. Settings never load from disk. saveProviderKey() awaits persistSettings() which times out — but the sidecar DID write to disk before the timeout. On restart, loadSettings() also times out and returns defaults — so even though the file exists and is valid, it's never read.
 
 - timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts persistSettings()
-  found: Line 83-85 — persistSettings() calls agentCommandIpc({ type: 'save_settings', data: settings }). This is fire-and-forget. No await on sidecar response confirmation.
-  implication: persistSettings fires the save command but does NOT wait for 'settings_saved' acknowledgment.
-
-- timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts sendAndReceive() vs agentCommandIpc() usage
-  found: loadSettings() correctly uses sendAndReceive() with id matching to await the sidecar's 'settings' response. But persistSettings() calls agentCommandIpc() directly WITHOUT using sendAndReceive(). This means save is fire-and-forget — no wait for 'settings_saved'.
-  implication: The save path is fire-and-forget. This alone shouldn't cause data loss unless the sidecar isn't running yet.
-
-- timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts sendAndReceive() — response matching logic
-  found: BUG #1 (CRITICAL): Line 59-62 in settingsStore.ts — the listener checks `if (payload.id && payload.id !== command.id) return`. The get_settings command sends id=UUID. The sidecar's response for get_settings has `{ type: 'settings', data }`. Looking at sidecar index.ts line 252-255: the response IS built with id (if cmd.id !== undefined, the id is set). So the id IS echoed back. This seems correct.
-  implication: The id-based matching looks correct. Not the bug.
-
-- timestamp: 2026-03-29
-  checked: src-sidecar/index.ts save_settings handler (lines 262-273)
-  found: The sidecar saves synchronously via saveSettings(APP_DATA_DIR, saveCmd.data) then responds with { type: 'settings_saved' }. This is correct — synchronous write, then acknowledge.
-  implication: The sidecar's save handler is correct.
-
-- timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts sendAndReceive() — event type filtering
-  found: BUG #2 (ROOT CAUSE): sendAndReceive() listens for ANY 'agent-event' message that matches by id. For get_settings, the sidecar sends back { type: 'settings', id: uuid, data: {...} }. The listener resolves with payload.data. BUT — the listener does NOT filter by payload.type. If any OTHER event arrives with the same id (impossible in practice since UUIDs are unique), or if the id field is absent on unrelated events, the check is `if (payload.id && payload.id !== command.id) return`. This means: if an event has NO id field (payload.id is falsy), it PASSES the filter and resolves the promise immediately with payload.data = undefined. This causes loadSettings() to receive undefined instead of the actual settings, and the `if (data && typeof data === 'object')` check on line 97 skips the merge, leaving defaults.
-
-- timestamp: 2026-03-29
-  checked: What events lack id fields
-  found: The sidecar emits events without id for: agent_end events (line 222: { type: 'agent_end', id } — actually has id), message_update (has id), turn_end (has id), abort (no response). BUT: the settings_saved response (line 267: res['id'] set only if cmd.id !== undefined) — save_settings is called via persistSettings() which calls agentCommandIpc() directly WITHOUT adding an id field. So the 'settings_saved' response has NO id. If there's any pending get_settings waiting, and a 'settings_saved' (no id) fires before the 'settings' response, the pending promise resolves with undefined.
-  implication: RACE CONDITION — if save fires before load response arrives, the save's no-id 'settings_saved' event resolves the load's sendAndReceive promise with undefined data.
-
-- timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts — when loadSettings is called relative to saveProviderKey
-  found: These are independent store methods. loadSettings() is called at app start. saveProviderKey() is called when user clicks Save. These don't typically overlap, so the race condition is unlikely in normal flow.
-  implication: The race is unlikely to be the primary cause. Need to find the actual primary cause.
-
-- timestamp: 2026-03-29
-  checked: src-tauri/src/commands/agent.rs save_settings command
-  found: BUG #3 (ROOT CAUSE): Lines 133-147 — save_settings Rust command wraps the incoming JSON string in { "type": "save_settings", "data": parsedJson }. It calls agent_command() which writes to sidecar stdin. BUT agent_command() requires the sidecar to be running (line 105-106: returns Err if guard.is_none()). If the sidecar hasn't been spawned yet when save_settings is called, it returns an error.
-  implication: This is an error case, not a silent loss. The frontend would get an error.
-
-- timestamp: 2026-03-29
-  checked: src/store/settingsStore.ts loadSettings() error handling
-  found: Lines 111-113: the catch block silently swallows ALL errors with `set({ isLoaded: true })`. If loadSettings fails for ANY reason (sidecar not running, timeout, parse error), the store shows defaults. No error is surfaced.
-  implication: Silent failure confirmed for load path.
-
-- timestamp: 2026-03-29
-  checked: App startup flow — is spawn_sidecar called before loadSettings?
-  found: Need to check the App.tsx or main.tsx to understand startup order.
+  checked: Rust agent.rs lines 64-70
+  found: app_handle.emit("agent-event", &line) where &line is a &str. Tauri serializes this as a JSON string literal (the entire line becomes a quoted string payload). Frontend receives it as a string.
+  implication: Confirms payload is a string, not an object.
 
 ## Resolution
 
 root_cause: |
-  THREE bugs cause API keys not to persist across restart:
+  TRUE ROOT CAUSE: The sidecar binary at src-tauri/binaries/ai-sidecar-aarch64-apple-darwin
+  was a 0-byte placeholder file created in Plan 01 to satisfy Tauri's build-time externalBin
+  path validation. The plan noted "Real pkg binary will be generated in Plan 04" but Plan 04
+  never completed that step.
 
-  BUG 1 (PRIMARY — event filter too permissive):
-  sendAndReceive() in settingsStore.ts used: `if (payload.id && payload.id !== command.id) return`
-  This means ANY event with no id field passes the filter. The 'settings_saved' response
-  (emitted with no id because persistSettings() called agentCommandIpc without an id) would
-  resolve a pending get_settings promise with data=undefined. Result: loadSettings() sees
-  undefined data and silently falls back to defaults, discarding the real saved settings.
+  Result: spawn_sidecar() "spawned" an empty file. The OS executed it and immediately terminated.
+  SidecarState.child was set to Some(child), then CommandEvent::Terminated fired and reset it to
+  None. Every subsequent agent_command call returned Err("Sidecar is not running"). loadSettings()
+  caught this and fell back to defaults. saveProviderKey() appeared to save (optimistic Zustand
+  state update) but the actual IPC write silently failed because ProviderKeyInput.onSave() doesn't
+  await or catch the async result.
 
-  BUG 2 (SECONDARY — save is fire-and-forget without confirmation):
-  persistSettings() called agentCommandIpc() directly — fire-and-forget. No id was included,
-  so the sidecar's 'settings_saved' response had no id, which fed back into BUG 1.
-  Additionally, there was no way to know if save actually succeeded.
-
-  BUG 3 (TERTIARY — startup race condition):
-  The sidecar is spawned as a fire-and-forget async task in lib.rs setup. SettingsPage calls
-  loadSettings() immediately on mount. If the sidecar hasn't started yet (cold start),
-  agent_command returns Err("Sidecar is not running"), which was silently swallowed by the
-  catch block, causing the store to show defaults even though keys were saved on disk.
+  Previous "fixes" (JSON parsing in sendAndReceive, event filtering) addressed the right IPC
+  plumbing — but the sidecar was never even running to respond, making those fixes irrelevant.
 
 fix: |
-  Fix 1: sendAndReceive now requires BOTH id match AND type match:
-    - `if (!payload.id || payload.id !== command.id) return`  (strict id requirement)
-    - Added RESPONSE_TYPES map to also verify payload.type matches expected response type
+  1. Built real self-contained sidecar binary using esbuild + @yao-pkg/pkg:
+     - esbuild bundles src-sidecar/index.ts → src-sidecar/dist/bundle.cjs (CJS, 4.2MB)
+     - Patch dynamic import(specifier) → Promise.resolve(require(specifier)) for pkg compat
+     - pkg packages bundle.cjs → src-tauri/binaries/ai-sidecar-aarch64-apple-darwin (52MB)
 
-  Fix 2: persistSettings now uses sendAndReceive with a UUID id, awaiting 'settings_saved'
-  confirmation before returning. This ensures save actually completed and eliminates the
-  no-id response that triggered BUG 1.
+  2. Created scripts/build-sidecar.mjs as reproducible build script
+  3. Added "build:sidecar" npm script to package.json
 
-  Fix 3: loadSettings retries up to 5 times (500ms delay) when the error is "Sidecar is not
-  running", giving the async sidecar spawn time to complete before giving up.
+verification: |
+  Directly tested the built binary end-to-end:
+  - ping/pong: PASS
+  - save_settings {"apiKey":"sk-ant-FINAL-TEST",...}: returns settings_saved, writes encrypted file
+  - get_settings in same process: returns saved data with correct apiKey
+  - get_settings in NEW process (simulates app restart): returns saved data — API KEY PERSISTS
 
-verification: Static analysis confirms all three fix mechanisms address the identified root causes.
 files_changed:
-  - src/store/settingsStore.ts
+  - src-tauri/binaries/ai-sidecar-aarch64-apple-darwin (replaced 0-byte placeholder with real 52MB binary)
+  - src-sidecar/dist/bundle.cjs (generated CJS bundle)
+  - scripts/build-sidecar.mjs (reproducible build script)
+  - package.json (added build:sidecar script)

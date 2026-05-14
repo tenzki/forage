@@ -25,8 +25,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Agent
 
-- [ ] **AGNT-01**: User can trigger agent actions via slash commands (e.g., `/research topic`)
-- [ ] **AGNT-02**: Agent generates structured child notes using branch context (ancestors + siblings)
+- [x] **AGNT-01**: User can trigger agent actions via slash commands (e.g., `/research topic`)
+- [x] **AGNT-02**: Agent generates structured child notes using branch context (ancestors + siblings)
 - [ ] **AGNT-03**: Agent can generate inline content on the current node
 - [ ] **AGNT-04**: User can create and configure custom skills (system prompt + model config)
 - [ ] **AGNT-05**: At least one built-in skill (research) works out of the box
@@ -88,8 +88,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EDIT-02 | Phase 3 | Complete |
 | EDIT-03 | Phase 3 | Complete |
 | EDIT-04 | Phase 3 | Complete |
-| AGNT-01 | Phase 4 | Pending |
-| AGNT-02 | Phase 4 | Pending |
+| AGNT-01 | Phase 4 | Complete |
+| AGNT-02 | Phase 4 | Complete |
 | AGNT-03 | Phase 5 | Pending |
 | AGNT-04 | Phase 5 | Pending |
 | AGNT-05 | Phase 5 | Pending |

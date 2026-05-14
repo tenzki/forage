@@ -43,27 +43,52 @@ pub async fn search_nodes(
         return Ok(vec![]);
     }
 
-    // Escape special FTS5 characters and append * for prefix matching.
-    let fts_query = format!("\"{}\"*", trimmed.replace('"', "\"\""));
+    // Tag search: queries starting with '#' search the node_tags table.
+    let rows = if let Some(tag) = trimmed.strip_prefix('#') {
+        if tag.is_empty() {
+            return Ok(vec![]);
+        }
+        sqlx::query(
+            r#"
+            SELECT
+                n.id,
+                n.parent_id,
+                n.node_type,
+                n.content_text AS snippet_text
+            FROM node_tags nt
+            JOIN nodes n ON n.id = nt.node_id
+            WHERE nt.tag = ?1
+            ORDER BY n.updated_at DESC
+            LIMIT 20
+            "#,
+        )
+        .bind(tag)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| AppError::Db(e.to_string()))?
+    } else {
+        // Escape special FTS5 characters and append * for prefix matching.
+        let fts_query = format!("\"{}\"*", trimmed.replace('"', "\"\""));
 
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            n.id,
-            n.parent_id,
-            n.node_type,
-            snippet(nodes_fts, 0, '<mark>', '</mark>', '...', 20) AS snippet_text
-        FROM nodes_fts
-        JOIN nodes n ON n.rowid = nodes_fts.rowid
-        WHERE nodes_fts MATCH ?1
-        ORDER BY rank
-        LIMIT 20
-        "#,
-    )
-    .bind(&fts_query)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| AppError::Db(e.to_string()))?;
+        sqlx::query(
+            r#"
+            SELECT
+                n.id,
+                n.parent_id,
+                n.node_type,
+                snippet(nodes_fts, 0, '<mark>', '</mark>', '...', 20) AS snippet_text
+            FROM nodes_fts
+            JOIN nodes n ON n.rowid = nodes_fts.rowid
+            WHERE nodes_fts MATCH ?1
+            ORDER BY rank
+            LIMIT 20
+            "#,
+        )
+        .bind(&fts_query)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| AppError::Db(e.to_string()))?
+    };
 
     let results = rows
         .iter()

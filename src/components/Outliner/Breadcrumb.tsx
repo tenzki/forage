@@ -10,18 +10,16 @@ export default function Breadcrumb() {
   const zoomedNodeId = useTreeStore((s) => s.zoomedNodeId)
   const zoomOut = useTreeStore((s) => s.zoomOut)
 
-  if (zoomedNodeId === null) return null
-
   return (
     <nav className="breadcrumb" aria-label="Zoom navigation">
-      {/* Home segment always present */}
-      <button
+      {/* Home segment always visible */}
+      <span
         className="breadcrumb-segment breadcrumb-link"
-        onClick={() => zoomOut(null)}
-        type="button"
+        onClick={zoomedNodeId !== null ? () => zoomOut(null) : undefined}
+        role={zoomedNodeId !== null ? 'button' : undefined}
       >
         Home
-      </button>
+      </span>
 
       {breadcrumb.map((item, index) => {
         const isLast = index === breadcrumb.length - 1

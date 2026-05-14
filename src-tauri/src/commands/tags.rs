@@ -10,7 +10,7 @@ use crate::errors::AppError;
 #[serde(rename_all = "camelCase")]
 pub struct TagCount {
     pub tag: String,
-    pub count: i64,
+    pub count: i32,
 }
 
 /// Get all tags with their node counts, ordered by count descending.
@@ -31,7 +31,7 @@ pub async fn get_all_tags(
         .map(|row| {
             Ok(TagCount {
                 tag: row.try_get("tag").map_err(|e| AppError::Db(e.to_string()))?,
-                count: row.try_get("count").map_err(|e| AppError::Db(e.to_string()))?,
+                count: row.try_get::<i64, _>("count").map_err(|e| AppError::Db(e.to_string()))? as i32,
             })
         })
         .collect::<Result<Vec<_>, AppError>>()?;

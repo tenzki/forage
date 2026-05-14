@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import type { NodeViewProps } from '@tiptap/react'
 import Suggestion from '@tiptap/suggestion'
@@ -93,9 +94,10 @@ function SuggestionPopup({ items, command, clientRect }: SuggestionPopupProps) {
 function HashtagNodeView({ node, extension }: NodeViewProps) {
   const tag = node.attrs.tag as string
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
     const opts = extension.options as HashtagNodeOptions
     if (opts.onTagClick) {
+      e.preventDefault()
       opts.onTagClick(tag)
     }
   }
@@ -203,6 +205,7 @@ export const HashtagNode = Node.create<HashtagNodeOptions>({
 
     return [
       Suggestion({
+        pluginKey: new PluginKey('hashtagSuggestion'),
         editor: this.editor,
         char: '#',
         startOfLine: false,

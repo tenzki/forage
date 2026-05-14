@@ -63,7 +63,9 @@ describe('HashtagNode extension', () => {
     for (const block of doc) {
       const inlineContent = block.content ?? []
       for (const inline of inlineContent) {
-        if (inline.type === 'hashtag' && inline.attrs?.tag === 'test') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const node = inline as any
+        if (node.type === 'hashtag' && node.attrs?.tag === 'test') {
           found = true
         }
       }
@@ -116,12 +118,15 @@ describe('HashtagNode extension', () => {
   })
 
   it('hashtag node has atom: true (not text-based)', () => {
-    const nodeType = editor.schema.nodes.hashtag
+    // NodeType.spec holds the original node spec definition
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nodeType = editor.schema.nodes.hashtag as any
     expect(nodeType.spec.atom).toBe(true)
   })
 
   it('hashtag node is inline', () => {
-    const nodeType = editor.schema.nodes.hashtag
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nodeType = editor.schema.nodes.hashtag as any
     expect(nodeType.spec.inline).toBe(true)
   })
 })
