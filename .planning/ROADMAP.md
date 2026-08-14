@@ -1,6 +1,18 @@
 # Roadmap: AI Chat — Tree-Based Note-Taking with AI Agent
 
-## Overview
+> **RE-PLATFORM 2026-06-08.** Original 6-phase roadmap (below, kept for history) built on Tauri+Rust+Pi-sidecar. That stack cost too much per feature at its 6 layer-seams (see `.planning/debug/`). New plan: keep Tauri shell, drop custom Rust + Pi sidecar, single-doc TipTap editor, Anthropic SDK from frontend, JSON file in iCloud Drive folder. Collapsed to 3 phases (A/B/C). Phases 1-6 detail below is superseded.
+
+## Active Roadmap (3 phases)
+
+- [ ] **Phase A — Outliner (Tauri + single-doc TipTap)**: React + Vite + Zustand. One TipTap document with a custom bullet node. Keyboard nav (Tab/Shift-Tab/Enter/Alt-Arrow/Delete), drag-reorder, zoom/hoist, search, native ProseMirror undo. Persist whole tree as one JSON file via `@tauri-apps/plugin-fs` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`. Covers TREE-*, EDIT-*, INFR-02/03/04. ~5-7 days.
+- [ ] **Phase B — Agent (Anthropic SDK from frontend)**: `@anthropic-ai/sdk` direct, streaming. Slash command opens cmdk menu with hardcoded skills (`/research`, `/brainstorm`, `/ask`). Streams child nodes under trigger node; inline mode for AGNT-03. AI content visually styled. Covers AGNT-01/02/03/05, EDIT-04. ~3-4 days.
+- [ ] **Phase C — Polish & Distribute**: Settings panel for paste-in API key via `@tauri-apps/plugin-store` (INFR-01). Error states, empty states, macOS code-sign + notarize → shareable .dmg. ~3 days.
+
+**Deferred to v2:** AGNT-04 (custom skill config UI).
+
+---
+
+## Original Overview (superseded)
 
 Six phases building from the ground up: a stable storage foundation first, then the full outliner experience, then editing completeness with undo, then the agent infrastructure, then user-facing AI skills, and finally iCloud sync completion and distribution. The order is non-negotiable — the storage schema and iCloud file placement cannot be retrofitted, undo must exist before AI generates content, and the agent sidecar must exist before the slash command UI.
 

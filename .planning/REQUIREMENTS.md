@@ -28,14 +28,15 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **AGNT-01**: User can trigger agent actions via slash commands (e.g., `/research topic`)
 - [x] **AGNT-02**: Agent generates structured child notes using branch context (ancestors + siblings)
 - [ ] **AGNT-03**: Agent can generate inline content on the current node
-- [ ] **AGNT-04**: User can create and configure custom skills (system prompt + model config)
-- [ ] **AGNT-05**: At least one built-in skill (research) works out of the box
+- [ ] **AGNT-05**: Built-in skills (research, brainstorm, ask) work out of the box as a hardcoded TS array
+
+> **AGNT-04 (custom skill config UI) — deferred to v2.** v1 ships 2-3 hardcoded skills. A configuration UI is post-POC.
 
 ### Infrastructure
 
 - [x] **INFR-01**: User can store and manage their own LLM API keys (OpenAI, Anthropic)
 - [x] **INFR-02**: Data persists locally across app restarts (local-first SQLite)
-- [ ] **INFR-03**: Data syncs across devices via iCloud Drive
+- [ ] **INFR-03**: Data file lives in the iCloud Drive folder; macOS syncs it automatically (no custom sync code)
 - [x] **INFR-04**: Data model supports node types to enable future chat mode
 
 ## v2 Requirements
@@ -90,13 +91,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EDIT-04 | Phase 3 | Complete |
 | AGNT-01 | Phase 4 | Complete |
 | AGNT-02 | Phase 4 | Complete |
-| AGNT-03 | Phase 5 | Pending |
-| AGNT-04 | Phase 5 | Pending |
-| AGNT-05 | Phase 5 | Pending |
-| INFR-01 | Phase 4 | Complete |
-| INFR-02 | Phase 1 | Complete |
-| INFR-03 | Phase 6 | Pending |
-| INFR-04 | Phase 1 | Complete |
+| AGNT-03 | Phase B | Pending |
+| AGNT-04 | v2 (deferred) | Deferred |
+| AGNT-05 | Phase B | Pending |
+| INFR-01 | Phase C | Pending |
+| INFR-02 | Phase A | Pending (re-impl as JSON) |
+| INFR-03 | Phase A | Pending (file path only) |
+| INFR-04 | Phase A | Pending (plain TS tree) |
 
 **Coverage:**
 - v1 requirements: 19 total

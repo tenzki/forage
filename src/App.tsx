@@ -1,105 +1,86 @@
-import { useEffect, useState } from 'react'
-import OutlinerView from './components/Outliner/OutlinerView'
-import SearchOverlay from './components/Search/SearchOverlay'
-import TagSidebar from './components/TagSidebar/TagSidebar'
-import SettingsPage from './components/Settings/SettingsPage'
-import { useTreeStore } from './store/treeStore'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Editor } from '@tiptap/react'
+import { OutlinerEditor } from './editor/OutlinerEditor'
+import { SlashMenu } from './components/Agent/SlashMenu'
+import { SettingsPanel } from './components/Settings/SettingsPanel'
+import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
+import { loadOutline, createDebouncedSaver } from './persistence/outlineFile'
+import { useSettingsStore } from './store/settingsStore'
+import type { JsonValue } from './types/tree'
 
-type MainView = 'outliner' | 'settings'
+type View = 'outliner' | 'settings'
 
 export default function App() {
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [mainView, setMainView] = useState<MainView>('outliner')
-  const undo = useTreeStore((s) => s.undo)
-  const redo = useTreeStore((s) => s.redo)
-  const registerTagClickHandler = useTreeStore((s) => s.registerTagClickHandler)
+  const [loaded, setLoaded] = useState(false)
+  const [initialContent, setInitialContent] = useState<JsonValue | null>(null)
+  const [view, setView] = useState<View>('outliner')
+  const [editor, setEditor] = useState<Editor | null>(null)
+  const saver = useRef(createDebouncedSaver())
+  const loadSettings = useSettingsStore((s) => s.load)
 
-  // Register the tag click handler so NodeEditor can call it
+  // Initial load: outline file + settings.
   useEffect(() => {
-    registerTagClickHandler((tag: string) => {
-      setSearchQuery('#' + tag)
-      setSearchOpen(true)
-      // Clicking a tag returns to outliner view
-      setMainView('outliner')
-    })
-  }, [registerTagClickHandler])
+    void (async () => {
+      const outline = await loadOutline()
+      setInitialContent(outline?.doc ?? null)
+      setLoaded(true)
+    })()
+    void loadSettings()
+  }, [loadSettings])
 
+  // Flush any pending save when the window is closing.
   useEffect(() => {
-    // capture: true intercepts Cmd+K/Z/\ before TipTap's stopPropagation
+    const flush = () => void saver.current.flush()
+    window.addEventListener('beforeunload', flush)
+    return () => window.removeEventListener('beforeunload', flush)
+  }, [])
+
+  // Cmd+, toggles settings.
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === 'k') {
-        e.preventDefault()
-        setSearchQuery('')
-        setSearchOpen(true)
-      }
-      // Toggle tag sidebar with Cmd+\
-      if (e.metaKey && e.key === '\\') {
-        e.preventDefault()
-        setSidebarOpen((open) => !open)
-      }
-      // Global undo/redo — handles case when no editor is focused
-      if (e.metaKey && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault()
-        undo().catch(console.error)
-      }
-      if (e.metaKey && e.key === 'z' && e.shiftKey) {
-        e.preventDefault()
-        redo().catch(console.error)
-      }
-      // Cmd+, toggles settings view in the main panel
       if (e.metaKey && e.key === ',') {
         e.preventDefault()
-        setMainView((v) => (v === 'settings' ? 'outliner' : 'settings'))
+        setView((v) => (v === 'settings' ? 'outliner' : 'settings'))
       }
     }
-    window.addEventListener('keydown', handler, { capture: true })
-    return () => window.removeEventListener('keydown', handler, { capture: true })
-  }, [undo, redo])
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
-  function handleTagClick(tag: string) {
-    setSearchQuery('#' + tag)
-    setSearchOpen(true)
-    // Clicking a tag returns to outliner view
-    setMainView('outliner')
-  }
+  const handleDocChange = useCallback((doc: JsonValue) => {
+    saver.current.schedule({ version: 1, doc })
+  }, [])
 
-  function handleSearchClose() {
-    setSearchOpen(false)
-    setSearchQuery('')
-  }
-
-  function handleSettingsClick() {
-    setMainView((v) => (v === 'settings' ? 'outliner' : 'settings'))
-  }
-
-  function handleSettingsBack() {
-    setMainView('outliner')
-  }
+  if (!loaded) return <div className="app-loading">Loading…</div>
 
   return (
-    <div id="app" style={{ display: 'flex', flexDirection: 'row', position: 'relative' }}>
-      <TagSidebar
-        open={sidebarOpen}
-        onTagClick={handleTagClick}
-        onToggle={() => setSidebarOpen((o) => !o)}
-        onSettingsClick={handleSettingsClick}
-        settingsActive={mainView === 'settings'}
-      />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-        {mainView === 'settings' ? (
-          <SettingsPage onBack={handleSettingsBack} />
-        ) : (
-          <OutlinerView />
-        )}
-      </div>
+    <div id="app">
+      <header className="app-header">
+        <span className="app-title">AI Chat</span>
+        <button
+          className="app-settings-btn"
+          onClick={() => setView((v) => (v === 'settings' ? 'outliner' : 'settings'))}
+        >
+          {view === 'settings' ? 'Outline' : 'Settings'}
+        </button>
+      </header>
 
-      <SearchOverlay
-        open={searchOpen}
-        onClose={handleSearchClose}
-        initialQuery={searchQuery}
-      />
+      {/*
+        The editor is mounted for the lifetime of the app and only hidden when
+        Settings is open. Unmounting it would drop the live document and the
+        ProseMirror undo stack, and remount it from the startup snapshot.
+      */}
+      <main className="outliner-main" hidden={view === 'settings'}>
+        <OutlinerChrome editor={editor} />
+        <OutlinerEditor
+          initialContent={initialContent}
+          onDocChange={handleDocChange}
+          onReady={setEditor}
+        />
+        <SlashMenu editor={editor} />
+      </main>
+
+      {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}
     </div>
   )
 }

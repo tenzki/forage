@@ -47,22 +47,25 @@ The tree is the universal data structure — every note, conversation, and piece
 
 ## Constraints
 
-- **Tech stack**: Tauri (Rust backend + web frontend), Rust for server component, Pi agent SDK (`@mariozechner/pi-coding-agent`) embedded as Node.js sidecar for LLM agent runtime
-- **Data**: Local-first architecture, iCloud for sync in v1
-- **LLM access**: User-provided API keys, no hosted inference
-- **Target user**: Personal tool first, small team second
+- **Tech stack**: Tauri v2 shell (desktop target) with a TypeScript/React frontend. **No custom Rust backend in v1** — only official Tauri plugins (fs, store, shell). LLM calls go directly from the frontend via `@anthropic-ai/sdk`. No Node.js sidecar.
+- **Data**: Local-first. Tree persisted as a single JSON file placed in the iCloud Drive folder; macOS handles sync. No custom sync engine.
+- **Editor**: One ProseMirror/TipTap document for the whole outliner with a custom bullet node — not one editor per node. Chosen for undo/keyboard correctness.
+- **LLM access**: User-provided API keys, no hosted inference. Anthropic only in v1.
+- **Target user**: Personal tool first, small team second. v1 ships as a shareable signed macOS .dmg.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Tauri for desktop | Rust backend aligns with server reuse, lightweight vs Electron | — Pending |
-| Local-first + iCloud sync | Simplest sync for personal use, avoids managed infra in v1 | — Pending |
-| Tree as universal primitive | Enables reuse for chat app later without architectural rework | — Pending |
-| Slash commands for agent | Inline UX keeps user in flow, no context switching to a chat panel | — Pending |
-| User-provided API keys | No billing/auth infrastructure needed for v1 | — Pending |
-| Pi agent SDK as agent runtime | Provides multi-model support, streaming, skills, tree sessions out of the box — no need to build custom LLM integration. Embedded via Node.js sidecar in Tauri. Replaces Vercel AI SDK + custom sidecar approach | — Pending |
-| 1:1 tree mapping with Pi sessions | Outliner branch = Pi session branch. No separate chat data model needed. Notes and conversations share the same tree. Ancestors provide conversation context naturally | — Pending |
+| Tauri for desktop | Lightweight vs Electron; desktop is the real target | — Kept |
+| Local-first + iCloud sync | Place JSON file in iCloud Drive folder; macOS syncs it. No custom code | — Kept (simplified) |
+| Tree as universal primitive | Enables reuse for chat app later without architectural rework | — Kept |
+| Slash commands for agent | Inline UX keeps user in flow, no context switching to a chat panel | — Kept |
+| User-provided API keys | No billing/auth infrastructure needed for v1; users paste own key | — Kept |
+| ~~Pi agent SDK as agent runtime~~ | Introduced a third runtime (Node.js sidecar, 52 MB binary, JSON-RPC) and an unfamiliar agent abstraction. Every feature crossed React↔Zustand↔IPC↔Rust↔SQLite↔sidecar — 6 seams. Caused the API-key (0-byte binary), slash-command, and undo bug clusters | — **REVERSED**: replaced by `@anthropic-ai/sdk` called directly from frontend |
+| ~~Custom Rust backend (SQLite + tauri-specta IPC)~~ | IPC type-drift, debounce-vs-IPC undo races. Only justified by a future shared server that v1 doesn't have | — **REVERSED**: logic moves to TypeScript; storage = single JSON file via plugin-fs |
+| ~~1:1 tree mapping with Pi sessions~~ | Coupled the data model to Pi's session abstraction | — **REVERSED**: tree is plain data; agent context built from ancestors at call time |
+| Single-document editor | One ProseMirror doc with bullet nodes (Workflowy model). ProseMirror's native history fixes undo in one layer instead of Rust history + Zustand wrapper + disabled TipTap history | — New |
 
 ---
-*Last updated: 2026-03-24 after tech decision (Pi agent SDK + 1:1 tree mapping)*
+*Last updated: 2026-06-08 — re-platform: drop Pi sidecar + custom Rust, keep Tauri shell, single-doc editor*
