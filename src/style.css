@@ -223,6 +223,9 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
 .outliner-editor li[data-node-type='ai']:not(:has(> ul)):has(> p > br:only-child) {
   display: none;
 }
+.outliner-editor li[data-node-type='ai'].is-agent-active {
+  display: list-item !important;
+}
 
 /* AI-generated bullets are visually distinct (EDIT-04) */
 .outliner-editor li[data-node-type='ai'] > p {
@@ -236,6 +239,72 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
   font-size: 0.75em;
   color: #6a4ce0;
   opacity: 0.7;
+}
+.outliner-editor li.is-agent-active > p {
+  color: #777;
+  font-size: 13px;
+}
+.outliner-editor li.is-agent-active > p::before {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border: 2px solid #ddd8f5;
+  border-top-color: #6a4ce0;
+  border-radius: 50%;
+  content: '';
+  animation: agent-tool-spin 800ms linear infinite;
+}
+.outliner-editor li.is-agent-active > p::after {
+  content: none;
+}
+.agent-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  vertical-align: top;
+}
+.agent-activity.is-streaming {
+  margin-right: 8px;
+  vertical-align: baseline;
+}
+.agent-activity-notes {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.agent-activity-line {
+  animation: agent-tool-pulse 1.6s ease-in-out infinite;
+}
+.agent-stop {
+  padding: 2px 7px;
+  border: 1px solid #ddd8f5;
+  border-radius: 5px;
+  background: #fff;
+  color: #7667ad;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.agent-stop:hover {
+  border-color: #bfb3ee;
+  color: #5f49b5;
+}
+.agent-stop:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+@keyframes agent-tool-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes agent-tool-pulse {
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .outliner-editor li.is-agent-active > p::before,
+  .agent-activity-line {
+    animation: none;
+  }
 }
 
 /* ============================================================
@@ -477,6 +546,11 @@ kbd {
   margin-bottom: 4px;
   font-size: 17px;
 }
+.settings-section + .settings-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #ededed;
+}
 .settings-section label {
   margin-top: 8px;
   font-weight: 600;
@@ -547,6 +621,111 @@ kbd {
 .settings-hint {
   font-size: 12px;
   color: #888;
+}
+.tool-list {
+  overflow: hidden;
+  margin-top: 4px;
+  border: 1px solid #e7e7e7;
+  border-radius: 9px;
+}
+.settings-section .tool-setting {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #ededed;
+  background: #fcfcfc;
+  font-weight: 400;
+}
+.settings-section .tool-setting:last-child {
+  border-bottom: 0;
+}
+.tool-setting span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tool-setting small {
+  color: #888;
+  font-size: 12px;
+}
+.tool-setting code {
+  max-width: 380px;
+  overflow: hidden;
+  color: #999;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-setting-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+.tool-setting-actions button {
+  border: 0;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 12px;
+}
+.tool-setting-actions button:hover {
+  color: #a22;
+}
+.settings-section .tool-setting input[type='checkbox'] {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 auto;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #ccc;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.settings-section .tool-setting input[type='checkbox']::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  content: '';
+  transition: transform 120ms ease;
+}
+.settings-section .tool-setting input[type='checkbox']:checked {
+  background: #6a4ce0;
+}
+.settings-section .tool-setting input[type='checkbox']:checked::after {
+  transform: translateX(16px);
+}
+.custom-tool-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 14px;
+  border: 1px solid #e7e7e7;
+  border-radius: 9px;
+  background: #fcfcfc;
+}
+.custom-tool-form > label {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.settings-secondary.add-tool {
+  align-self: flex-start;
+}
+.tool-privacy {
+  margin-top: 2px;
 }
 .settings-save {
   align-self: flex-start;

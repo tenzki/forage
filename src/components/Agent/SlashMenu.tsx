@@ -5,13 +5,12 @@
 // No false positives on mid-sentence slashes: we only trigger when the bullet
 // text *starts* with "/" (AGNT-01).
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { SKILLS, type Skill } from '../../agent/skills'
 import {
   runSkillIntoEditor,
   setCurrentBulletText,
-  type Generation,
 } from '../../agent/insertIntoEditor'
 import { useSettingsStore } from '../../store/settingsStore'
 
@@ -47,10 +46,11 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
   const openAiApiKey = useSettingsStore((s) => s.openAiApiKey)
   const oauthCredential = useSettingsStore((s) => s.oauthCredential)
   const modelId = useSettingsStore((s) => s.modelId)
+  const enabledToolIds = useSettingsStore((s) => s.enabledToolIds)
+  const customTools = useSettingsStore((s) => s.customTools)
   const setOAuthCredential = useSettingsStore((s) => s.setOAuthCredential)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
-  const genRef = useRef<Generation | null>(null)
 
   // Track editor changes to open/close the menu.
   useEffect(() => {
@@ -114,8 +114,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     // Replace the command with its context so the bullet remains a clean note.
     setCurrentBulletText(editor, prompt)
     setMenu(null)
-    genRef.current?.cancel()
-    genRef.current = runSkillIntoEditor(
+    runSkillIntoEditor(
       editor,
       {
         mode: authMode,
@@ -126,6 +125,8 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
       },
       skill,
       prompt,
+      enabledToolIds,
+      customTools,
     )
   }
 

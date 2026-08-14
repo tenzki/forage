@@ -57,6 +57,27 @@ describe('App view switching', () => {
     expect(container.querySelector('.ProseMirror')).toBe(editorBefore)
   })
 
+  it('shows tools and can add an approved custom HTTP tool', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByText('Web search')).not.toBeNull()
+    expect(screen.getByText('Read webpages')).not.toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /Add custom tool/ }))
+    await user.type(screen.getByLabelText('Tool name'), 'github_issues')
+    await user.type(
+      screen.getByLabelText('Description for Codex'),
+      'List public issues for a GitHub repository',
+    )
+    await user.click(screen.getByRole('button', { name: 'Add tool' }))
+
+    expect(await screen.findByText('github_issues')).not.toBeNull()
+    const enabled = screen.getByRole('checkbox', { name: 'Enable github_issues' }) as HTMLInputElement
+    expect(enabled.checked).toBe(true)
+  })
+
   it('preserves edits made before opening Settings', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()

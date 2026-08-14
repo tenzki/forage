@@ -18,7 +18,9 @@ export const SKILLS: Skill[] = [
       'You are a research assistant inside an outliner. Investigate the topic ' +
       'the user gives, using the surrounding outline as context. Reply with ' +
       'concise, well-structured findings as short bullet-style lines (one idea ' +
-      'per line, no markdown bullet characters). Be specific and factual.',
+      'per line, no markdown bullet characters). Use web_search when available ' +
+      'for current or externally verifiable facts, then use web_fetch to verify ' +
+      'promising sources when needed. Include source URLs. Be specific and factual.',
   },
   {
     id: 'brainstorm',

@@ -10,7 +10,11 @@
       "allow": [
         { "url": "https://auth.openai.com/**" },
         { "url": "https://chatgpt.com/**" },
-        { "url": "https://api.openai.com/**" }
+        { "url": "https://api.openai.com/**" },
+        { "url": "https://html.duckduckgo.com/**" },
+        { "url": "https://r.jina.ai/**" },
+        { "url": "https://api.github.com/**" },
+        { "url": "https://api.open-meteo.com/**" }
       ]
     },
     "opener:default",

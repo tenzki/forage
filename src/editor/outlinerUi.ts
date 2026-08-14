@@ -4,17 +4,24 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { collectBullets, reorderBullet } from './outlineModel'
 
+interface AgentActivity {
+  notes: string[]
+  onCancel?: () => void
+}
+
 interface OutlinerUiState {
   zoomId: string | null
   query: string
+  agentActivity: Record<string, AgentActivity>
 }
 
 const uiKey = new PluginKey<OutlinerUiState>('outlinerUi')
 const zoomMeta = 'zoom'
 const queryMeta = 'query'
+const activityMeta = 'agentActivity'
 
 export function getOutlinerUiState(editor: Editor): OutlinerUiState {
-  return uiKey.getState(editor.state) ?? { zoomId: null, query: '' }
+  return uiKey.getState(editor.state) ?? { zoomId: null, query: '', agentActivity: {} }
 }
 
 export function setZoom(editor: Editor, nodeId: string | null): void {
@@ -23,6 +30,19 @@ export function setZoom(editor: Editor, nodeId: string | null): void {
 
 export function setSearchQuery(editor: Editor, query: string): void {
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: queryMeta, query }))
+}
+
+export function setAgentActivity(
+  editor: Editor,
+  nodeId: string,
+  notes: string[] | null,
+  onCancel?: () => void,
+): void {
+  editor.view.dispatch(editor.state.tr.setMeta(uiKey, {
+    type: activityMeta,
+    nodeId,
+    activity: notes === null ? null : { notes, onCancel },
+  }))
 }
 
 export function toggleCollapsed(editor: Editor, nodeId: string): boolean {
@@ -125,6 +145,46 @@ function nodeClasses(
   return classes
 }
 
+function createActivityWidget(activity: AgentActivity): HTMLElement {
+  const status = document.createElement('span')
+  status.className = 'agent-activity'
+  status.setAttribute('contenteditable', 'false')
+  status.setAttribute('role', 'status')
+  status.setAttribute('aria-live', 'polite')
+  if (activity.notes.length) {
+    const notes = document.createElement('span')
+    notes.className = 'agent-activity-notes'
+    for (const note of activity.notes) {
+      const line = document.createElement('span')
+      line.className = 'agent-activity-line'
+      line.textContent = note
+      notes.append(line)
+    }
+    status.append(notes)
+  } else {
+    status.classList.add('is-streaming')
+  }
+  if (activity.onCancel) status.append(createStopButton(activity.onCancel))
+  return status
+}
+
+function createStopButton(onCancel: () => void): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'agent-stop'
+  button.textContent = 'Stop'
+  button.setAttribute('aria-label', 'Stop generation')
+  button.setAttribute('contenteditable', 'false')
+  button.addEventListener('mousedown', (event) => event.preventDefault())
+  button.addEventListener('click', (event) => {
+    event.stopPropagation()
+    button.disabled = true
+    button.textContent = 'Stopping…'
+    onCancel()
+  })
+  return button
+}
+
 function addSearchHighlights(
   decorations: Decoration[],
   entry: ReturnType<typeof collectBullets>[number],
@@ -150,6 +210,8 @@ function buildDecorations(editor: Editor): DecorationSet {
   const decorations: Decoration[] = []
   for (const entry of entries) {
     const classes = nodeClasses(entry, ui)
+    const activity = ui.agentActivity[entry.id]
+    if (activity?.notes.length) classes.push('is-agent-active')
     if (ui.zoomId && !zoomPath.has(entry.id) && !entry.ancestorIds.includes(ui.zoomId)) {
       classes.push('zoom-hidden')
     } else if (ui.zoomId && zoomPath.has(entry.id) && entry.id !== ui.zoomId) {
@@ -164,6 +226,13 @@ function buildDecorations(editor: Editor): DecorationSet {
         side: -1,
       }),
     )
+    if (activity && (activity.notes.length || activity.onCancel)) {
+      decorations.push(Decoration.widget(
+        entry.pos + 2,
+        () => createActivityWidget(activity),
+        { key: `activity-${entry.id}-${activity.notes.join('|')}`, side: -1 },
+      ))
+    }
     addSearchHighlights(decorations, entry, ui.query.trim())
   }
   return DecorationSet.create(editor.state.doc, decorations)
@@ -178,13 +247,22 @@ export const OutlinerUi = Extension.create({
       new Plugin<OutlinerUiState>({
         key: uiKey,
         state: {
-          init: () => ({ zoomId: null, query: '' }),
+          init: () => ({ zoomId: null, query: '', agentActivity: {} }),
           apply: (transaction, previous) => {
             const meta = transaction.getMeta(uiKey) as
-              | { type: string; nodeId?: string | null; query?: string }
+              | { type: string; nodeId?: string | null; query?: string; activity?: AgentActivity | null }
               | undefined
             if (meta?.type === zoomMeta) return { ...previous, zoomId: meta.nodeId ?? null }
             if (meta?.type === queryMeta) return { ...previous, query: meta.query ?? '' }
+            if (meta?.type === activityMeta && meta.nodeId) {
+              const agentActivity = { ...previous.agentActivity }
+              if (meta.activity && (meta.activity.notes.length || meta.activity.onCancel)) {
+                agentActivity[meta.nodeId] = meta.activity
+              } else {
+                delete agentActivity[meta.nodeId]
+              }
+              return { ...previous, agentActivity }
+            }
             if (previous.zoomId && !collectBullets(transaction.doc).some((e) => e.id === previous.zoomId)) {
               return { ...previous, zoomId: null }
             }

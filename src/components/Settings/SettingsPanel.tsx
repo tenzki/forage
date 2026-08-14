@@ -8,6 +8,10 @@ import {
   type DeviceLoginInfo,
 } from '../../agent/codexAuth'
 import {
+  APPROVED_TOOL_ORIGINS,
+  BUILTIN_TOOL_OPTIONS,
+} from '../../agent/tools'
+import {
   useSettingsStore,
   type CodexAuthMode,
 } from '../../store/settingsStore'
@@ -21,6 +25,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
   const oauthCredential = useSettingsStore((state) => state.oauthCredential)
   const modelId = useSettingsStore((state) => state.modelId)
+  const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
+  const customTools = useSettingsStore((state) => state.customTools)
   const isLoaded = useSettingsStore((state) => state.isLoaded)
   const storeError = useSettingsStore((state) => state.error)
   const loadSettings = useSettingsStore((state) => state.load)
@@ -28,12 +34,20 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const setOpenAiApiKey = useSettingsStore((state) => state.setOpenAiApiKey)
   const setOAuthCredential = useSettingsStore((state) => state.setOAuthCredential)
   const setModelId = useSettingsStore((state) => state.setModelId)
+  const setToolEnabled = useSettingsStore((state) => state.setToolEnabled)
+  const addCustomTool = useSettingsStore((state) => state.addCustomTool)
+  const removeCustomTool = useSettingsStore((state) => state.removeCustomTool)
 
   const [draft, setDraft] = useState('')
   const [saved, setSaved] = useState(false)
   const [loginBusy, setLoginBusy] = useState(false)
   const [deviceInfo, setDeviceInfo] = useState<DeviceLoginInfo | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [showToolForm, setShowToolForm] = useState(false)
+  const [toolName, setToolName] = useState('')
+  const [toolDescription, setToolDescription] = useState('')
+  const [toolOrigin, setToolOrigin] = useState<string>(APPROVED_TOOL_ORIGINS[0].origin)
+  const [toolPath, setToolPath] = useState<string>(APPROVED_TOOL_ORIGINS[0].examplePath)
   const loginController = useRef<AbortController | null>(null)
   const modelOptions = useMemo(() => codexModelOptions(authMode), [authMode])
 
@@ -100,6 +114,41 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     setActionError(null)
     try {
       await setModelId(nextModelId)
+    } catch (error) {
+      setActionError(describeError(error))
+    }
+  }
+
+  async function toggleTool(toolId: string, enabled: boolean) {
+    setActionError(null)
+    try {
+      await setToolEnabled(toolId, enabled)
+    } catch (error) {
+      setActionError(describeError(error))
+    }
+  }
+
+  async function createCustomTool() {
+    setActionError(null)
+    try {
+      const path = toolPath.startsWith('/') ? toolPath : `/${toolPath}`
+      await addCustomTool({
+        name: toolName,
+        description: toolDescription,
+        urlTemplate: `${toolOrigin}${path}`,
+      })
+      setToolName('')
+      setToolDescription('')
+      setShowToolForm(false)
+    } catch (error) {
+      setActionError(describeError(error))
+    }
+  }
+
+  async function deleteCustomTool(toolId: string) {
+    setActionError(null)
+    try {
+      await removeCustomTool(toolId)
     } catch (error) {
       setActionError(describeError(error))
     }
@@ -188,11 +237,121 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
             <option key={option.id} value={option.id}>{option.name}</option>
           ))}
         </select>
-
-        {(actionError || storeError) && (
-          <p className="settings-error" role="alert">{actionError || storeError}</p>
-        )}
       </section>
+
+      <section className="settings-section">
+        <h2>Tools</h2>
+        <p className="settings-hint">
+          Enabled tools may be called by Codex when a command needs external information.
+        </p>
+        <div className="tool-list">
+          {BUILTIN_TOOL_OPTIONS.map((tool) => (
+            <label className="tool-setting" key={tool.id}>
+              <span>
+                <strong>{tool.name}</strong>
+                <small>{tool.description}</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={enabledToolIds.includes(tool.id)}
+                onChange={(event) => void toggleTool(tool.id, event.target.checked)}
+                disabled={!isLoaded}
+              />
+            </label>
+          ))}
+          {customTools.map((tool) => (
+            <div className="tool-setting" key={tool.id}>
+              <span>
+                <strong>{tool.name}</strong>
+                <small>{tool.description}</small>
+                <code>{tool.urlTemplate}</code>
+              </span>
+              <div className="tool-setting-actions">
+                <input
+                  type="checkbox"
+                  aria-label={`Enable ${tool.name}`}
+                  checked={enabledToolIds.includes(tool.id)}
+                  onChange={(event) => void toggleTool(tool.id, event.target.checked)}
+                  disabled={!isLoaded}
+                />
+                <button
+                  type="button"
+                  aria-label={`Delete ${tool.name}`}
+                  onClick={() => void deleteCustomTool(tool.id)}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {showToolForm ? (
+          <div className="custom-tool-form">
+            <strong>Add public GET tool</strong>
+            <label htmlFor="tool-name">Tool name</label>
+            <input
+              id="tool-name"
+              value={toolName}
+              onChange={(event) => setToolName(event.target.value)}
+              placeholder="github_issues"
+              spellCheck={false}
+            />
+            <label htmlFor="tool-description">Description for Codex</label>
+            <input
+              id="tool-description"
+              value={toolDescription}
+              onChange={(event) => setToolDescription(event.target.value)}
+              placeholder="List public GitHub issues for a repository"
+            />
+            <label htmlFor="tool-origin">Approved API</label>
+            <select
+              id="tool-origin"
+              value={toolOrigin}
+              onChange={(event) => {
+                const selected = APPROVED_TOOL_ORIGINS.find((item) => item.origin === event.target.value)
+                setToolOrigin(event.target.value)
+                if (selected) setToolPath(selected.examplePath)
+              }}
+            >
+              {APPROVED_TOOL_ORIGINS.map((item) => (
+                <option key={item.origin} value={item.origin}>{item.label}</option>
+              ))}
+            </select>
+            <label htmlFor="tool-path">Path and query template</label>
+            <input
+              id="tool-path"
+              value={toolPath}
+              onChange={(event) => setToolPath(event.target.value)}
+              placeholder="/repos/{{owner}}/{{repo}}/issues"
+              spellCheck={false}
+            />
+            <p className="settings-hint">
+              Each {'{{parameter}}'} becomes a required string argument available to Codex. Only public GET endpoints are supported.
+            </p>
+            <div className="settings-actions">
+              <button className="settings-save" onClick={() => void createCustomTool()}>
+                Add tool
+              </button>
+              <button className="settings-secondary" onClick={() => setShowToolForm(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="settings-secondary add-tool" onClick={() => setShowToolForm(true)}>
+            + Add custom tool
+          </button>
+        )}
+
+        <p className="settings-hint tool-privacy">
+          Search queries go to DuckDuckGo. Page URLs go to Jina Reader. Custom tools are limited to the approved public API origins above.
+        </p>
+      </section>
+
+      {(actionError || storeError) && (
+        <p className="settings-error" role="alert">{actionError || storeError}</p>
+      )}
     </div>
   )
 }

@@ -12,9 +12,11 @@
 import type { Editor } from '@tiptap/react'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
+import { setAgentActivity } from '../editor/outlinerUi'
 import { newNodeId } from '../types/tree'
 import { generate, type CodexAuthConfig } from './client'
 import type { Skill } from './skills'
+import type { CustomHttpToolConfig } from './tools'
 
 /** Text of the listItems enclosing the cursor, outer-to-inner. */
 export function ancestorContext(editor: Editor): string[] {
@@ -173,24 +175,33 @@ export function runSkillIntoEditor(
   auth: CodexAuthConfig,
   skill: Skill,
   prompt: string,
+  enabledToolIds: string[] = [],
+  customTools: CustomHttpToolConfig[] = [],
 ): Generation {
   const controller = new AbortController()
+  const cancel = () => controller.abort()
   const context = ancestorContext(editor)
   const nodeId = insertAiChild(editor)
 
   const promise = (async () => {
     if (!nodeId) throw new Error('Could not find a bullet to generate under.')
     try {
-      writeAiText(editor, nodeId, '…')
+      setAgentActivity(editor, nodeId, ['Thinking…'], cancel)
       await generate(
         auth,
-        { skill, prompt, context },
+        { skill, prompt, context, enabledToolIds, customTools },
         {
           signal: controller.signal,
-          onDelta: (textSoFar) => writeAiText(editor, nodeId, textSoFar),
+          onDelta: (textSoFar) => {
+            setAgentActivity(editor, nodeId, [], cancel)
+            writeAiText(editor, nodeId, textSoFar)
+          },
+          onToolActivity: (notes) => setAgentActivity(editor, nodeId, notes, cancel),
         },
       )
+      setAgentActivity(editor, nodeId, null)
     } catch (e) {
+      setAgentActivity(editor, nodeId, null)
       if (controller.signal.aborted) {
         writeAiText(editor, nodeId, '[cancelled]')
       } else {
@@ -200,5 +211,5 @@ export function runSkillIntoEditor(
     }
   })()
 
-  return { promise, cancel: () => controller.abort() }
+  return { promise, cancel }
 }

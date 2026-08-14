@@ -1,9 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { collectBullets, moveBulletById } from './outlineModel'
-import { OutlinerUi, setZoom, toggleCollapsed } from './outlinerUi'
+import {
+  OutlinerUi,
+  setAgentActivity,
+  setZoom,
+  toggleCollapsed,
+} from './outlinerUi'
 
 function item(id: string, text: string, children: object[] = []) {
   return {
@@ -50,6 +55,22 @@ describe('Workflowy-style outline interactions', () => {
   it('tracks stable hierarchy paths for breadcrumbs and search scope', () => {
     const child = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha-child')
     expect(child?.ancestorIds).toEqual(['alpha'])
+  })
+
+  it('shows agent activity as transient decoration instead of document content', () => {
+    const beforeText = editor.state.doc.textContent
+
+    const cancel = vi.fn()
+    setAgentActivity(editor, 'bravo', ['fetching: lambdaworks.io'], cancel)
+
+    expect(editor.view.dom.querySelector('.agent-activity-line')?.textContent).toBe('fetching: lambdaworks.io')
+    expect(editor.state.doc.textContent).toBe(beforeText)
+    expect(editor.state.doc.textContent).not.toContain('fetching')
+    const stopButton = editor.view.dom.querySelector('.agent-stop') as HTMLButtonElement
+    stopButton.click()
+    expect(cancel).toHaveBeenCalledOnce()
+    setAgentActivity(editor, 'bravo', null)
+    expect(editor.view.dom.querySelector('.agent-activity')).toBeNull()
   })
 
   it('moves a whole branch between siblings as one undoable operation', () => {
