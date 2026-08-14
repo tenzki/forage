@@ -456,15 +456,76 @@ kbd {
   flex-direction: column;
   gap: 8px;
 }
+.settings-section h2 {
+  margin-bottom: 4px;
+  font-size: 17px;
+}
 .settings-section label {
+  margin-top: 8px;
   font-weight: 600;
 }
-.settings-section input {
+.settings-section input,
+.settings-section select {
   border: 1px solid #ddd;
   border-radius: 6px;
   padding: 8px 10px;
+  background: #fff;
   font-size: 14px;
+}
+.settings-section input {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.auth-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #f1f1f1;
+}
+.auth-mode button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+}
+.auth-mode button.active {
+  background: #fff;
+  color: #222;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 8px;
+  padding: 14px;
+  border: 1px solid #e7e7e7;
+  border-radius: 9px;
+  background: #fcfcfc;
+}
+.device-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f1eeff;
+  color: #5a45b5;
+  font-size: 12px;
+}
+.device-code code {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .settings-hint {
   font-size: 12px;
@@ -484,4 +545,20 @@ kbd {
 .settings-save:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.settings-secondary {
+  margin-top: 8px;
+  padding: 7px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+}
+.settings-error {
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: #fff0f0;
+  color: #a22;
+  font-size: 12px;
 }

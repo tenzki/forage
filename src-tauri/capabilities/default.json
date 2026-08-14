@@ -5,6 +5,15 @@
   "permissions": [
     "core:default",
     "store:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://auth.openai.com/**" },
+        { "url": "https://chatgpt.com/**" },
+        { "url": "https://api.openai.com/**" }
+      ]
+    },
+    "opener:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
     "fs:allow-mkdir",

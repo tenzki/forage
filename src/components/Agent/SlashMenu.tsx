@@ -43,7 +43,11 @@ function readSlashState(editor: Editor): MenuState | null {
 }
 
 export function SlashMenu({ editor }: { editor: Editor | null }) {
-  const apiKey = useSettingsStore((s) => s.apiKey)
+  const authMode = useSettingsStore((s) => s.authMode)
+  const openAiApiKey = useSettingsStore((s) => s.openAiApiKey)
+  const oauthCredential = useSettingsStore((s) => s.oauthCredential)
+  const modelId = useSettingsStore((s) => s.modelId)
+  const setOAuthCredential = useSettingsStore((s) => s.setOAuthCredential)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
   const genRef = useRef<Generation | null>(null)
@@ -97,7 +101,18 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     setCurrentBulletText(editor, prompt)
     setMenu(null)
     genRef.current?.cancel()
-    genRef.current = runSkillIntoEditor(editor, apiKey, skill, prompt)
+    genRef.current = runSkillIntoEditor(
+      editor,
+      {
+        mode: authMode,
+        apiKey: openAiApiKey,
+        oauthCredential,
+        modelId,
+        onCredentialRefresh: setOAuthCredential,
+      },
+      skill,
+      prompt,
+    )
   }
 
   if (!menu || matches.length === 0) return null

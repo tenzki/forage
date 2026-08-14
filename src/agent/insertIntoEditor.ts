@@ -1,4 +1,4 @@
-// Bridges the Anthropic stream to the single TipTap document: build branch
+// Bridges the Codex stream to the single TipTap document: build branch
 // context from ancestors, insert an AI-styled child bullet under the current
 // one, and stream text into it.
 //
@@ -12,7 +12,7 @@
 import type { Editor } from '@tiptap/react'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { newNodeId } from '../types/tree'
-import { generate } from './client'
+import { generate, type CodexAuthConfig } from './client'
 import type { Skill } from './skills'
 
 /** Text of the listItems enclosing the cursor, outer-to-inner. */
@@ -159,7 +159,7 @@ export interface Generation {
  */
 export function runSkillIntoEditor(
   editor: Editor,
-  apiKey: string,
+  auth: CodexAuthConfig,
   skill: Skill,
   prompt: string,
 ): Generation {
@@ -172,7 +172,7 @@ export function runSkillIntoEditor(
     try {
       writeAiText(editor, nodeId, '…')
       await generate(
-        apiKey,
+        auth,
         { skill, prompt, context },
         {
           signal: controller.signal,

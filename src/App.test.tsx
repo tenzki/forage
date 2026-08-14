@@ -27,6 +27,7 @@ vi.mock('@tauri-apps/plugin-store', () => ({
   load: async () => ({
     get: async () => '',
     set: async () => undefined,
+    delete: async () => true,
     save: async () => undefined,
   }),
 }))
@@ -48,7 +49,7 @@ describe('App view switching', () => {
     const editorBefore = container.querySelector('.ProseMirror')
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await screen.findByLabelText('Anthropic API key')
+    await screen.findByRole('heading', { name: 'Settings' })
     await user.click(screen.getByRole('button', { name: 'Outline' }))
 
     // Same DOM node means the editor was never torn down, so the document and
@@ -66,7 +67,7 @@ describe('App view switching', () => {
     expect(editor.textContent).toContain('Notes I do not want to lose')
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    await screen.findByLabelText('Anthropic API key')
+    await screen.findByRole('heading', { name: 'Settings' })
     await user.click(screen.getByRole('button', { name: 'Outline' }))
 
     expect(container.querySelector('.ProseMirror')?.textContent).toContain(

@@ -1,4 +1,4 @@
-// Tests for the bridge between the Anthropic stream and the TipTap document.
+// Tests for the bridge between the Codex stream and the TipTap document.
 //
 // Two behaviours matter and both were broken:
 //   - agent output arrives as one idea per line and must become one bullet per
