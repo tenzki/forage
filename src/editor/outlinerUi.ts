@@ -58,7 +58,7 @@ function iconButton(label: string, className: string, text: string): HTMLButtonE
 function createCollapseButton(editor: Editor, nodeId: string, collapsed: boolean) {
   const label = collapsed ? 'Expand branch' : 'Collapse branch'
   const className = collapsed ? 'bullet-collapse' : 'bullet-collapse is-expanded'
-  const button = iconButton(label, className, '›')
+  const button = iconButton(label, className, '')
   button.addEventListener('click', (event) => {
     event.stopPropagation()
     toggleCollapsed(editor, nodeId)

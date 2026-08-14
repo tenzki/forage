@@ -11,6 +11,7 @@
 
 import type { Editor } from '@tiptap/react'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { TextSelection } from '@tiptap/pm/state'
 import { newNodeId } from '../types/tree'
 import { generate, type CodexAuthConfig } from './client'
 import type { Skill } from './skills'
@@ -41,7 +42,11 @@ function currentListItem(editor: Editor) {
 }
 
 /** Replace the text of the bullet the cursor is in (used to set the prompt note). */
-export function setCurrentBulletText(editor: Editor, text: string): void {
+export function setCurrentBulletText(
+  editor: Editor,
+  text: string,
+  moveCursorToEnd = false,
+): void {
   const li = currentListItem(editor)
   if (!li) return
   const para = li.node.firstChild
@@ -52,6 +57,9 @@ export function setCurrentBulletText(editor: Editor, text: string): void {
     tr.replaceWith(paraStart, paraStart + size, editor.schema.text(text))
   } else if (size > 0) {
     tr.delete(paraStart, paraStart + size)
+  }
+  if (moveCursorToEnd) {
+    tr.setSelection(TextSelection.create(tr.doc, paraStart + text.length))
   }
   editor.view.dispatch(tr)
 }
@@ -108,10 +116,13 @@ function findAiList(
 
 /** Split streamed text into the lines that should become bullets. */
 function toLines(text: string): string[] {
-  const lines = text.split('\n')
-  // A trailing newline mid-stream would otherwise flash an empty bullet.
-  while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
-  return lines
+  // Models often separate ideas with blank lines. Empty list items create
+  // orphan dots and AI sparkles, so keep only visible outline content.
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  return lines.length ? lines : ['']
 }
 
 /**

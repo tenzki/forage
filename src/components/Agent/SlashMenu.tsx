@@ -1,6 +1,6 @@
 // Slash-command menu. When the current bullet's text starts with "/", show
-// matching skills near the caret. Pick one → the typed text becomes the note,
-// and the skill streams findings into AI child bullets. Esc dismisses.
+// matching skills near the caret. Selecting one completes "/skill " so the
+// user can add context; Enter then runs it. Esc dismisses.
 //
 // No false positives on mid-sentence slashes: we only trigger when the bullet
 // text *starts* with "/" (AGNT-01).
@@ -82,9 +82,15 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         setActive((i) => (i - 1 + matches.length) % matches.length)
+      } else if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault()
+        complete(matches[active])
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        choose(matches[active])
+        const skill = matches[active]
+        const hasContext = menu.query === skill.label && menu.prompt.trim().length > 0
+        if (hasContext || e.metaKey || e.ctrlKey) run(skill)
+        else complete(skill)
       } else if (e.key === 'Escape') {
         e.preventDefault()
         setMenu(null)
@@ -94,10 +100,18 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [editor, menu, matches, active])
 
-  function choose(skill: Skill) {
+  function complete(skill: Skill) {
+    if (!editor) return
+    const context = menu?.prompt.trimStart() ?? ''
+    const command = `/${skill.label}${context ? ` ${context}` : ' '}`
+    setCurrentBulletText(editor, command, true)
+    editor.view.focus()
+  }
+
+  function run(skill: Skill) {
     if (!editor) return
     const prompt = (menu?.prompt || skill.label).trim()
-    // Replace the "/skill ..." text with the actual prompt as the note title.
+    // Replace the command with its context so the bullet remains a clean note.
     setCurrentBulletText(editor, prompt)
     setMenu(null)
     genRef.current?.cancel()
@@ -125,11 +139,15 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
           className={i === active ? 'slash-item active' : 'slash-item'}
           onMouseDown={(e) => {
             e.preventDefault()
-            choose(s)
+            complete(s)
           }}
         >
           <span className="slash-label">/{s.label}</span>
-          <span className="slash-desc">{s.description}</span>
+          <span className="slash-desc">
+            {menu.query === s.label && menu.prompt.trim()
+              ? 'Press Enter to run with this context'
+              : `${s.description} · Enter or Tab to select`}
+          </span>
         </li>
       ))}
     </ul>

@@ -9,7 +9,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
-import { insertAiChild, writeAiText } from './insertIntoEditor'
+import { insertAiChild, setCurrentBulletText, writeAiText } from './insertIntoEditor'
 
 function makeEditor(text: string): Editor {
   return new Editor({
@@ -55,6 +55,13 @@ describe('agent output insertion', () => {
     editor.destroy()
   })
 
+  it('can complete a slash command and place the caret after it', () => {
+    setCurrentBulletText(editor, '/research ', true)
+
+    expect(bulletTexts(editor)).toEqual(['/research '])
+    expect(editor.state.selection.$from.parentOffset).toBe('/research '.length)
+  })
+
   it('leaves the caret in the trigger bullet when the AI child is inserted', () => {
     const before = editor.state.selection.from
 
@@ -73,6 +80,18 @@ describe('agent output insertion', () => {
       'First finding',
       'Second finding',
       'Third finding',
+    ])
+  })
+
+  it('drops blank separator lines instead of rendering empty AI bullets', () => {
+    const nodeId = insertAiChild(editor)!
+
+    writeAiText(editor, nodeId, 'First finding\n\n  \nSecond finding\n')
+
+    expect(bulletTexts(editor)).toEqual([
+      'Research topic',
+      'First finding',
+      'Second finding',
     ])
   })
 

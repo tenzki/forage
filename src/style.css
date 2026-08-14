@@ -74,6 +74,8 @@ body {
 }
 
 .outliner-editor {
+  --outline-indent: 26px;
+  --outline-control-width: 30px;
   max-width: 760px;
   margin: 0 auto;
   padding: 20px 32px 200px;
@@ -85,7 +87,7 @@ body {
 
 .outliner-editor ul {
   list-style: none;
-  padding-left: 22px;
+  padding-left: var(--outline-indent);
 }
 .outliner-editor > .ProseMirror > ul {
   padding-left: 0;
@@ -109,11 +111,13 @@ body {
 
 .bullet-controls {
   position: absolute;
-  top: 2px;
-  left: -32px;
-  display: flex;
-  align-items: center;
+  top: 1px;
+  left: calc(-1 * var(--outline-control-width));
+  display: grid;
+  grid-template-columns: 12px 18px;
+  width: var(--outline-control-width);
   height: 24px;
+  align-items: center;
   user-select: none;
 }
 
@@ -127,21 +131,28 @@ body {
 .bullet-collapse,
 .bullet-collapse-spacer {
   display: grid;
-  width: 14px;
-  height: 22px;
+  width: 12px;
+  height: 24px;
   place-items: center;
-  font-size: 18px;
-  line-height: 1;
 }
 
 .bullet-collapse {
   opacity: 0;
-  transform: rotate(0deg);
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition: opacity 120ms ease;
 }
 
-.bullet-collapse.is-expanded {
-  transform: rotate(90deg);
+.bullet-collapse::before {
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  content: '';
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.bullet-collapse.is-expanded::before {
+  transform: rotate(45deg);
 }
 
 li:hover > .bullet-controls .bullet-collapse,
@@ -207,6 +218,12 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
   top: 7px;
 }
 
+/* Hide separator rows left by older generations that preserved blank lines. */
+.outliner-editor li[data-node-type='ai']:not(:has(> ul)):has(> p:empty),
+.outliner-editor li[data-node-type='ai']:not(:has(> ul)):has(> p > br:only-child) {
+  display: none;
+}
+
 /* AI-generated bullets are visually distinct (EDIT-04) */
 .outliner-editor li[data-node-type='ai'] > p {
   color: #6a4ce0;
@@ -233,7 +250,7 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
   justify-content: space-between;
   gap: 16px;
   min-height: 45px;
-  padding: 7px max(20px, calc((100% - 760px) / 2 + 24px));
+  padding: 7px max(20px, calc((100% - 760px) / 2 + 32px));
   border-bottom: 1px solid #f0f0f0;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
