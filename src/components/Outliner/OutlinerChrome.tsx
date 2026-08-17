@@ -11,6 +11,7 @@ import {
   setSearchQuery,
   setZoom,
 } from '../../editor/outlinerUi'
+import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -112,13 +113,15 @@ function SearchResults({
 function OutlineSearch({
   editor,
   zoomId,
+  initialQuery,
   onClose,
 }: {
   editor: Editor
   zoomId: string | null
+  initialQuery: string
   onClose: () => void
 }) {
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
   const [allOutline, setAllOutline] = useState(!zoomId)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -133,8 +136,9 @@ function OutlineSearch({
 
   useEffect(() => {
     inputRef.current?.focus()
+    setSearchQuery(editor, initialQuery)
     return () => setSearchQuery(editor, '')
-  }, [editor])
+  }, [editor, initialQuery])
 
   function changeQuery(value: string) {
     setQuery(value)
@@ -210,23 +214,45 @@ function OutlineSearch({
 export function OutlinerChrome({ editor }: { editor: Editor | null }) {
   const zoomId = useEditorUi(editor)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQueryText] = useState('')
+
+  function openSearch(query = '') {
+    setSearchQueryText(query)
+    setSearchOpen(true)
+  }
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
         event.preventDefault()
-        setSearchOpen(true)
+        openSearch()
       }
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
   }, [])
 
+  useEffect(() => {
+    const openTag = (event: Event) => {
+      const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
+      if (tag) openSearch(`#${tag}`)
+    }
+    window.addEventListener(OUTLINE_TAG_EVENT, openTag)
+    return () => window.removeEventListener(OUTLINE_TAG_EVENT, openTag)
+  }, [])
+
   if (!editor) return null
   return (
     <>
-      <Toolbar editor={editor} zoomId={zoomId} onOpenSearch={() => setSearchOpen(true)} />
-      {searchOpen && <OutlineSearch editor={editor} zoomId={zoomId} onClose={() => setSearchOpen(false)} />}
+      <Toolbar editor={editor} zoomId={zoomId} onOpenSearch={() => openSearch()} />
+      {searchOpen && (
+        <OutlineSearch
+          editor={editor}
+          zoomId={zoomId}
+          initialQuery={searchQuery}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
     </>
   )
 }

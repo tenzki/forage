@@ -5,7 +5,7 @@
 // No false positives on mid-sentence slashes: we only trigger when the bullet
 // text *starts* with "/" (AGNT-01).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { SKILLS, type Skill } from '../../agent/skills'
 import {
@@ -51,12 +51,23 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
   const setOAuthCredential = useSettingsStore((s) => s.setOAuthCredential)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
+  const [completedSkill, setCompletedSkill] = useState<Skill | null>(null)
+  const completedSkillRef = useRef<Skill | null>(null)
 
   // Track editor changes to open/close the menu.
   useEffect(() => {
     if (!editor) return
     const update = () => {
       const state = readSlashState(editor)
+      const completed = completedSkillRef.current
+      if (completed && state?.query === completed.label) {
+        setMenu(null)
+        return
+      }
+      if (completed) {
+        completedSkillRef.current = null
+        setCompletedSkill(null)
+      }
       setMenu(state)
       setActive(0)
     }
@@ -100,18 +111,38 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [editor, menu, matches, active])
 
+  useEffect(() => {
+    if (!editor || !completedSkill) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+      const state = readSlashState(editor)
+      if (state?.query !== completedSkill.label) return
+      event.preventDefault()
+      run(completedSkill)
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [editor, completedSkill])
+
   function complete(skill: Skill) {
     if (!editor) return
     const context = menu?.prompt.trimStart() ?? ''
     const command = `/${skill.label}${context ? ` ${context}` : ' '}`
+    completedSkillRef.current = skill
+    setCompletedSkill(skill)
     setCurrentBulletText(editor, command, true)
+    setMenu(null)
     editor.view.focus()
   }
 
   function run(skill: Skill) {
     if (!editor) return
-    const prompt = (menu?.prompt || skill.label).trim()
+    const state = readSlashState(editor)
+    const context = state?.query === skill.label ? state.prompt : menu?.prompt
+    const prompt = (context || skill.label).trim()
     // Replace the command with its context so the bullet remains a clean note.
+    completedSkillRef.current = null
+    setCompletedSkill(null)
     setCurrentBulletText(editor, prompt)
     setMenu(null)
     runSkillIntoEditor(

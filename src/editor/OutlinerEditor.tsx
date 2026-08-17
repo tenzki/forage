@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { useEffect } from 'react'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { OutlinerUi } from './outlinerUi'
+import { TagDecorations } from './tags'
 import { EMPTY_DOC } from './emptyDoc'
 import type { JsonValue } from '../types/tree'
 
@@ -30,6 +31,7 @@ export function OutlinerEditor({
       StarterKit, // bulletList, listItem, paragraph, marks, history (undo/redo)
       BulletAttributes,
       OutlinerKeymap,
+      TagDecorations,
       OutlinerUi,
     ],
     content: (initialContent ?? EMPTY_DOC) as object,

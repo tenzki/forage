@@ -477,6 +477,58 @@ kbd {
 }
 
 /* ============================================================
+   Tags and autocomplete
+   ============================================================ */
+.outline-tag {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #f1eeff;
+  color: #6549c7;
+  cursor: pointer;
+  font-weight: 500;
+}
+.outline-tag:hover {
+  background: #e5dfff;
+}
+.tag-menu {
+  position: fixed;
+  z-index: 55;
+  min-width: 220px;
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  list-style: none;
+}
+.tag-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #6549c7;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.tag-item:hover,
+.tag-item.active {
+  background: #f0edff;
+}
+.tag-item small {
+  color: #999;
+  font-size: 11px;
+}
+
+/* ============================================================
    Slash menu
    ============================================================ */
 .slash-menu {

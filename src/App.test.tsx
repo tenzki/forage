@@ -57,6 +57,38 @@ describe('App view switching', () => {
     expect(container.querySelector('.ProseMirror')).toBe(editorBefore)
   })
 
+  it('hides slash suggestions after Tab completes a command', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('/res')
+    expect(container.querySelector('.slash-menu')).not.toBeNull()
+
+    await user.keyboard('{Tab}')
+    expect(container.querySelector('.slash-menu')).toBeNull()
+    expect(editor.textContent).toContain('/research ')
+
+    await user.keyboard('Workflowy alternatives')
+    expect(container.querySelector('.slash-menu')).toBeNull()
+  })
+
+  it('opens tag-filtered search when a hashtag is clicked', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('Tagged note #research')
+    const tag = container.querySelector('.outline-tag') as HTMLElement
+    await user.click(tag)
+
+    const search = await screen.findByRole('combobox', { name: 'Search bullets' }) as HTMLInputElement
+    expect(search.value).toBe('#research')
+    expect(screen.getAllByText('Tagged note #research').length).toBeGreaterThan(0)
+  })
+
   it('shows tools and can add an approved custom HTTP tool', async () => {
     const user = userEvent.setup()
     await renderApp()

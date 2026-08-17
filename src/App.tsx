@@ -4,6 +4,7 @@ import { OutlinerEditor } from './editor/OutlinerEditor'
 import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
+import { TagMenu } from './components/Outliner/TagMenu'
 import { loadOutline, createDebouncedSaver } from './persistence/outlineFile'
 import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue } from './types/tree'
@@ -78,6 +79,7 @@ export default function App() {
           onReady={setEditor}
         />
         <SlashMenu editor={editor} />
+        <TagMenu editor={editor} />
       </main>
 
       {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}
