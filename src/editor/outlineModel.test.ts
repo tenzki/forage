@@ -64,6 +64,54 @@ describe('Workflowy-style outline interactions', () => {
     expect(child?.ancestorIds).toEqual(['alpha'])
   })
 
+  it('inserts a new first child when Enter follows an expanded parent', () => {
+    let parentEnd = -1
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeId === 'alpha') {
+        parentEnd = pos + 2 + node.firstChild!.content.size
+        return false
+      }
+      return undefined
+    })
+    editor.commands.setTextSelection(parentEnd)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!.node
+    const children = alpha.child(1)
+    expect(children.childCount).toBe(2)
+    expect(children.child(0).textContent).toBe('')
+    expect(children.child(1).textContent).toBe('Alpha child')
+    expect(editor.state.selection.$from.parent.textContent).toBe('')
+  })
+
+  it('inserts a visible sibling after a collapsed parent when Enter follows it', () => {
+    expect(toggleCollapsed(editor, 'alpha')).toBe(true)
+    let parentEnd = -1
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeId === 'alpha') {
+        parentEnd = pos + 2 + node.firstChild!.content.size
+        return false
+      }
+      return undefined
+    })
+    editor.commands.setTextSelection(parentEnd)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const rootList = editor.state.doc.firstChild!
+    expect(rootList.childCount).toBe(4)
+    expect(rootList.child(0).attrs.nodeId).toBe('alpha')
+    expect(rootList.child(0).child(1).child(0).textContent).toBe('Alpha child')
+    expect(rootList.child(1).textContent).toBe('')
+    expect(rootList.child(2).attrs.nodeId).toBe('bravo')
+    expect(editor.state.selection.$from.parent.textContent).toBe('')
+  })
+
   it('shows agent activity as transient decoration instead of document content', () => {
     const beforeText = editor.state.doc.textContent
 

@@ -119,7 +119,7 @@ function findAiList(
 /** Split streamed text into the lines that should become bullets. */
 function toLines(text: string): string[] {
   // Models often separate ideas with blank lines. Empty list items create
-  // orphan dots and AI sparkles, so keep only visible outline content.
+  // orphan dots, so keep only visible outline content.
   const lines = text
     .split('\n')
     .map((line) => line.trim())

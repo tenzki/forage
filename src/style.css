@@ -109,6 +109,10 @@ body {
   background: #fafafa;
 }
 
+.outliner-editor a[href] {
+  cursor: pointer;
+}
+
 .bullet-controls {
   position: absolute;
   top: 1px;
@@ -323,19 +327,6 @@ body.is-dragging-outline .bullet-collapse {
   display: list-item !important;
 }
 
-/* AI-generated bullets are visually distinct (EDIT-04) */
-.outliner-editor li[data-node-type='ai'] > p {
-  color: #6a4ce0;
-}
-.outliner-editor li[data-node-type='ai'] > .bullet-controls .bullet-dot::after {
-  background: #6a4ce0;
-}
-.outliner-editor li[data-node-type='ai'] > p::after {
-  content: ' ✦';
-  font-size: 0.75em;
-  color: #6a4ce0;
-  opacity: 0.7;
-}
 .outliner-editor li.is-agent-active > p {
   color: #777;
   font-size: 13px;

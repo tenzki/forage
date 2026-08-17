@@ -48,7 +48,7 @@ The biggest gaps are not the tree itself. They are the systems Workflowy layers 
 5. **Sharing and platform:** collaboration, comments, mobile/web capture, import/export, integrations, and multi-platform sync.
 6. **AI breadth:** account-wide chat, page/subtree context, chat history, accept/reject/regenerate, transformations, and AI-driven structural actions.
 
-The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup with streaming outline-native skills, web tools, custom public GET tools, cancellation, AI styling, and one-step undo behavior**.
+The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup with streaming outline-native skills, web tools, custom public GET tools, cancellation, and one-step undo behavior**.
 
 ---
 
@@ -250,7 +250,7 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Chat with all notes | Account-wide retrieval, answers, connections, and supporting notes | No account-wide AI chat/retrieval UI | **Missing** |
 | Chat about current page | Chat can focus on the current node and its whole subtree | `/ask` is one-shot and receives ancestor/current-item text, not descendants | **Partial** |
 | Persistent chat history | Start, revisit, continue, and delete chats | No chat session/history model | **Missing** |
-| AI node in the outline | Prompt near content and generate in place | Skills insert streaming AI-marked child bullets | **Supported** |
+| AI node in the outline | Prompt near content and generate in place | Skills insert streaming child bullets that use normal bullet styling after generation | **Supported** |
 | Nearby/page context | AI node uses nearby items; focused chat can use a whole page | Context is ancestors from outermost to current bullet only | **Partial** |
 | Accept/reject/regenerate | Explicit controls gate or retry generated output | Output is inserted immediately; undo removes it, Stop cancels it | **Partial** |
 | Prepared transformations | Summarize, find tasks, draft outline, fix grammar, shorten | Research, brainstorm, and ask skills instead | **Different** |
@@ -258,7 +258,7 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Streaming output | AI generation visibly progresses | Deltas stream into stable AI child bullets | **Supported** |
 | Cancellation and failure state | AI node controls include response management | Stop button aborts; `[cancelled]` / `[error: …]` remains in place | **Supported** |
 | Undo-safe generation | Generated changes participate safely in document editing | Streaming writes stay out of history; one undo removes the generation | **Supported** |
-| AI provenance styling | Workflowy has an AI Node type | `nodeType: 'ai'` adds distinct dot/sparkle styling | **Supported** |
+| AI provenance styling | Workflowy has an AI Node type | `nodeType: 'ai'` is retained internally, but completed output has no visible AI marker | **Missing** |
 | Web research tools | Not described as a configurable Workflowy AI UX in reviewed pages | Built-in DuckDuckGo search and Jina page fetch can be enabled | **Different / advantage** |
 | Custom agent tools | Workflowy exposes API/MCP routes for external agents | Users can configure approved public GET endpoints as Codex tools | **Different / advantage** |
 | Agent can restructure existing tree | API/MCP agents can create, update, move, complete, delete, and search | In-app agent only appends/replaces its generated child list | **Missing** |
