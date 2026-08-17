@@ -5,79 +5,135 @@ import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
 import { TagMenu } from './components/Outliner/TagMenu'
-import { loadOutline, createDebouncedSaver } from './persistence/outlineFile'
+import {
+  loadOutline,
+  createDebouncedSaver,
+  type DebouncedSaver,
+} from './persistence/outlineFile'
 import { useSettingsStore } from './store/settingsStore'
-import type { JsonValue } from './types/tree'
+import type { JsonValue, TrashEntry } from './types/tree'
 
 type View = 'outliner' | 'settings'
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [initialContent, setInitialContent] = useState<JsonValue | null>(null)
+  const [liveDoc, setLiveDoc] = useState<JsonValue | null>(null)
+  const [trash, setTrash] = useState<TrashEntry[]>([])
   const [view, setView] = useState<View>('outliner')
   const [editor, setEditor] = useState<Editor | null>(null)
-  const saver = useRef(createDebouncedSaver())
-  const loadSettings = useSettingsStore((s) => s.load)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const loadSettings = useSettingsStore((state) => state.load)
+  const saver = useRef<DebouncedSaver | null>(null)
 
-  // Initial load: outline file + settings.
-  useEffect(() => {
-    void (async () => {
+  if (!saver.current) {
+    saver.current = createDebouncedSaver(
+      600,
+      (error) => setSaveError(errorMessage(error)),
+      () => setSaveError(null),
+    )
+  }
+
+  const readOutline = useCallback(async () => {
+    setLoadError(null)
+    try {
       const outline = await loadOutline()
-      setInitialContent(outline?.doc ?? null)
+      const doc = outline?.doc ?? null
+      setInitialContent(doc)
+      setLiveDoc(doc)
+      setTrash(outline?.trash ?? [])
       setLoaded(true)
-    })()
-    void loadSettings()
-  }, [loadSettings])
+    } catch (error) {
+      setLoadError(errorMessage(error))
+    }
+  }, [])
 
-  // Flush any pending save when the window is closing.
   useEffect(() => {
-    const flush = () => void saver.current.flush()
+    void readOutline()
+    void loadSettings()
+  }, [loadSettings, readOutline])
+
+  useEffect(() => {
+    if (!loaded || !liveDoc) return
+    saver.current?.schedule({ version: 2, doc: liveDoc, trash })
+  }, [liveDoc, loaded, trash])
+
+  useEffect(() => {
+    const flush = () => void saver.current?.flush().catch((error) => setSaveError(errorMessage(error)))
     window.addEventListener('beforeunload', flush)
     return () => window.removeEventListener('beforeunload', flush)
   }, [])
 
-  // Cmd+, toggles settings.
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === ',') {
-        e.preventDefault()
-        setView((v) => (v === 'settings' ? 'outliner' : 'settings'))
+    const handler = (event: KeyboardEvent) => {
+      if (event.metaKey && event.key === ',') {
+        event.preventDefault()
+        setView((current) => (current === 'settings' ? 'outliner' : 'settings'))
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const handleDocChange = useCallback((doc: JsonValue) => {
-    saver.current.schedule({ version: 1, doc })
-  }, [])
+  const handleDocChange = useCallback((doc: JsonValue) => setLiveDoc(doc), [])
 
-  if (!loaded) return <div className="app-loading">Loading…</div>
+  async function retrySave() {
+    try {
+      await saver.current?.flush()
+      setSaveError(null)
+    } catch (error) {
+      setSaveError(errorMessage(error))
+    }
+  }
+
+  function startEmpty() {
+    setInitialContent(null)
+    setLiveDoc(null)
+    setTrash([])
+    setLoadError(null)
+    setLoaded(true)
+  }
+
+  if (!loaded) {
+    if (!loadError) return <div className="app-loading">Loading…</div>
+    return (
+      <main className="load-error" role="alert">
+        <h1>Could not open your outline</h1>
+        <p>{loadError}</p>
+        <div>
+          <button className="primary-action" onClick={() => void readOutline()}>Retry</button>
+          <button onClick={startEmpty}>Start with an empty outline</button>
+        </div>
+        <small>Starting empty does not delete the existing file, but saving new edits may replace it.</small>
+      </main>
+    )
+  }
 
   return (
     <div id="app">
       <header className="app-header">
         <span className="app-title">AI Chat</span>
-        <button
-          className="app-settings-btn"
-          onClick={() => setView((v) => (v === 'settings' ? 'outliner' : 'settings'))}
-        >
+        <button className="app-settings-btn" onClick={() => setView((current) => (current === 'settings' ? 'outliner' : 'settings'))}>
           {view === 'settings' ? 'Outline' : 'Settings'}
         </button>
       </header>
 
-      {/*
-        The editor is mounted for the lifetime of the app and only hidden when
-        Settings is open. Unmounting it would drop the live document and the
-        ProseMirror undo stack, and remount it from the startup snapshot.
-      */}
+      {saveError && (
+        <div className="persistence-error" role="alert">
+          <span><strong>Outline not saved.</strong> {saveError}</span>
+          <button onClick={() => void retrySave()}>Retry</button>
+          <button onClick={() => setSaveError(null)}>Dismiss</button>
+        </div>
+      )}
+
       <main className="outliner-main" hidden={view === 'settings'}>
-        <OutlinerChrome editor={editor} />
-        <OutlinerEditor
-          initialContent={initialContent}
-          onDocChange={handleDocChange}
-          onReady={setEditor}
-        />
+        <OutlinerChrome editor={editor} trash={trash} onTrashChange={setTrash} />
+        <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
         <SlashMenu editor={editor} />
         <TagMenu editor={editor} />
       </main>

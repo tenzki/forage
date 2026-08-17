@@ -25,10 +25,26 @@ export interface BulletAttrs {
   collapsed: boolean
 }
 
-/** The persisted document envelope written to the iCloud Drive file. */
+/** A branch held outside the live editor until it is restored or purged. */
+export interface TrashEntry {
+  id: string
+  deletedAt: string
+  originalParentId: string | null
+  originalIndex: number
+  node: JsonValue
+}
+
+/** Current persisted envelope written to the iCloud Drive file. */
 export interface OutlineDoc {
-  version: 1
+  version: 2
   /** Raw ProseMirror doc JSON (a `doc` node containing one `bulletList`). */
+  doc: JsonValue
+  trash: TrashEntry[]
+}
+
+/** Previous envelope, accepted and migrated when loading existing outlines. */
+export interface LegacyOutlineDoc {
+  version: 1
   doc: JsonValue
 }
 

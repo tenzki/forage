@@ -75,7 +75,7 @@ body {
 
 .outliner-editor {
   --outline-indent: 26px;
-  --outline-control-width: 30px;
+  --outline-control-width: 52px;
   max-width: 760px;
   margin: 0 auto;
   padding: 20px 32px 200px;
@@ -114,7 +114,7 @@ body {
   top: 1px;
   left: calc(-1 * var(--outline-control-width));
   display: grid;
-  grid-template-columns: 12px 18px;
+  grid-template-columns: 22px 12px 18px;
   width: var(--outline-control-width);
   height: 24px;
   align-items: center;
@@ -155,7 +155,8 @@ body {
   transform: rotate(45deg);
 }
 
-li:hover > .bullet-controls .bullet-collapse,
+li:has(> p:hover) > .bullet-controls .bullet-collapse,
+li:has(> .bullet-controls:hover) > .bullet-controls .bullet-collapse,
 li.is-collapsed > .bullet-controls .bullet-collapse,
 .bullet-collapse:focus-visible {
   opacity: 1;
@@ -183,6 +184,101 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
 .bullet-dot:focus-visible::after {
   background: #6a4ce0;
   transform: scale(1.45);
+}
+
+.bullet-menu {
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  opacity: 0;
+  font-size: 10px;
+  letter-spacing: -1px;
+  transition: opacity 120ms ease;
+}
+
+li:has(> p:hover) > .bullet-controls .bullet-menu,
+li:has(> .bullet-controls:hover) > .bullet-controls .bullet-menu,
+.bullet-menu:focus-visible {
+  opacity: 1;
+}
+
+.outliner-editor li[data-drop-placement='before'] {
+  margin-top: 28px;
+}
+.outliner-editor li[data-drop-placement='after'],
+.outliner-editor li[data-drop-placement='inside'] {
+  margin-bottom: 28px;
+}
+.outliner-editor li[data-drop-placement='before'] > p {
+  box-shadow: 0 -2px 0 #6a4ce0;
+}
+.outliner-editor li[data-drop-placement='after'] > p {
+  box-shadow: 0 2px 0 #6a4ce0;
+}
+.outliner-editor li[data-drop-placement='inside'] > p {
+  background: #ece7ff;
+  box-shadow: inset 0 0 0 1px #cfc5f8;
+}
+.outliner-editor li.is-drag-source {
+  display: none;
+}
+body.is-dragging-outline,
+body.is-dragging-outline * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+body.is-dragging-outline .bullet-menu,
+body.is-dragging-outline .bullet-collapse {
+  opacity: 0 !important;
+  transition: none !important;
+}
+.outline-drag-ghost {
+  position: fixed;
+  z-index: 200;
+  max-width: min(440px, 65vw);
+  overflow: hidden;
+  padding: 5px 10px;
+  border: 1px solid #cfc5f8;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  color: #333;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-drop-preview {
+  position: fixed;
+  z-index: 190;
+  display: flex;
+  height: 24px;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 1px 7px;
+  border-top: 2px solid #6a4ce0;
+  border-radius: 3px;
+  background: rgba(241, 238, 255, 0.92);
+  color: #6852bd;
+  font-size: 13px;
+  opacity: 0.9;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outline-drop-preview[hidden] {
+  display: none;
+}
+.outline-drop-preview[data-placement='inside'] {
+  border-top-color: #8c78dc;
+  background: rgba(232, 226, 255, 0.96);
+}
+.outline-drop-preview-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #6a4ce0;
 }
 
 .outliner-editor li.is-collapsed > ul {
@@ -336,7 +432,8 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
 }
 
 .outline-breadcrumbs button,
-.search-open {
+.search-open,
+.trash-open {
   border: 0;
   background: transparent;
   color: #777;
@@ -345,7 +442,8 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
 }
 
 .outline-breadcrumbs button:hover,
-.search-open:hover {
+.search-open:hover,
+.trash-open:hover {
   color: #6a4ce0;
 }
 
@@ -363,13 +461,22 @@ li.is-collapsed > .bullet-controls .bullet-collapse,
   white-space: nowrap;
 }
 
-.search-open {
+.outline-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-open,
+.trash-open {
   flex: 0 0 auto;
   padding: 5px 8px;
   border-radius: 6px;
 }
 
-.search-open:hover {
+.search-open:hover,
+.trash-open:hover {
   background: #f6f4ff;
 }
 
@@ -439,17 +546,12 @@ kbd {
 }
 
 .search-result {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
   padding: 8px 10px;
-  border: 0;
   border-radius: 7px;
-  background: transparent;
   color: #222;
-  cursor: pointer;
-  text-align: left;
 }
 
 .search-result:hover,
@@ -457,7 +559,32 @@ kbd {
   background: #f1eeff;
 }
 
+.search-result input {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.search-result input:focus {
+  border-color: #bfb3ee;
+  background: #fff;
+  outline: none;
+}
+.search-result button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  padding: 4px 8px;
+  border: 1px solid #ddd8f5;
+  border-radius: 5px;
+  background: #fff;
+  color: #6a4ce0;
+  cursor: pointer;
+}
 .search-result small {
+  grid-column: 1;
   overflow: hidden;
   color: #999;
   text-overflow: ellipsis;
@@ -809,4 +936,207 @@ kbd {
   background: #fff0f0;
   color: #a22;
   font-size: 12px;
+}
+
+/* P0 node actions, trash, and persistence feedback */
+.node-menu-dismiss {
+  position: fixed;
+  z-index: 79;
+  inset: 0;
+  border: 0;
+  background: transparent;
+}
+.node-action-menu {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  width: 180px;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+}
+.node-action-menu button {
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+  text-align: left;
+}
+.node-action-menu button:hover,
+.node-action-menu button:focus-visible {
+  background: #f1eeff;
+  outline: none;
+}
+.danger-action {
+  color: #a22 !important;
+}
+.move-dialog {
+  display: flex;
+  width: min(420px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 20px;
+  border: 1px solid #dedede;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.18);
+}
+.move-dialog h2,
+.trash-panel h2 {
+  font-size: 18px;
+}
+.move-dialog label {
+  margin-top: 5px;
+  color: #555;
+  font-size: 12px;
+  font-weight: 600;
+}
+.move-dialog select {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.dialog-actions button,
+.load-error button {
+  padding: 7px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.primary-action {
+  border-color: #6a4ce0 !important;
+  background: #6a4ce0 !important;
+  color: #fff !important;
+}
+.trash-panel {
+  width: min(620px, calc(100vw - 32px));
+  max-height: 70vh;
+  align-self: flex-start;
+  overflow: hidden;
+  border: 1px solid #dedede;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.18);
+}
+.trash-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eee;
+}
+.trash-panel header p,
+.trash-empty {
+  color: #888;
+  font-size: 12px;
+}
+.trash-panel header > button {
+  border: 0;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+  font-size: 22px;
+}
+.trash-empty {
+  padding: 36px 18px;
+  text-align: center;
+}
+.trash-list {
+  max-height: 55vh;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+.trash-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.trash-list li > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.trash-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trash-list small {
+  color: #999;
+}
+.trash-list li > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.trash-list button {
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+.action-error,
+.persistence-error {
+  display: flex;
+  z-index: 90;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #fff0f0;
+  color: #922;
+  font-size: 12px;
+}
+.action-error {
+  position: sticky;
+  top: 45px;
+}
+.action-error button,
+.persistence-error button {
+  border: 0;
+  background: transparent;
+  color: #6a4ce0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.load-error {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.load-error h1 {
+  font-size: 22px;
+}
+.load-error > div {
+  display: flex;
+  gap: 8px;
+}
+.load-error small {
+  max-width: 480px;
+  color: #888;
 }

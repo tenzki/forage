@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
-import { collectBullets, moveBulletById } from './outlineModel'
+import {
+  collectBullets,
+  duplicateBullet,
+  moveBulletById,
+  moveBulletTo,
+  restoreBullet,
+  trashBullet,
+} from './outlineModel'
 import {
   OutlinerUi,
   setAgentActivity,
@@ -89,6 +96,70 @@ describe('Workflowy-style outline interactions', () => {
       'bravo',
       'charlie',
     ])
+  })
+
+  it('pointer-drags a bullet over the target row to re-nest it', () => {
+    const source = editor.view.dom.querySelector('[data-node-id="bravo"] > .bullet-controls .bullet-dot') as HTMLButtonElement
+    const target = editor.view.dom.querySelector('[data-node-id="alpha-child"]') as HTMLElement
+    const targetText = target.querySelector(':scope > p') as HTMLElement
+    targetText.getBoundingClientRect = () => ({ top: 0, height: 30 } as DOMRect)
+    const hitTest = vi.spyOn(document, 'elementFromPoint').mockReturnValue(targetText)
+
+    source.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true, cancelable: true, button: 0, clientX: 0, clientY: 0,
+    }))
+    document.dispatchEvent(new MouseEvent('pointermove', {
+      bubbles: true, cancelable: true, clientX: 10, clientY: 15,
+    }))
+    const preview = document.querySelector('.outline-drop-preview') as HTMLElement
+    expect(source.closest('li')?.classList.contains('is-drag-source')).toBe(true)
+    expect(target.dataset.dropPlacement).toBe('inside')
+    expect(preview.hidden).toBe(false)
+    expect(preview.dataset.placement).toBe('inside')
+    expect(preview.textContent).toContain('Bravo')
+    document.dispatchEvent(new MouseEvent('pointerup', {
+      bubbles: true, cancelable: true, clientX: 10, clientY: 15,
+    }))
+    hitTest.mockRestore()
+
+    expect(document.querySelector('.outline-drop-preview')).toBeNull()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.ancestorIds).toEqual([
+      'alpha',
+      'alpha-child',
+    ])
+  })
+
+  it('moves a branch across parents and undoes it in one step', () => {
+    expect(moveBulletTo(editor, 'bravo', 'alpha', 'inside')).toBe(true)
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')
+    expect(bravo?.ancestorIds).toEqual(['alpha'])
+
+    editor.commands.undo()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.ancestorIds).toEqual([])
+  })
+
+  it('prevents moving a branch inside its own descendant', () => {
+    const before = editor.state.doc.toJSON()
+    expect(moveBulletTo(editor, 'alpha', 'alpha-child', 'inside')).toBe(false)
+    expect(editor.state.doc.toJSON()).toEqual(before)
+  })
+
+  it('duplicates a complete branch with fresh ids', () => {
+    expect(duplicateBullet(editor, 'alpha')).toBe(true)
+    const entries = collectBullets(editor.state.doc)
+    const alphaCopies = entries.filter((entry) => entry.text === 'Alpha')
+    const childCopies = entries.filter((entry) => entry.text === 'Alpha child')
+    expect(alphaCopies).toHaveLength(2)
+    expect(childCopies).toHaveLength(2)
+    expect(new Set(entries.map((entry) => entry.id)).size).toBe(entries.length)
+  })
+
+  it('moves a deleted branch to trash and restores its original parent', () => {
+    const deleted = trashBullet(editor, 'alpha-child')
+    expect(deleted?.originalParentId).toBe('alpha')
+    expect(collectBullets(editor.state.doc).some((entry) => entry.id === 'alpha-child')).toBe(false)
+    expect(deleted && restoreBullet(editor, deleted)).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha-child')?.ancestorIds).toEqual(['alpha'])
   })
 
   it('collapses a branch without removing its children', () => {

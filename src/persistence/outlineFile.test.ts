@@ -1,0 +1,53 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const fsMocks = vi.hoisted(() => ({
+  exists: vi.fn(async () => true),
+  mkdir: vi.fn(async () => undefined),
+  readTextFile: vi.fn(async () => ''),
+  writeTextFile: vi.fn(async () => undefined),
+}))
+
+vi.mock('@tauri-apps/api/path', () => ({
+  homeDir: async () => '/home/test',
+  join: async (...parts: string[]) => parts.join('/'),
+}))
+
+vi.mock('@tauri-apps/plugin-fs', () => fsMocks)
+
+import { createDebouncedSaver, normalizeOutline } from './outlineFile'
+
+const doc = {
+  type: 'doc',
+  content: [{ type: 'bulletList', content: [] }],
+}
+
+describe('outline persistence', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('migrates version 1 files without losing the document', () => {
+    expect(normalizeOutline({ version: 1, doc })).toEqual({
+      version: 2,
+      doc,
+      trash: [],
+    })
+  })
+
+  it('rejects malformed persisted input', () => {
+    expect(() => normalizeOutline({ version: 2, doc, trash: [{}] })).toThrow(/invalid format/)
+    expect(() => normalizeOutline(null)).toThrow(/valid document/)
+  })
+
+  it('retains a failed write so the user can retry it', async () => {
+    fsMocks.writeTextFile
+      .mockRejectedValueOnce(new Error('iCloud unavailable'))
+      .mockResolvedValueOnce(undefined)
+    const onError = vi.fn()
+    const saver = createDebouncedSaver(60_000, onError)
+    saver.schedule({ version: 2, doc, trash: [] })
+
+    await expect(saver.flush()).rejects.toThrow('iCloud unavailable')
+    expect(saver.hasPending()).toBe(true)
+    await expect(saver.flush()).resolves.toBeUndefined()
+    expect(saver.hasPending()).toBe(false)
+  })
+})

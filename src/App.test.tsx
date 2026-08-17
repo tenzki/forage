@@ -11,17 +11,19 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 
+const fsMocks = vi.hoisted(() => ({
+  exists: vi.fn(async () => false),
+  mkdir: vi.fn(async () => undefined),
+  readTextFile: vi.fn(async () => ''),
+  writeTextFile: vi.fn(async () => undefined),
+}))
+
 vi.mock('@tauri-apps/api/path', () => ({
   homeDir: async () => '/home/test',
   join: async (...parts: string[]) => parts.join('/'),
 }))
 
-vi.mock('@tauri-apps/plugin-fs', () => ({
-  exists: async () => false,
-  mkdir: async () => undefined,
-  readTextFile: async () => '',
-  writeTextFile: async () => undefined,
-}))
+vi.mock('@tauri-apps/plugin-fs', () => fsMocks)
 
 vi.mock('@tauri-apps/plugin-store', () => ({
   load: async () => ({
@@ -41,6 +43,37 @@ async function renderApp() {
 describe('App view switching', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    fsMocks.exists.mockResolvedValue(false)
+    fsMocks.readTextFile.mockResolvedValue('')
+    fsMocks.writeTextFile.mockResolvedValue(undefined)
+  })
+
+  it('shows a recoverable error instead of silently replacing an unreadable outline', async () => {
+    const user = userEvent.setup()
+    fsMocks.exists.mockResolvedValue(true)
+    fsMocks.readTextFile
+      .mockRejectedValueOnce(new Error('permission denied'))
+      .mockResolvedValueOnce(JSON.stringify({
+        version: 2,
+        trash: [],
+        doc: {
+          type: 'doc',
+          content: [{
+            type: 'bulletList',
+            content: [{
+              type: 'listItem',
+              attrs: { nodeId: 'recovered', nodeType: 'user', collapsed: false },
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Recovered' }] }],
+            }],
+          }],
+        },
+      }))
+    const view = render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Could not open your outline' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Start with an empty outline' })).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(view.container.querySelector('.ProseMirror')?.textContent).toContain('Recovered'))
   })
 
   it('keeps the same editor instance when toggling Settings', async () => {
