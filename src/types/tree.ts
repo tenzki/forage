@@ -34,19 +34,24 @@ export interface TrashEntry {
   node: JsonValue
 }
 
+/** A persistent sidebar link to a bullet or tag search. */
+export type OutlineShortcut =
+  | { type: 'node'; target: string }
+  | { type: 'tag'; target: string }
+
 /** Current persisted envelope written to the iCloud Drive file. */
 export interface OutlineDoc {
-  version: 2
+  version: 3
   /** Raw ProseMirror doc JSON (a `doc` node containing one `bulletList`). */
   doc: JsonValue
   trash: TrashEntry[]
+  shortcuts: OutlineShortcut[]
 }
 
-/** Previous envelope, accepted and migrated when loading existing outlines. */
-export interface LegacyOutlineDoc {
-  version: 1
-  doc: JsonValue
-}
+/** Previous envelopes, accepted and migrated when loading existing outlines. */
+export type LegacyOutlineDoc =
+  | { version: 1; doc: JsonValue }
+  | { version: 2; doc: JsonValue; trash: TrashEntry[] }
 
 /** Stable id generator for bullets. crypto.randomUUID is available in the webview. */
 export function newNodeId(): string {

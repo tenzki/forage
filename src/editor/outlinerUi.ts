@@ -5,6 +5,15 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { collectBullets, reorderBullet, type MovePlacement } from './outlineModel'
 
 export const OUTLINER_NODE_MENU_EVENT = 'outliner-node-menu'
+export const OUTLINER_POINTER_DRAG_EVENT = 'outliner-pointer-drag'
+export const OUTLINER_OPEN_TRASH_EVENT = 'outliner-open-trash'
+
+export interface PointerDragEventDetail {
+  phase: 'move' | 'drop' | 'cancel'
+  nodeId: string
+  clientX: number
+  clientY: number
+}
 
 export interface NodeMenuRequest {
   nodeId: string
@@ -187,6 +196,12 @@ function clearPointerDrag(state: PointerDragState, button: HTMLButtonElement): v
   button.setAttribute('aria-grabbed', 'false')
 }
 
+function emitPointerDrag(detail: PointerDragEventDetail): void {
+  window.dispatchEvent(new CustomEvent<PointerDragEventDetail>(OUTLINER_POINTER_DRAG_EVENT, {
+    detail,
+  }))
+}
+
 function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: string): void {
   button.style.touchAction = 'none'
   button.addEventListener('pointerdown', (downEvent) => {
@@ -200,9 +215,17 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
       sourceRow, targetRow: null, targetId: null, placement: 'after', ghost: null, preview: null,
     }
 
-    const move = (event: PointerEvent) => updatePointerDrag(event, state, button)
-    const finish = (event: PointerEvent) => {
-      if (state.started) event.preventDefault()
+    const move = (event: PointerEvent) => updatePointerDrag(event, state, button, nodeId)
+    const finish = (event: PointerEvent, cancelled = false) => {
+      if (state.started) {
+        event.preventDefault()
+        emitPointerDrag({
+          phase: cancelled ? 'cancel' : 'drop',
+          nodeId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        })
+      }
       const targetId = state.targetId
       const placement = state.placement
       if (state.started) button.dataset.suppressZoom = 'true'
@@ -210,12 +233,12 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
       document.removeEventListener('pointermove', move)
       document.removeEventListener('pointerup', finish)
       document.removeEventListener('pointercancel', cancel)
-      if (state.started && targetId) reorderBullet(editor, nodeId, targetId, placement)
+      if (state.started && !cancelled && targetId) reorderBullet(editor, nodeId, targetId, placement)
       window.setTimeout(() => delete button.dataset.suppressZoom, 0)
     }
     const cancel = (event: PointerEvent) => {
       state.targetId = null
-      finish(event)
+      finish(event, true)
     }
     document.addEventListener('pointermove', move)
     document.addEventListener('pointerup', finish)
@@ -223,7 +246,12 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
   })
 }
 
-function updatePointerDrag(event: PointerEvent, state: PointerDragState, button: HTMLButtonElement): void {
+function updatePointerDrag(
+  event: PointerEvent,
+  state: PointerDragState,
+  button: HTMLButtonElement,
+  nodeId: string,
+): void {
   const distance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY)
   if (!state.started && distance < 4) return
   event.preventDefault()
@@ -239,6 +267,12 @@ function updatePointerDrag(event: PointerEvent, state: PointerDragState, button:
     state.ghost.style.left = `${event.clientX + 14}px`
     state.ghost.style.top = `${event.clientY + 10}px`
   }
+  emitPointerDrag({
+    phase: 'move',
+    nodeId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  })
   const hitRow = rowAt(event.clientX, event.clientY, state.sourceRow)
   const row = hitRow ?? (previewContainsPoint(state.preview, event.clientX, event.clientY)
     ? state.targetRow

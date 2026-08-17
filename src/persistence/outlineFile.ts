@@ -8,7 +8,13 @@ import {
   writeTextFile,
 } from '@tauri-apps/plugin-fs'
 import { homeDir, join } from '@tauri-apps/api/path'
-import type { JsonValue, LegacyOutlineDoc, OutlineDoc, TrashEntry } from '../types/tree'
+import type {
+  JsonValue,
+  LegacyOutlineDoc,
+  OutlineDoc,
+  OutlineShortcut,
+  TrashEntry,
+} from '../types/tree'
 
 const ICLOUD_REL = 'Library/Mobile Documents/com~apple~CloudDocs/AIChat'
 const FILE_NAME = 'tree.json'
@@ -31,6 +37,13 @@ function validPmNode(value: unknown): boolean {
   return Array.isArray(value.content) && value.content.every(validPmNode)
 }
 
+function validShortcut(value: unknown): value is OutlineShortcut {
+  return isObject(value)
+    && (value.type === 'node' || value.type === 'tag')
+    && typeof value.target === 'string'
+    && value.target.trim().length > 0
+}
+
 function validTrashEntry(value: unknown): value is TrashEntry {
   if (!isObject(value) || !isObject(value.node) || !isObject(value.node.attrs)) return false
   return typeof value.id === 'string'
@@ -50,12 +63,25 @@ export function normalizeOutline(value: unknown): OutlineDoc {
   }
   if (value.version === 1) {
     const legacy = value as unknown as LegacyOutlineDoc
-    return { version: 2, doc: legacy.doc, trash: [] }
+    return { version: 3, doc: legacy.doc, trash: [], shortcuts: [] }
   }
-  if (value.version !== 2 || !Array.isArray(value.trash) || !value.trash.every(validTrashEntry)) {
+  if (!Array.isArray(value.trash) || !value.trash.every(validTrashEntry)) {
     throw new Error('The outline file uses an unsupported or invalid format.')
   }
-  return { version: 2, doc: value.doc as JsonValue, trash: value.trash }
+  if (value.version === 2) {
+    return { version: 3, doc: value.doc as JsonValue, trash: value.trash, shortcuts: [] }
+  }
+  if (value.version !== 3
+    || !Array.isArray(value.shortcuts)
+    || !value.shortcuts.every(validShortcut)) {
+    throw new Error('The outline file uses an unsupported or invalid format.')
+  }
+  return {
+    version: 3,
+    doc: value.doc as JsonValue,
+    trash: value.trash,
+    shortcuts: value.shortcuts,
+  }
 }
 
 /** Read and migrate the outline, or return null on the first run. */

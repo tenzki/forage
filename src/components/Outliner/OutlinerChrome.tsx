@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import {
   breadcrumbFor,
@@ -10,12 +11,13 @@ import {
 import {
   getOutlinerUiState,
   OUTLINER_NODE_MENU_EVENT,
+  OUTLINER_OPEN_TRASH_EVENT,
   setSearchQuery,
   setZoom,
   type NodeMenuRequest,
 } from '../../editor/outlinerUi'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
-import type { TrashEntry } from '../../types/tree'
+import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
 import { TrashPanel } from './TrashPanel'
 
@@ -54,23 +56,33 @@ function Breadcrumbs({ editor, zoomId }: { editor: Editor; zoomId: string | null
 function Toolbar({
   editor,
   zoomId,
-  trashCount,
+  sidebarCollapsed,
+  onToggleSidebar,
   onOpenSearch,
-  onOpenTrash,
 }: {
   editor: Editor
   zoomId: string | null
-  trashCount: number
+  sidebarCollapsed: boolean
+  onToggleSidebar: () => void
   onOpenSearch: () => void
-  onOpenTrash: () => void
 }) {
   return (
     <div className="outline-toolbar">
-      <Breadcrumbs editor={editor} zoomId={zoomId} />
+      <div className="outline-toolbar-navigation">
+        <button
+          className="outline-sidebar-toggle"
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={onToggleSidebar}
+        >
+          {sidebarCollapsed
+            ? <PanelLeftOpen size={17} aria-hidden="true" />
+            : <PanelLeftClose size={17} aria-hidden="true" />}
+        </button>
+        <Breadcrumbs editor={editor} zoomId={zoomId} />
+      </div>
       <div className="outline-toolbar-actions">
-        <button className="trash-open" onClick={onOpenTrash}>Trash{trashCount ? ` (${trashCount})` : ''}</button>
         <button className="search-open" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
-          <span aria-hidden="true">⌕</span> Search <kbd>⌘K</kbd>
+          <Search size={15} aria-hidden="true" /> Search <kbd>⌘K</kbd>
         </button>
       </div>
     </div>
@@ -257,10 +269,18 @@ export function OutlinerChrome({
   editor,
   trash,
   onTrashChange,
+  shortcuts = [],
+  onShortcutsChange = () => undefined,
+  sidebarCollapsed = false,
+  onToggleSidebar = () => undefined,
 }: {
   editor: Editor | null
   trash: TrashEntry[]
   onTrashChange: (entries: TrashEntry[]) => void
+  shortcuts?: OutlineShortcut[]
+  onShortcutsChange?: (shortcuts: OutlineShortcut[]) => void
+  sidebarCollapsed?: boolean
+  onToggleSidebar?: () => void
 }) {
   const zoomId = useEditorUi(editor)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -275,6 +295,13 @@ export function OutlinerChrome({
     setSearchOpen(true)
   }
 
+  function toggleNodeShortcut(nodeId: string) {
+    const pinned = shortcuts.some((item) => item.type === 'node' && item.target === nodeId)
+    onShortcutsChange(pinned
+      ? shortcuts.filter((item) => item.type !== 'node' || item.target !== nodeId)
+      : [...shortcuts, { type: 'node', target: nodeId }])
+  }
+
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
@@ -284,6 +311,12 @@ export function OutlinerChrome({
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
+  }, [])
+
+  useEffect(() => {
+    const openTrash = () => setTrashOpen(true)
+    window.addEventListener(OUTLINER_OPEN_TRASH_EVENT, openTrash)
+    return () => window.removeEventListener(OUTLINER_OPEN_TRASH_EVENT, openTrash)
   }, [])
 
   useEffect(() => {
@@ -301,9 +334,9 @@ export function OutlinerChrome({
       <Toolbar
         editor={editor}
         zoomId={zoomId}
-        trashCount={trash.length}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={onToggleSidebar}
         onOpenSearch={() => openSearch()}
-        onOpenTrash={() => setTrashOpen(true)}
       />
       {actionError && <div className="action-error" role="alert">{actionError}<button onClick={() => setActionError(null)}>Dismiss</button></div>}
       {searchOpen && (
@@ -315,7 +348,17 @@ export function OutlinerChrome({
         />
       )}
       {trashOpen && <TrashPanel editor={editor} entries={trash} onChange={onTrashChange} onError={setActionError} onClose={() => setTrashOpen(false)} />}
-      {nodeMenu && <NodeActions editor={editor} request={nodeMenu} onClose={() => setNodeMenu(null)} onTrashed={(entry) => onTrashChange([entry, ...trash])} onError={setActionError} />}
+      {nodeMenu && (
+        <NodeActions
+          editor={editor}
+          request={nodeMenu}
+          onClose={() => setNodeMenu(null)}
+          onTrashed={(entry) => onTrashChange([entry, ...trash])}
+          onError={setActionError}
+          isShortcut={shortcuts.some((item) => item.type === 'node' && item.target === nodeMenu.nodeId)}
+          onToggleShortcut={() => toggleNodeShortcut(nodeMenu.nodeId)}
+        />
+      )}
     </>
   )
 }

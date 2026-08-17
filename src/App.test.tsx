@@ -83,7 +83,7 @@ describe('App view switching', () => {
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await screen.findByRole('heading', { name: 'Settings' })
-    await user.click(screen.getByRole('button', { name: 'Outline' }))
+    await user.click(screen.getByRole('button', { name: /Back/ }))
 
     // Same DOM node means the editor was never torn down, so the document and
     // undo stack survived the round trip.
@@ -154,7 +154,7 @@ describe('App view switching', () => {
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await screen.findByRole('heading', { name: 'Settings' })
-    await user.click(screen.getByRole('button', { name: 'Outline' }))
+    await user.click(screen.getByRole('button', { name: /Back/ }))
 
     expect(container.querySelector('.ProseMirror')?.textContent).toContain(
       'Notes I do not want to lose',

@@ -4,6 +4,7 @@ import { OutlinerEditor } from './editor/OutlinerEditor'
 import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
+import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
 import { TagMenu } from './components/Outliner/TagMenu'
 import {
   loadOutline,
@@ -11,7 +12,7 @@ import {
   type DebouncedSaver,
 } from './persistence/outlineFile'
 import { useSettingsStore } from './store/settingsStore'
-import type { JsonValue, TrashEntry } from './types/tree'
+import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 
 type View = 'outliner' | 'settings'
 
@@ -24,6 +25,8 @@ export default function App() {
   const [initialContent, setInitialContent] = useState<JsonValue | null>(null)
   const [liveDoc, setLiveDoc] = useState<JsonValue | null>(null)
   const [trash, setTrash] = useState<TrashEntry[]>([])
+  const [shortcuts, setShortcuts] = useState<OutlineShortcut[]>([])
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [view, setView] = useState<View>('outliner')
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -47,6 +50,7 @@ export default function App() {
       setInitialContent(doc)
       setLiveDoc(doc)
       setTrash(outline?.trash ?? [])
+      setShortcuts(outline?.shortcuts ?? [])
       setLoaded(true)
     } catch (error) {
       setLoadError(errorMessage(error))
@@ -60,8 +64,8 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded || !liveDoc) return
-    saver.current?.schedule({ version: 2, doc: liveDoc, trash })
-  }, [liveDoc, loaded, trash])
+    saver.current?.schedule({ version: 3, doc: liveDoc, trash, shortcuts })
+  }, [liveDoc, loaded, shortcuts, trash])
 
   useEffect(() => {
     const flush = () => void saver.current?.flush().catch((error) => setSaveError(errorMessage(error)))
@@ -95,6 +99,7 @@ export default function App() {
     setInitialContent(null)
     setLiveDoc(null)
     setTrash([])
+    setShortcuts([])
     setLoadError(null)
     setLoaded(true)
   }
@@ -118,9 +123,6 @@ export default function App() {
     <div id="app">
       <header className="app-header">
         <span className="app-title">AI Chat</span>
-        <button className="app-settings-btn" onClick={() => setView((current) => (current === 'settings' ? 'outliner' : 'settings'))}>
-          {view === 'settings' ? 'Outline' : 'Settings'}
-        </button>
       </header>
 
       {saveError && (
@@ -132,10 +134,28 @@ export default function App() {
       )}
 
       <main className="outliner-main" hidden={view === 'settings'}>
-        <OutlinerChrome editor={editor} trash={trash} onTrashChange={setTrash} />
-        <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
-        <SlashMenu editor={editor} />
-        <TagMenu editor={editor} />
+        <OutlinerSidebar
+          editor={editor}
+          shortcuts={shortcuts}
+          collapsed={sidebarCollapsed}
+          trashCount={trash.length}
+          onChange={setShortcuts}
+          onOpenSettings={() => setView('settings')}
+        />
+        <section className="outline-workspace">
+          <OutlinerChrome
+            editor={editor}
+            trash={trash}
+            onTrashChange={setTrash}
+            shortcuts={shortcuts}
+            onShortcutsChange={setShortcuts}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          />
+          <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
+          <SlashMenu editor={editor} />
+          <TagMenu editor={editor} />
+        </section>
       </main>
 
       {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}

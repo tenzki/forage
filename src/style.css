@@ -63,9 +63,22 @@ body {
    Outliner editor (single TipTap document)
    ============================================================ */
 .outliner-main {
-  flex: 1;
-  overflow-y: auto;
   position: relative;
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 220px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.outline-workspace {
+  position: relative;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.outliner-main:has(.outline-sidebar.is-collapsed) {
+  grid-template-columns: 46px minmax(0, 1fr);
 }
 
 /* Settings hides the outliner rather than unmounting it (see App.tsx). */
@@ -395,6 +408,416 @@ body.is-dragging-outline .bullet-collapse {
 }
 
 /* ============================================================
+   Sidebar
+   ============================================================ */
+.outline-sidebar {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  padding: 12px 10px;
+  overflow: hidden;
+  flex-direction: column;
+  border-right: 1px solid #ececec;
+  background: #fafafa;
+  transition: background 120ms ease;
+}
+
+.outline-sidebar.is-collapsed {
+  padding: 12px 6px;
+}
+
+.outline-sidebar.is-drop-target {
+  background: #eee9ff;
+  box-shadow: inset -3px 0 #7659d6;
+}
+
+.sidebar-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.sidebar-home,
+.sidebar-settings,
+.sidebar-trash,
+.sidebar-shortcut-drag,
+.sidebar-shortcut-open,
+.sidebar-shortcut-remove {
+  border: 0;
+  background: transparent;
+  color: #666;
+  cursor: pointer;
+  font: inherit;
+}
+
+.sidebar-home,
+.sidebar-settings,
+.sidebar-trash {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.sidebar-home {
+  flex: 1;
+}
+
+.sidebar-settings,
+.sidebar-trash {
+  width: 100%;
+}
+
+.sidebar-shortcut-content {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sidebar-bottom {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #ececec;
+}
+
+.sidebar-primary-icon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #777;
+}
+
+svg.sidebar-primary-icon {
+  stroke-width: 1.75;
+}
+
+.sidebar-primary-label {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-trash-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ece8fa;
+  color: #7659d6;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.outline-sidebar.is-collapsed .sidebar-home,
+.outline-sidebar.is-collapsed .sidebar-settings,
+.outline-sidebar.is-collapsed .sidebar-trash {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.outline-sidebar.is-collapsed .sidebar-home {
+  width: 18px;
+  flex: 0 0 18px;
+}
+
+.outline-sidebar.is-collapsed .sidebar-primary-label,
+.outline-sidebar.is-collapsed .sidebar-trash-count {
+  display: none;
+}
+
+.outline-sidebar.is-collapsed .sidebar-top-row {
+  justify-content: center;
+}
+
+.sidebar-home:hover,
+.sidebar-settings:hover,
+.sidebar-trash:hover,
+.sidebar-shortcuts li:hover {
+  background: #f0edff;
+}
+
+.sidebar-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 8px 6px;
+}
+
+.sidebar-section-heading h2 {
+  color: #999;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-section-heading button {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #7659d6;
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.sidebar-section-heading button:hover,
+.sidebar-section-heading button[aria-expanded='true'] {
+  background: #e8e2ff;
+}
+
+.shortcut-picker {
+  position: absolute;
+  z-index: 45;
+  top: 80px;
+  right: 8px;
+  left: 8px;
+  overflow: hidden;
+  border: 1px solid #ddd7f5;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(48, 35, 92, 0.16);
+}
+
+.shortcut-picker-search {
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.shortcut-picker-search input {
+  min-width: 0;
+  flex: 1;
+  padding: 5px 6px;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+}
+
+.shortcut-picker-search button {
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.shortcut-picker ul {
+  max-height: 300px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.shortcut-picker li > button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.shortcut-picker li > button:hover,
+.shortcut-picker li > button:focus-visible {
+  background: #f0edff;
+  outline: none;
+}
+
+.shortcut-picker li span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-picker small {
+  color: #aaa;
+  font-size: 10px;
+}
+
+.shortcut-picker > p {
+  padding: 18px 10px;
+  color: #999;
+  font-size: 12px;
+  text-align: center;
+}
+
+.sidebar-drop-message {
+  position: absolute;
+  inset: 8px;
+  display: grid;
+  z-index: 50;
+  place-items: center;
+  border: 2px dashed #7659d6;
+  border-radius: 8px;
+  background: rgba(240, 237, 255, 0.94);
+  color: #6549c7;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  text-align: center;
+}
+
+.outline-sidebar.is-collapsed .sidebar-drop-message {
+  writing-mode: vertical-rl;
+}
+
+.sidebar-empty {
+  padding: 8px;
+  color: #aaa;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sidebar-shortcuts {
+  list-style: none;
+}
+
+.sidebar-shortcuts li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+
+.sidebar-shortcuts li[data-shortcut-drop='before']::before,
+.sidebar-shortcuts li[data-shortcut-drop='after']::after {
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 999px;
+  background: #7659d6;
+  content: '';
+}
+
+.sidebar-shortcuts li[data-shortcut-drop='before']::before {
+  top: -1px;
+}
+
+.sidebar-shortcuts li[data-shortcut-drop='after']::after {
+  bottom: -1px;
+}
+
+.sidebar-shortcuts li.is-shortcut-drag-source {
+  opacity: 0.35;
+}
+
+.sidebar-shortcut-drag {
+  position: absolute;
+  right: 25px;
+  z-index: 1;
+  width: 18px;
+  padding: 5px 0;
+  color: #aaa;
+  cursor: grab;
+  font-size: 12px;
+  opacity: 0;
+  touch-action: none;
+}
+
+.sidebar-shortcuts li:hover .sidebar-shortcut-drag,
+.sidebar-shortcut-drag:focus-visible,
+body.is-dragging-shortcut .sidebar-shortcut-drag {
+  opacity: 1;
+}
+
+.sidebar-shortcut-drag:hover {
+  color: #6549c7;
+}
+
+body.is-dragging-shortcut,
+body.is-dragging-shortcut * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.sidebar-shortcut-ghost {
+  position: fixed;
+  z-index: 210;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid #d6cdf8;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 8px 20px rgba(48, 35, 92, 0.18);
+  color: #555;
+  font-size: 12px;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-shortcut-open {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 42px 6px 9px;
+  text-align: left;
+}
+
+.sidebar-shortcut-open > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-shortcut-open:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.sidebar-shortcut-icon {
+  width: 12px;
+  flex: 0 0 auto;
+  color: #7659d6;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sidebar-shortcut-remove {
+  padding: 3px 7px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.sidebar-shortcuts li:hover .sidebar-shortcut-remove,
+.sidebar-shortcut-remove:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-shortcut-remove:hover {
+  background: #e5dfff;
+  color: #6549c7;
+}
+
+/* ============================================================
    Outline navigation, search, and node actions
    ============================================================ */
 .outline-toolbar {
@@ -406,10 +829,35 @@ body.is-dragging-outline .bullet-collapse {
   justify-content: space-between;
   gap: 16px;
   min-height: 45px;
-  padding: 7px max(20px, calc((100% - 760px) / 2 + 32px));
+  padding: 7px 12px;
   border-bottom: 1px solid #f0f0f0;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
+}
+
+.outline-toolbar-navigation {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.outline-sidebar-toggle {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+}
+
+.outline-sidebar-toggle:hover {
+  background: #f0edff;
+  color: #6549c7;
 }
 
 .outline-breadcrumbs {
@@ -457,11 +905,15 @@ body.is-dragging-outline .bullet-collapse {
   flex: 0 0 auto;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
 }
 
 .search-open,
 .trash-open {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
   padding: 5px 8px;
   border-radius: 6px;
 }

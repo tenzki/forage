@@ -26,14 +26,25 @@ describe('outline persistence', () => {
 
   it('migrates version 1 files without losing the document', () => {
     expect(normalizeOutline({ version: 1, doc })).toEqual({
-      version: 2,
+      version: 3,
       doc,
       trash: [],
+      shortcuts: [],
+    })
+  })
+
+  it('migrates version 2 files with empty shortcuts', () => {
+    expect(normalizeOutline({ version: 2, doc, trash: [] })).toEqual({
+      version: 3,
+      doc,
+      trash: [],
+      shortcuts: [],
     })
   })
 
   it('rejects malformed persisted input', () => {
     expect(() => normalizeOutline({ version: 2, doc, trash: [{}] })).toThrow(/invalid format/)
+    expect(() => normalizeOutline({ version: 3, doc, trash: [], shortcuts: [{}] })).toThrow(/invalid format/)
     expect(() => normalizeOutline(null)).toThrow(/valid document/)
   })
 
@@ -43,7 +54,7 @@ describe('outline persistence', () => {
       .mockResolvedValueOnce(undefined)
     const onError = vi.fn()
     const saver = createDebouncedSaver(60_000, onError)
-    saver.schedule({ version: 2, doc, trash: [] })
+    saver.schedule({ version: 3, doc, trash: [], shortcuts: [] })
 
     await expect(saver.flush()).rejects.toThrow('iCloud unavailable')
     expect(saver.hasPending()).toBe(true)

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../../editor/extensions'
 import { collectBullets } from '../../editor/outlineModel'
-import { OutlinerUi } from '../../editor/outlinerUi'
+import { OUTLINER_OPEN_TRASH_EVENT, OutlinerUi } from '../../editor/outlinerUi'
 import { OutlinerChrome } from './OutlinerChrome'
 
 function makeEditor(): Editor {
@@ -46,6 +46,50 @@ describe('outliner chrome', () => {
     await user.tab()
 
     expect(collectBullets(editor.state.doc)[0].text).toBe('Renamed note')
+  })
+
+  it('exposes the sidebar toggle in the outline toolbar', async () => {
+    const user = userEvent.setup()
+    const onToggleSidebar = vi.fn()
+    render(
+      <OutlinerChrome
+        editor={editor}
+        trash={[]}
+        onTrashChange={vi.fn()}
+        onToggleSidebar={onToggleSidebar}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+
+    expect(onToggleSidebar).toHaveBeenCalledOnce()
+  })
+
+  it('opens Trash when requested from the sidebar', async () => {
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    act(() => window.dispatchEvent(new Event(OUTLINER_OPEN_TRASH_EVENT)))
+
+    expect(await screen.findByRole('dialog', { name: 'Trash' })).toBeTruthy()
+  })
+
+  it('adds a node to sidebar shortcuts from its action menu', async () => {
+    const user = userEvent.setup()
+    const onShortcutsChange = vi.fn()
+    render(
+      <OutlinerChrome
+        editor={editor}
+        trash={[]}
+        onTrashChange={vi.fn()}
+        shortcuts={[]}
+        onShortcutsChange={onShortcutsChange}
+      />,
+    )
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Add to shortcuts' }))
+
+    expect(onShortcutsChange).toHaveBeenCalledWith([{ type: 'node', target: 'alpha' }])
   })
 
   it('exposes explicit branch actions and sends deletion to trash', async () => {

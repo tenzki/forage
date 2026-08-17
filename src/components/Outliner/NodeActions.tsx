@@ -22,6 +22,8 @@ interface NodeActionsProps {
   onClose: () => void
   onTrashed: (entry: TrashEntry) => void
   onError: (message: string) => void
+  isShortcut: boolean
+  onToggleShortcut: () => void
 }
 
 function hasChildren(editor: Editor, nodeId: string): boolean {
@@ -100,7 +102,15 @@ function MoveToDialog({
   )
 }
 
-export function NodeActions({ editor, request, onClose, onTrashed, onError }: NodeActionsProps) {
+export function NodeActions({
+  editor,
+  request,
+  onClose,
+  onTrashed,
+  onError,
+  isShortcut,
+  onToggleShortcut,
+}: NodeActionsProps) {
   const [moving, setMoving] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const entry = collectBullets(editor.state.doc).find((item) => item.id === request.nodeId)
@@ -137,6 +147,9 @@ export function NodeActions({ editor, request, onClose, onTrashed, onError }: No
           </button>
         )}
         <button role="menuitem" onClick={() => setMoving(true)}>Move to…</button>
+        <button role="menuitem" onClick={() => { onToggleShortcut(); onClose() }}>
+          {isShortcut ? 'Remove from shortcuts' : 'Add to shortcuts'}
+        </button>
         <button role="menuitem" onClick={() => { duplicateBullet(editor, request.nodeId); onClose() }}>Duplicate branch</button>
         <button role="menuitem" onClick={() => void copyNodeLink(request.nodeId).then(onClose).catch((error: unknown) => onError(error instanceof Error ? error.message : String(error)))}>
           Copy bullet link
