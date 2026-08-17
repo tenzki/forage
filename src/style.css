@@ -647,8 +647,19 @@ kbd {
 }
 
 /* ============================================================
-   Slash menu
+   Slash commands and menu
    ============================================================ */
+.outline-command {
+  padding: 1px 6px;
+  border: 1px solid #d9d0ff;
+  border-radius: 999px;
+  background: #f0edff;
+  color: #6549c7;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-weight: 600;
+}
+
 .slash-menu {
   position: fixed;
   z-index: 50;

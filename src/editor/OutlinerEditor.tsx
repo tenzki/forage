@@ -9,6 +9,7 @@ import { useEffect } from 'react'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
+import { SlashCommandDecorations } from './slashCommands'
 import { EMPTY_DOC } from './emptyDoc'
 import type { JsonValue } from '../types/tree'
 
@@ -32,6 +33,7 @@ export function OutlinerEditor({
       BulletAttributes,
       OutlinerKeymap,
       TagDecorations,
+      SlashCommandDecorations,
       OutlinerUi,
     ],
     content: (initialContent ?? EMPTY_DOC) as object,

@@ -119,7 +119,7 @@ describe('App view switching', () => {
 
     const search = await screen.findByRole('combobox', { name: 'Search bullets' }) as HTMLInputElement
     expect(search.value).toBe('#research')
-    expect(screen.getAllByText('Tagged note #research').length).toBeGreaterThan(0)
+    expect(screen.getByDisplayValue('Tagged note #research')).toBeTruthy()
   })
 
   it('shows tools and can add an approved custom HTTP tool', async () => {
