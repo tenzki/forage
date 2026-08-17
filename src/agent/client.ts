@@ -39,6 +39,7 @@ export interface GenerateInput {
   skill: Skill
   prompt: string
   context: string[]
+  siblings?: string[]
   enabledToolIds?: string[]
   customTools?: CustomHttpToolConfig[]
 }
@@ -104,15 +105,18 @@ async function resolveAccessToken(
   return credential.access
 }
 
-function userMessage({ skill, prompt, context }: GenerateInput): Context {
-  const contextBlock = context.length
+function userMessage({ skill, prompt, context, siblings = [] }: GenerateInput): Context {
+  const ancestorBlock = context.length
     ? `Outline context (outer to inner):\n${context.map((item) => `- ${item}`).join('\n')}\n\n`
+    : ''
+  const siblingBlock = siblings.length
+    ? `Direct sibling bullets (same parent):\n${siblings.map((item) => `- ${item}`).join('\n')}\n\n`
     : ''
   return {
     systemPrompt: skill.systemPrompt,
     messages: [{
       role: 'user',
-      content: `${contextBlock}Task: ${prompt}`,
+      content: `${ancestorBlock}${siblingBlock}Task: ${prompt}`,
       timestamp: Date.now(),
     }],
   }

@@ -9,7 +9,12 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
-import { insertAiChild, setCurrentBulletText, writeAiText } from './insertIntoEditor'
+import {
+  insertAiChild,
+  setCurrentBulletText,
+  siblingContext,
+  writeAiText,
+} from './insertIntoEditor'
 
 function makeEditor(text: string): Editor {
   return new Editor({
@@ -60,6 +65,30 @@ describe('agent output insertion', () => {
 
     expect(bulletTexts(editor)).toEqual(['/research '])
     expect(editor.state.selection.$from.parentOffset).toBe('/research '.length)
+  })
+
+  it('collects direct sibling text in document order', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: ['Previous note', 'Current task', 'Following note'].map((text) => ({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+        })),
+      }],
+    })
+    let currentPos = -1
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.firstChild?.textContent === 'Current task') {
+        currentPos = pos + 2
+        return false
+      }
+      return undefined
+    })
+    editor.commands.setTextSelection(currentPos)
+
+    expect(siblingContext(editor)).toEqual(['Previous note', 'Following note'])
   })
 
   it('leaves the caret in the trigger bullet when the AI child is inserted', () => {

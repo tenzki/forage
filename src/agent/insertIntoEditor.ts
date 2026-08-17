@@ -32,6 +32,24 @@ export function ancestorContext(editor: Editor): string[] {
   return texts
 }
 
+/** Text of direct siblings around the current bullet, in document order. */
+export function siblingContext(editor: Editor): string[] {
+  const { $from } = editor.state.selection
+  for (let depth = $from.depth; depth > 0; depth--) {
+    const current = $from.node(depth)
+    if (current.type.name !== 'listItem' || depth < 1) continue
+    const parentList = $from.node(depth - 1)
+    const texts: string[] = []
+    parentList.forEach((sibling) => {
+      if (sibling === current) return
+      const text = sibling.firstChild?.textContent?.trim()
+      if (text) texts.push(text)
+    })
+    return texts
+  }
+  return []
+}
+
 /** Find the listItem enclosing the cursor; returns its position + node. */
 function currentListItem(editor: Editor) {
   const { $from } = editor.state.selection
@@ -181,6 +199,7 @@ export function runSkillIntoEditor(
   const controller = new AbortController()
   const cancel = () => controller.abort()
   const context = ancestorContext(editor)
+  const siblings = siblingContext(editor)
   const nodeId = insertAiChild(editor)
 
   const promise = (async () => {
@@ -189,7 +208,7 @@ export function runSkillIntoEditor(
       setAgentActivity(editor, nodeId, ['Thinking…'], cancel)
       await generate(
         auth,
-        { skill, prompt, context, enabledToolIds, customTools },
+        { skill, prompt, context, siblings, enabledToolIds, customTools },
         {
           signal: controller.signal,
           onDelta: (textSoFar) => {
