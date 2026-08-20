@@ -8,6 +8,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { useEffect } from 'react'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { BulletNote } from './bulletNote'
+import { InternalLink } from './internalLinks'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
 import { SlashCommandDecorations } from './slashCommands'
@@ -33,6 +34,7 @@ export function OutlinerEditor({
       StarterKit, // bulletList, listItem, paragraph, marks, history (undo/redo)
       BulletAttributes,
       BulletNote,
+      InternalLink,
       OutlinerKeymap,
       TagDecorations,
       SlashCommandDecorations,

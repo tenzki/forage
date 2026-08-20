@@ -20,6 +20,7 @@ import {
   type NodeMenuRequest,
   type SearchRequest,
 } from '../../editor/outlinerUi'
+import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
@@ -411,6 +412,18 @@ export function OutlinerChrome({
     window.addEventListener(OUTLINE_TAG_EVENT, openTag)
     return () => window.removeEventListener(OUTLINE_TAG_EVENT, openTag)
   }, [])
+
+  useEffect(() => {
+    const openInternalLink = (event: Event) => {
+      if (!editor) return
+      const targetId = (event as CustomEvent<{ targetId?: string }>).detail?.targetId
+      if (!targetId || !collectBullets(editor.state.doc).some((entry) => entry.id === targetId)) return
+      setZoom(editor, targetId)
+      selectBullet(editor, targetId)
+    }
+    window.addEventListener(OUTLINE_INTERNAL_LINK_EVENT, openInternalLink)
+    return () => window.removeEventListener(OUTLINE_INTERNAL_LINK_EVENT, openInternalLink)
+  }, [editor])
 
   if (!editor) return null
   return (

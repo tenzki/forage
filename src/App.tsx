@@ -4,8 +4,10 @@ import { OutlinerEditor } from './editor/OutlinerEditor'
 import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
+import { BacklinksPanel } from './components/Outliner/BacklinksPanel'
 import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
 import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
+import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
 import { TrashPanel } from './components/Outliner/TrashPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
 import {
@@ -156,9 +158,11 @@ export default function App() {
               onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
             />
             <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
+            {editor && <BacklinksPanel editor={editor} />}
             <FormattingBubbleMenu editor={editor} />
             <SlashMenu editor={editor} />
             <TagMenu editor={editor} />
+            <InternalLinkMenu editor={editor} />
           </div>
           {viewError && <div className="action-error" role="alert">{viewError}<button onClick={() => setViewError(null)}>Dismiss</button></div>}
           {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}

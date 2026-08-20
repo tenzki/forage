@@ -19,6 +19,9 @@ Account administration, billing, and productivity-method tutorials are excluded 
 - `src/editor/outlinerUi.ts`
 - `src/editor/outlineModel.ts`
 - `src/components/Outliner/OutlinerChrome.tsx`
+- `src/components/Outliner/InternalLinkMenu.tsx`
+- `src/components/Outliner/BacklinksPanel.tsx`
+- `src/editor/internalLinks.ts`
 - `src/components/Agent/SlashMenu.tsx`
 - `src/agent/insertIntoEditor.ts`
 - `src/agent/skills.ts`
@@ -42,8 +45,8 @@ The current app already has a credible **core outliner**: one document, nested b
 The biggest gaps are not the tree itself. They are the systems Workflowy layers around the tree:
 
 1. **Batch actions and deeper safety:** multi-select and undo integration for soft-delete/restore remain; item actions, cross-parent movement, duplication, Trash, and restore are now implemented.
-2. **Retrieval and navigation:** true in-place outline filtering, advanced operators, tags, dates, sidebar, starring, saved searches, shortcuts, and panes.
-3. **Richer nodes:** notes, todos/completion, headings and other first-class node types, files, internal links, and backlinks.
+2. **Retrieval and navigation:** true in-place outline filtering, broader advanced operators, dates, custom text shortcuts, navigation history, and panes remain; tags, sidebar shortcuts, saved searches, and Jump To are implemented.
+3. **Richer nodes:** headings and other first-class node types, files, and attachments remain; notes, todos/completion, stable internal links, and backlinks are implemented.
 4. **Alternate views and reuse:** boards, tables, calendar, mirrors, and templates.
 5. **Sharing and platform:** collaboration, comments, mobile/web capture, import/export, integrations, and multi-platform sync.
 6. **AI breadth:** account-wide chat, page/subtree context, chat history, accept/reject/regenerate, transformations, and AI-driven structural actions.
@@ -120,14 +123,14 @@ The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup wi
 | Fuzzy/partial matching | Workflowy documents fuzzy partial matching | Literal substring only | **Partial** |
 | Boolean/exact operators | AND, OR, NOT, quoted exact phrases | No query parser | **Missing** |
 | Hierarchical/nested search | `ancestor > descendant` queries | No hierarchy operator | **Missing** |
-| Type/property search | `is:`, `has:`, `text:`, `highlight:`, `changed:`, `in:note:` | No property index or operators | **Missing** |
+| Type/property search | `is:`, `has:`, `text:`, `highlight:`, `changed:`, `in:note:` | Todo status operators exist, but there is no general property index or broader operator set | **Partial** |
 | Tag/date/range search | Search tags, natural-language dates, and ranges | Clickable hashtag filtering is supported; date recognition and ranges remain absent | **Partial** |
 | Completion-status search | Filter open/completed todos | Search supports `is:todo`, `is:open`, and `is:complete`, with discoverable filter controls | **Supported** |
 | Search notes and attachments | Notes/files participate in search | Secondary node notes participate in search and highlighting; attachments remain absent | **Partial** |
 
 ### 5. Text formatting and node types
 
-The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/commands for bold, italic, underline, strike, inline code, links, headings, blockquote, code block, ordered list, and horizontal rule. However, the app exposes no formatting toolbar, node menu, generic slash commands, or type-specific search. Block transforms are therefore classified as partial rather than equivalent Workflowy node-type UX.
+The current editor loads TipTap StarterKit 3.20.5. It exposes common inline marks and validated external links through a formatting bubble menu. Rich block transforms such as headings, blockquotes, code blocks, and dividers still lack first-class outliner conversion controls, slash actions, and type-specific search, so those capabilities remain partial.
 
 | Capability | Workflowy UX | Current app | Status |
 |---|---|---|---|
@@ -158,8 +161,8 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Date recognition | Numeric and natural-language text becomes a date pill | Dates remain ordinary text | **Missing** |
 | Date picker / `!!` | Calendar picker, ranges, common dates | No date picker | **Missing** |
 | Date display preferences | Custom format and start-of-week setting | No date settings | **Missing** |
-| Internal links | `[[` picker links to existing or newly created nodes | No internal link picker or node-link mark | **Missing** |
-| Backlinks | Target node lists every incoming internal link | No backlink index | **Missing** |
+| Internal links | `[[` picker links to existing or newly created nodes | A keyboard-accessible `[[` picker inserts stable-ID links to existing nodes or creates a linked root node; links navigate to the target and missing targets are visibly disabled | **Supported** |
+| Backlinks | Target node lists every incoming internal link | Zoomed target nodes show incoming source nodes with one-click navigation | **Supported** |
 | Copy node link | Stable link to an exact node | Action menu copies a hash link and the app resolves it to zoom/select the stable node | **Supported** |
 | External URL embeds | YouTube, Loom, X/Twitter and other supported media render inline | No embed extension | **Missing** |
 | Deep links | `workflowy://` opens exact nodes in native apps | No custom URL scheme/deep-link routing | **Missing** |
@@ -251,7 +254,7 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Chat about current page | Chat can focus on the current node and its whole subtree | `/ask` is one-shot and receives ancestor/current-item text, not descendants | **Partial** |
 | Persistent chat history | Start, revisit, continue, and delete chats | No chat session/history model | **Missing** |
 | AI node in the outline | Prompt near content and generate in place | Skills insert streaming child bullets that use normal bullet styling after generation | **Supported** |
-| Nearby/page context | AI node uses nearby items; focused chat can use a whole page | Context is ancestors from outermost to current bullet only | **Partial** |
+| Nearby/page context | AI node uses nearby items; focused chat can use a whole page | Context includes ancestors and direct siblings, but not descendant branches or a whole focused page | **Partial** |
 | Accept/reject/regenerate | Explicit controls gate or retry generated output | Output is inserted immediately; undo removes it, Stop cancels it | **Partial** |
 | Prepared transformations | Summarize, find tasks, draft outline, fix grammar, shorten | Research, brainstorm, and ask skills instead | **Different** |
 | Structured outline generation | AI can draft/transform outline content | One generated line becomes one child bullet | **Supported** |
@@ -283,11 +286,11 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 3. **Implemented:** Node notes for secondary detail without adding visual tree depth.
 4. **Implemented:** Sidebar + Jump To for large-outline navigation.
 5. **Implemented:** Formatting bubble menu for the editor capabilities already present in StarterKit.
-6. **Internal links/backlinks** only if the product is ready to evolve from a strict tree toward linked knowledge.
+6. **Implemented:** Stable-ID internal links with a `[[` picker, new-target creation, target navigation, broken-link handling, and backlinks.
 
 ### P2 — Differentiate around AI rather than clone every layout
 
-1. Expand context from ancestors-only to an explicit scope: current item, subtree, page, or whole outline.
+1. Expand context from ancestors/direct siblings to an explicit scope: current item, subtree, page, or whole outline.
 2. Add AI actions that fit this product: summarize branch, extract tasks, rewrite, expand, and organize preview.
 3. Add accept/reject/regenerate and a visible provenance/history model.
 4. Let users invoke safe structural agent tools with confirmation and undo.
@@ -299,4 +302,4 @@ Boards, tables, calendar, collaboration, comments, mobile apps, public APIs, MCP
 
 ## Bottom line
 
-The app supports the Workflowy interaction loop of **write → nest → focus → collapse → find**, but not yet Workflowy's broader loop of **type/annotate → connect → save views → reuse → share → access everywhere**. The strongest route is to close the trust and navigation gaps first, then use the app's agent/tool architecture as the differentiator rather than pursuing exhaustive Workflowy parity immediately.
+The app supports the Workflowy interaction loop of **write → nest → focus → collapse → find**, and now covers the core **annotate → connect → save views** loop through notes, todos, tags, internal links, backlinks, and saved searches. Reuse, sharing, collaboration, and broad platform access remain outside the focused product scope. The strongest route is to build on the app's agent/tool architecture rather than pursuing exhaustive Workflowy parity.
