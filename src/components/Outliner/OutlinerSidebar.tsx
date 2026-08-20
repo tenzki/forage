@@ -5,6 +5,7 @@ import {
   Hash,
   Home,
   Plus,
+  Search as SearchIcon,
   Settings as SettingsIcon,
   Trash2,
   X,
@@ -12,6 +13,7 @@ import {
 import type { Editor } from '@tiptap/react'
 import { collectBullets, selectBullet, type BulletEntry } from '../../editor/outlineModel'
 import {
+  OUTLINER_OPEN_SEARCH_EVENT,
   OUTLINER_OPEN_TRASH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   setZoom,
@@ -45,7 +47,9 @@ interface ShortcutPickerProps {
 }
 
 function shortcutKey(shortcut: OutlineShortcut): string {
-  return `${shortcut.type}:${shortcut.target}`
+  return shortcut.type === 'search'
+    ? `${shortcut.type}:${shortcut.scopeId ?? 'all'}:${shortcut.target}`
+    : `${shortcut.type}:${shortcut.target}`
 }
 
 function ShortcutPicker({ entries, tags, shortcuts, onAdd, onClose }: ShortcutPickerProps) {
@@ -156,6 +160,10 @@ export function OutlinerSidebar({
     if (!editor) return
     if (shortcut.type === 'tag') {
       window.dispatchEvent(new CustomEvent(OUTLINE_TAG_EVENT, { detail: { tag: shortcut.target } }))
+    } else if (shortcut.type === 'search') {
+      window.dispatchEvent(new CustomEvent(OUTLINER_OPEN_SEARCH_EVENT, {
+        detail: { query: shortcut.target, scopeId: shortcut.scopeId },
+      }))
     } else if (entriesById.has(shortcut.target)) {
       setZoom(editor, shortcut.target)
       selectBullet(editor, shortcut.target)
@@ -237,7 +245,11 @@ export function OutlinerSidebar({
             {shortcuts.map((shortcut, index) => {
               const entry = shortcut.type === 'node' ? entriesById.get(shortcut.target) : null
               const missing = shortcut.type === 'node' && !entry
-              const label = shortcut.type === 'tag' ? `#${shortcut.target}` : (entry?.text.trim() || 'Unavailable node')
+              const label = shortcut.type === 'tag'
+                ? `#${shortcut.target}`
+                : shortcut.type === 'search'
+                  ? shortcut.label
+                  : (entry?.text.trim() || 'Unavailable node')
               return (
                 <li
                   key={shortcutKey(shortcut)}
@@ -254,7 +266,11 @@ export function OutlinerSidebar({
                   </button>
                   <button className="sidebar-shortcut-open" disabled={missing} onClick={() => open(shortcut)} title={label}>
                     <span className="sidebar-shortcut-icon" aria-hidden="true">
-                      {shortcut.type === 'tag' ? <Hash size={13} /> : <Circle size={8} />}
+                      {shortcut.type === 'tag'
+                        ? <Hash size={13} />
+                        : shortcut.type === 'search'
+                          ? <SearchIcon size={13} />
+                          : <Circle size={8} />}
                     </span>
                     <span>{label}</span>
                   </button>

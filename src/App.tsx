@@ -5,6 +5,7 @@ import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
 import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
+import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
 import { TagMenu } from './components/Outliner/TagMenu'
 import {
   loadOutline,
@@ -64,7 +65,7 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded || !liveDoc) return
-    saver.current?.schedule({ version: 3, doc: liveDoc, trash, shortcuts })
+    saver.current?.schedule({ version: 4, doc: liveDoc, trash, shortcuts })
   }, [liveDoc, loaded, shortcuts, trash])
 
   useEffect(() => {
@@ -121,10 +122,6 @@ export default function App() {
 
   return (
     <div id="app">
-      <header className="app-header">
-        <span className="app-title">AI Chat</span>
-      </header>
-
       {saveError && (
         <div className="persistence-error" role="alert">
           <span><strong>Outline not saved.</strong> {saveError}</span>
@@ -153,6 +150,7 @@ export default function App() {
             onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
           />
           <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
+          <FormattingBubbleMenu editor={editor} />
           <SlashMenu editor={editor} />
           <TagMenu editor={editor} />
         </section>

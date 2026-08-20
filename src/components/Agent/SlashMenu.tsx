@@ -8,17 +8,62 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { SKILLS, type Skill } from '../../agent/skills'
+import { focusOrCreateBulletNote } from '../../editor/bulletNote'
+import {
+  OUTLINE_COMMANDS,
+  type OutlineCommandDefinition,
+} from '../../editor/commandDefinitions'
+import {
+  currentBulletId,
+  setBulletKind,
+  setTodoCompleted,
+} from '../../editor/outlineModel'
 import {
   runSkillIntoEditor,
   setCurrentBulletText,
 } from '../../agent/insertIntoEditor'
 import { useSettingsStore } from '../../store/settingsStore'
 
+interface CommandChoice {
+  id: string
+  label: string
+  description: string
+  skill?: Skill
+  outlineCommand?: OutlineCommandDefinition
+}
+
+const COMMAND_CHOICES: CommandChoice[] = [
+  ...OUTLINE_COMMANDS.map((outlineCommand) => ({
+    ...outlineCommand,
+    outlineCommand,
+  })),
+  ...SKILLS.map((skill) => ({
+    id: skill.id,
+    label: skill.label,
+    description: skill.description,
+    skill,
+  })),
+]
+
 interface MenuState {
   query: string
   prompt: string
   top: number
   left: number
+}
+
+function runOutlineCommand(editor: Editor, command: OutlineCommandDefinition): void {
+  const nodeId = currentBulletId(editor)
+  if (!nodeId) return
+  if (command.id === 'note') {
+    focusOrCreateBulletNote(editor, nodeId)
+    return
+  }
+  if (command.id === 'bullet') {
+    setBulletKind(editor, nodeId, 'bullet')
+    return
+  }
+  setTodoCompleted(editor, nodeId, command.id === 'done')
 }
 
 function readSlashState(editor: Editor): MenuState | null {
@@ -51,22 +96,22 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
   const setOAuthCredential = useSettingsStore((s) => s.setOAuthCredential)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
-  const [completedSkill, setCompletedSkill] = useState<Skill | null>(null)
-  const completedSkillRef = useRef<Skill | null>(null)
+  const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
+  const completedCommandRef = useRef<CommandChoice | null>(null)
 
   // Track editor changes to open/close the menu.
   useEffect(() => {
     if (!editor) return
     const update = () => {
       const state = readSlashState(editor)
-      const completed = completedSkillRef.current
+      const completed = completedCommandRef.current
       if (completed && state?.query === completed.label) {
         setMenu(null)
         return
       }
       if (completed) {
-        completedSkillRef.current = null
-        setCompletedSkill(null)
+        completedCommandRef.current = null
+        setCompletedCommand(null)
       }
       setMenu(state)
       setActive(0)
@@ -79,8 +124,8 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     }
   }, [editor])
 
-  const matches: Skill[] = menu
-    ? SKILLS.filter((s) => s.label.startsWith(menu.query))
+  const matches: CommandChoice[] = menu
+    ? COMMAND_CHOICES.filter((command) => command.label.startsWith(menu.query))
     : []
 
   // Keyboard handling while menu is open (capture beats the editor's handlers).
@@ -100,7 +145,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         e.preventDefault()
         const skill = matches[active]
         const hasContext = menu.query === skill.label && menu.prompt.trim().length > 0
-        if (hasContext || e.metaKey || e.ctrlKey) run(skill)
+        if (skill.outlineCommand || hasContext || e.metaKey || e.ctrlKey) run(skill)
         else complete(skill)
       } else if (e.key === 'Escape') {
         e.preventDefault()
@@ -112,39 +157,44 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
   }, [editor, menu, matches, active])
 
   useEffect(() => {
-    if (!editor || !completedSkill) return
+    if (!editor || !completedCommand) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
       const state = readSlashState(editor)
-      if (state?.query !== completedSkill.label) return
+      if (state?.query !== completedCommand.label) return
       event.preventDefault()
-      run(completedSkill)
+      run(completedCommand)
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [editor, completedSkill])
+  }, [editor, completedCommand])
 
-  function complete(skill: Skill) {
+  function complete(command: CommandChoice) {
     if (!editor) return
     const context = menu?.prompt.trimStart() ?? ''
-    const command = `/${skill.label}${context ? ` ${context}` : ' '}`
-    completedSkillRef.current = skill
-    setCompletedSkill(skill)
-    setCurrentBulletText(editor, command, true)
+    const text = `/${command.label}${context ? ` ${context}` : ' '}`
+    completedCommandRef.current = command
+    setCompletedCommand(command)
+    setCurrentBulletText(editor, text, true)
     setMenu(null)
     editor.view.focus()
   }
 
-  function run(skill: Skill) {
+  function run(command: CommandChoice) {
     if (!editor) return
     const state = readSlashState(editor)
-    const context = state?.query === skill.label ? state.prompt : menu?.prompt
-    const prompt = (context || skill.label).trim()
-    // Replace the command with its context so the bullet remains a clean note.
-    completedSkillRef.current = null
-    setCompletedSkill(null)
+    const context = state?.query === command.label ? state.prompt : menu?.prompt
+    const prompt = (context || (command.skill ? command.label : '')).trim()
+    completedCommandRef.current = null
+    setCompletedCommand(null)
     setCurrentBulletText(editor, prompt)
     setMenu(null)
+    if (command.outlineCommand) {
+      runOutlineCommand(editor, command.outlineCommand)
+      return
+    }
+    const skill = command.skill
+    if (!skill) return
     runSkillIntoEditor(
       editor,
       {
@@ -165,20 +215,20 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
 
   return (
     <ul className="slash-menu" style={{ top: menu.top, left: menu.left }}>
-      {matches.map((s, i) => (
+      {matches.map((command, i) => (
         <li
-          key={s.id}
+          key={command.id}
           className={i === active ? 'slash-item active' : 'slash-item'}
           onMouseDown={(e) => {
             e.preventDefault()
-            complete(s)
+            complete(command)
           }}
         >
-          <span className="slash-label">/{s.label}</span>
+          <span className="slash-label">/{command.label}</span>
           <span className="slash-desc">
-            {menu.query === s.label && menu.prompt.trim()
+            {menu.query === command.label && menu.prompt.trim()
               ? 'Press Enter to run with this context'
-              : `${s.description} · Enter or Tab to select`}
+              : `${command.description} · Enter or Tab to select`}
           </span>
         </li>
       ))}

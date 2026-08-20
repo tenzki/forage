@@ -1,16 +1,19 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
-import { newNodeId, type JsonValue, type TrashEntry } from '../types/tree'
+import { newNodeId, type BulletKind, type JsonValue, type TrashEntry } from '../types/tree'
 
 export interface BulletEntry {
   id: string
   text: string
+  noteText: string
   pos: number
   node: ProseMirrorNode
   parentListPos: number
   siblingIndex: number
   ancestorIds: string[]
+  bulletKind: BulletKind
+  completed: boolean
 }
 
 export type MovePlacement = 'before' | 'after' | 'inside'
@@ -41,14 +44,22 @@ export function collectBullets(doc: ProseMirrorNode): BulletEntry[] {
         ancestorIds.push(ancestor.attrs.nodeId)
       }
     }
+    let noteText = ''
+    for (let index = 0; index < node.childCount; index += 1) {
+      const child = node.child(index)
+      if (child.type.name === 'bulletNote') noteText = child.textContent
+    }
     entries.push({
       id: node.attrs.nodeId,
       text: node.firstChild?.textContent ?? '',
+      noteText,
       pos,
       node,
       parentListPos: resolved.before(resolved.depth),
       siblingIndex: resolved.index(resolved.depth),
       ancestorIds,
+      bulletKind: node.attrs.bulletKind === 'todo' ? 'todo' : 'bullet',
+      completed: Boolean(node.attrs.completed),
     })
   })
   return entries
@@ -194,6 +205,70 @@ export function moveBulletById(editor: Editor, nodeId: string, direction: -1 | 1
 export function moveCurrentBullet(editor: Editor, direction: -1 | 1): boolean {
   const id = currentBulletId(editor)
   return id ? moveBulletById(editor, id, direction) : false
+}
+
+export function setBulletKind(editor: Editor, nodeId: string, bulletKind: BulletKind): boolean {
+  const entry = findBullet(editor.state.doc, nodeId)
+  if (!entry) return false
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
+    ...entry.node.attrs,
+    bulletKind,
+    completed: bulletKind === 'todo' ? Boolean(entry.node.attrs.completed) : false,
+  }))
+  return true
+}
+
+export function setTodoCompleted(editor: Editor, nodeId: string, completed: boolean): boolean {
+  const entry = findBullet(editor.state.doc, nodeId)
+  if (!entry) return false
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
+    ...entry.node.attrs,
+    bulletKind: 'todo',
+    completed,
+  }))
+  return true
+}
+
+export function toggleBulletCompleted(editor: Editor, nodeId: string): boolean {
+  const entry = findBullet(editor.state.doc, nodeId)
+  if (!entry || entry.bulletKind !== 'todo') return false
+  editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
+    ...entry.node.attrs,
+    completed: !entry.completed,
+  }))
+  return true
+}
+
+export function toggleCurrentBulletCompleted(editor: Editor): boolean {
+  const nodeId = currentBulletId(editor)
+  if (!nodeId) return false
+  const entry = findBullet(editor.state.doc, nodeId)
+  if (!entry) return false
+  if (entry.bulletKind === 'bullet') return setTodoCompleted(editor, nodeId, false)
+  if (!entry.completed) return setTodoCompleted(editor, nodeId, true)
+  return setBulletKind(editor, nodeId, 'bullet')
+}
+
+const COMPLETION_FILTERS = new Set(['is:todo', 'is:complete', 'is:completed', 'is:open'])
+
+export function searchBullets(entries: BulletEntry[], query: string): BulletEntry[] {
+  const tokens = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
+  const filters = new Set(tokens.filter((token) => COMPLETION_FILTERS.has(token)))
+  const terms = tokens.filter((token) => !COMPLETION_FILTERS.has(token))
+  return entries.filter((entry) => {
+    if (filters.has('is:todo') && entry.bulletKind !== 'todo') return false
+    if ((filters.has('is:complete') || filters.has('is:completed'))
+      && (entry.bulletKind !== 'todo' || !entry.completed)) return false
+    if (filters.has('is:open') && (entry.bulletKind !== 'todo' || entry.completed)) return false
+    const searchableText = `${entry.text}\n${entry.noteText}`.toLocaleLowerCase()
+    return terms.every((term) => searchableText.includes(term))
+  })
+}
+
+export function searchText(query: string): string {
+  return query.trim().split(/\s+/u)
+    .filter((token) => !COMPLETION_FILTERS.has(token.toLocaleLowerCase()))
+    .join(' ')
 }
 
 export function reorderBullet(

@@ -18,6 +18,15 @@ import { generate, type CodexAuthConfig } from './client'
 import type { Skill } from './skills'
 import type { CustomHttpToolConfig } from './tools'
 
+function contextText(item: ProseMirrorNode): string {
+  const title = item.firstChild?.textContent?.trim() ?? ''
+  let note = ''
+  item.forEach((child) => {
+    if (child.type.name === 'bulletNote') note = child.textContent.trim()
+  })
+  return note ? `${title}\nNote: ${note}`.trim() : title
+}
+
 /** Text of the listItems enclosing the cursor, outer-to-inner. */
 export function ancestorContext(editor: Editor): string[] {
   const { $from } = editor.state.selection
@@ -25,7 +34,7 @@ export function ancestorContext(editor: Editor): string[] {
   for (let d = 1; d <= $from.depth; d++) {
     const node = $from.node(d)
     if (node.type.name === 'listItem') {
-      const t = node.firstChild?.textContent?.trim()
+      const t = contextText(node)
       if (t) texts.push(t)
     }
   }
@@ -42,7 +51,7 @@ export function siblingContext(editor: Editor): string[] {
     const texts: string[] = []
     parentList.forEach((sibling) => {
       if (sibling === current) return
-      const text = sibling.firstChild?.textContent?.trim()
+      const text = contextText(sibling)
       if (text) texts.push(text)
     })
     return texts

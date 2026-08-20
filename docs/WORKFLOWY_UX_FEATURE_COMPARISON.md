@@ -26,7 +26,7 @@ Account administration, billing, and productivity-method tutorials are excluded 
 - `src/persistence/outlineFile.ts`
 - tests and package configuration
 
-This comparison follows the implementation, not stale planning checkboxes. For example, the planning files say hashtags and drag re-nesting are complete, but the current source has no hashtag extension and `reorderBullet` rejects moves between different parent lists.
+This comparison follows the implementation, not stale planning checkboxes. The current source now includes hashtag decorations and autocomplete, cross-parent drag re-nesting, persistent shortcuts, and a collapsible navigation sidebar.
 
 ### Status legend
 
@@ -83,11 +83,11 @@ The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup wi
 | Back/forward navigation history | Page/pane history supports backward and forward navigation | Zoom state has no navigation history | **Missing** |
 | Collapse/expand a branch | Arrow hides or reveals descendants | Per-parent collapse control; state is stored in the document | **Supported** |
 | Expand/collapse all | Menu and double-click behavior operate over a whole level/subtree | No expand-all or collapse-all action | **Missing** |
-| Sidebar tree | Collapsible sidebar shows Home tree and enables navigation/editing | No sidebar | **Missing** |
-| Create/move from sidebar | Add children or drag nodes to remote branches in sidebar | No sidebar | **Missing** |
-| Star nodes | Pin frequently used nodes in the sidebar | No starring | **Missing** |
-| Star/save searches | Save a live filtered view with a custom name | Searches are transient | **Missing** |
-| Custom text shortcuts | Assign codes to nodes/searches and use them in Jump To | No saved shortcuts | **Missing** |
+| Sidebar tree | Collapsible sidebar shows Home tree and enables navigation/editing | Collapsible sidebar provides Home, node/tag shortcuts, Settings, and Trash navigation | **Supported** |
+| Create/move from sidebar | Add children or drag nodes to remote branches in sidebar | Nodes can be dragged onto the sidebar to create navigation shortcuts; structural editing remains in the outline | **Partial** |
+| Star nodes | Pin frequently used nodes in the sidebar | Nodes can be pinned, removed, and reordered as persistent sidebar shortcuts | **Supported** |
+| Star/save searches | Save a live filtered view with a custom name | Queries can be named, scoped, persisted, reordered, and reopened from the sidebar | **Supported** |
+| Custom text shortcuts | Assign codes to nodes/searches and use them in Jump To | Persistent node and tag shortcuts exist, without user-defined text codes | **Partial** |
 | Jump To | Cmd/Ctrl+K finds and navigates to any node | Cmd/Ctrl+K opens substring search and selecting a result zooms to it | **Partial** |
 | Multiple panes | Independently navigate/edit several branches side by side | One editor view only | **Missing** |
 | Zen/full-width modes | Commands hide chrome or expand writing width | No view modes | **Missing** |
@@ -121,9 +121,9 @@ The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup wi
 | Boolean/exact operators | AND, OR, NOT, quoted exact phrases | No query parser | **Missing** |
 | Hierarchical/nested search | `ancestor > descendant` queries | No hierarchy operator | **Missing** |
 | Type/property search | `is:`, `has:`, `text:`, `highlight:`, `changed:`, `in:note:` | No property index or operators | **Missing** |
-| Tag/date/range search | Search tags, natural-language dates, and ranges | Tags/dates are plain text only | **Missing** |
-| Completion-status search | Filter open/completed todos | No todo/completion model | **Missing** |
-| Search notes and attachments | Notes/files participate in search | No note/file fields | **Missing** |
+| Tag/date/range search | Search tags, natural-language dates, and ranges | Clickable hashtag filtering is supported; date recognition and ranges remain absent | **Partial** |
+| Completion-status search | Filter open/completed todos | Search supports `is:todo`, `is:open`, and `is:complete`, with discoverable filter controls | **Supported** |
+| Search notes and attachments | Notes/files participate in search | Secondary node notes participate in search and highlighting; attachments remain absent | **Partial** |
 
 ### 5. Text formatting and node types
 
@@ -132,8 +132,8 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Capability | Workflowy UX | Current app | Status |
 |---|---|---|---|
 | Bold / italic / inline code | Selection toolbar, keyboard shortcuts, and markdown behavior | StarterKit marks and standard shortcuts/input rules | **Supported** |
-| Underline / strikethrough | Selection toolbar and shortcuts | StarterKit includes both marks, but there is no visible formatting UX | **Partial** |
-| External links | Paste/autolink URLs or apply a URL to selected text | StarterKit Link supports link parsing/autolinking; no link editor UI | **Partial** |
+| Underline / strikethrough | Selection toolbar and shortcuts | Both marks are exposed through an active-state formatting bubble menu | **Supported** |
+| External links | Paste/autolink URLs or apply a URL to selected text | Autolinking plus validated create/remove-link controls are available from the formatting bubble menu | **Supported** |
 | Text color/highlight | Selection toolbar with remembered color | No color or highlight extension/UI | **Missing** |
 | Headings H1–H3 | First-class item types with menus, slash commands, and search | Heading extension exists, but no reliable outliner node-type conversion UX | **Partial** |
 | Paragraph node | Hide bullet while preserving item behavior | No paragraph-style item action | **Missing** |
@@ -141,18 +141,18 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 | Code block | First-class type preserving whitespace | CodeBlock extension exists, but no app-level conversion UX | **Partial** |
 | Divider | First-class type / markdown shortcut | HorizontalRule extension exists, but no app-level action | **Partial** |
 | Numbered list | Auto-numbered item type | OrderedList extension exists; no Workflowy-style type control | **Partial** |
-| Todo/checkbox | Toggle item type, complete, and hide/show completed | No task-list extension, completion attribute, or checkbox UX | **Missing** |
-| Per-node note field | Secondary styled text below a node; Shift+Enter focuses it | No separate note field | **Missing** |
+| Todo/checkbox | Toggle item type, complete, and hide/show completed | Cmd/Ctrl+Enter cycles bullet → open todo → completed todo → bullet; todos can also be changed by checkbox, searched by status, and globally hidden/shown | **Supported** |
+| Per-node note field | Secondary styled text below a node; Shift+Enter focuses it | Editable secondary notes live inside each list item, support Shift+Enter, and follow branch operations and undo | **Supported** |
 | Markdown typing | Converts heading, quote, task, divider, and inline syntax | StarterKit provides some input rules; task syntax is unsupported and block behavior is not productized | **Partial** |
 | Markdown/HTML/plain-text paste | Converts imported structure and formatting | Browser/TipTap paste handles basic rich/plain content; no audited import mapping | **Partial** |
-| Formatting selection toolbar | Floating widget appears on selection | No bubble/formatting menu | **Missing** |
+| Formatting selection toolbar | Floating widget appears on selection | A selection bubble exposes bold, italic, underline, strike, inline code, and validated links | **Supported** |
 | Mixed node/layout types | Any branch can mix bullets, todos, headings, boards, etc. | User nodes are visually one bullet type; only `user` vs `ai` metadata differs | **Missing** |
 
 ### 6. Tags, dates, links, and knowledge connections
 
 | Capability | Workflowy UX | Current app | Status |
 |---|---|---|---|
-| `#` tags | Parsed, suggested, clickable, searchable pills | `#text` remains ordinary text | **Missing** |
+| `#` tags | Parsed, suggested, clickable, searchable pills | Hashtags remain persisted plain text while decorations provide suggestions, pill styling, and click-to-filter behavior | **Supported** |
 | `@` tags/mentions | Tags users and can notify collaborators | `@text` remains ordinary text | **Missing** |
 | Tag colors | One color assignment updates every occurrence | No tag model | **Missing** |
 | Date recognition | Numeric and natural-language text becomes a date pill | Dates remain ordinary text | **Missing** |
@@ -204,11 +204,11 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 
 | Capability | Workflowy UX | Current app | Status |
 |---|---|---|---|
-| Slash menu | `/` exposes formatting, type, date, move, mirror, share, file, template, and AI actions | Slash menu exists only when a bullet starts with `/` | **Partial** |
+| Slash menu | `/` exposes formatting, type, date, move, mirror, share, file, template, and AI actions | Start-of-bullet slash menu exposes todo, completion, bullet, note, and AI commands | **Partial** |
 | Slash anywhere after a space | Commands can be invoked at the start or after whitespace | Deliberately start-of-bullet only | **Missing** |
 | Keyboard selection | Filter, use arrows, Enter/Tab, Escape | Matching AI skills support arrows, Enter/Tab, and Escape | **Supported** |
-| Generic item actions via slash | Delete, duplicate, move, sort, share, export, etc. | No generic actions | **Missing** |
-| Type/format slash actions | Todo, heading, paragraph, quote, code, board, table, etc. | No formatting/type commands | **Missing** |
+| Generic item actions via slash | Delete, duplicate, move, sort, share, export, etc. | Todo completion/opening and note actions are available; move/delete/share/export remain menu-only or absent | **Partial** |
+| Type/format slash actions | Todo, heading, paragraph, quote, code, board, table, etc. | `/todo`, `/done`, `/open`, `/bullet`, and `/note` are supported; richer block types remain absent | **Partial** |
 | Command palette | Search and execute the full action set from one palette | No command palette; Cmd+K is outline search | **Missing** |
 | Shortcut reference/help panel | In-app learnable keyboard shortcut panel | No shortcut help | **Missing** |
 | Customizable hotkeys | Command palette exposes custom hotkey configuration | Hardcoded shortcuts only | **Missing** |
@@ -278,11 +278,11 @@ The current editor loads TipTap StarterKit 3.20.5. That gives underlying schema/
 
 ### P1 — Highest-value Workflowy power features
 
-1. **First-class todos/completion**, including hide/show completed and completion search.
-2. **Tags with click-to-filter**, then saved/starred searches.
-3. **Node notes** for secondary detail without adding visual tree depth.
-4. **Sidebar + Jump To** for large-outline navigation.
-5. **Formatting bubble menu** for the editor capabilities already present in StarterKit.
+1. **Implemented:** First-class todos/completion, including hide/show completed and completion search.
+2. **Implemented:** Tags with click-to-filter plus named, scoped, saved sidebar searches.
+3. **Implemented:** Node notes for secondary detail without adding visual tree depth.
+4. **Implemented:** Sidebar + Jump To for large-outline navigation.
+5. **Implemented:** Formatting bubble menu for the editor capabilities already present in StarterKit.
 6. **Internal links/backlinks** only if the product is ready to evolve from a strict tree toward linked knowledge.
 
 ### P2 — Differentiate around AI rather than clone every layout

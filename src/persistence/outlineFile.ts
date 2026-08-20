@@ -37,11 +37,14 @@ function validPmNode(value: unknown): boolean {
   return Array.isArray(value.content) && value.content.every(validPmNode)
 }
 
-function validShortcut(value: unknown): value is OutlineShortcut {
-  return isObject(value)
-    && (value.type === 'node' || value.type === 'tag')
-    && typeof value.target === 'string'
-    && value.target.trim().length > 0
+function validShortcut(value: unknown, allowSearch = true): value is OutlineShortcut {
+  if (!isObject(value) || typeof value.target !== 'string' || !value.target.trim()) return false
+  if (value.type === 'node' || value.type === 'tag') return true
+  return allowSearch
+    && value.type === 'search'
+    && typeof value.label === 'string'
+    && Boolean(value.label.trim())
+    && (value.scopeId === null || typeof value.scopeId === 'string')
 }
 
 function validTrashEntry(value: unknown): value is TrashEntry {
@@ -63,21 +66,30 @@ export function normalizeOutline(value: unknown): OutlineDoc {
   }
   if (value.version === 1) {
     const legacy = value as unknown as LegacyOutlineDoc
-    return { version: 3, doc: legacy.doc, trash: [], shortcuts: [] }
+    return { version: 4, doc: legacy.doc, trash: [], shortcuts: [] }
   }
   if (!Array.isArray(value.trash) || !value.trash.every(validTrashEntry)) {
     throw new Error('The outline file uses an unsupported or invalid format.')
   }
   if (value.version === 2) {
-    return { version: 3, doc: value.doc as JsonValue, trash: value.trash, shortcuts: [] }
+    return { version: 4, doc: value.doc as JsonValue, trash: value.trash, shortcuts: [] }
   }
-  if (value.version !== 3
-    || !Array.isArray(value.shortcuts)
-    || !value.shortcuts.every(validShortcut)) {
+  if (!Array.isArray(value.shortcuts)) {
+    throw new Error('The outline file uses an unsupported or invalid format.')
+  }
+  if (value.version === 3 && value.shortcuts.every((item) => validShortcut(item, false))) {
+    return {
+      version: 4,
+      doc: value.doc as JsonValue,
+      trash: value.trash,
+      shortcuts: value.shortcuts,
+    }
+  }
+  if (value.version !== 4 || !value.shortcuts.every((item) => validShortcut(item))) {
     throw new Error('The outline file uses an unsupported or invalid format.')
   }
   return {
-    version: 3,
+    version: 4,
     doc: value.doc as JsonValue,
     trash: value.trash,
     shortcuts: value.shortcuts,

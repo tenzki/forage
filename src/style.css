@@ -30,36 +30,6 @@ body {
 }
 
 /* ============================================================
-   Header
-   ============================================================ */
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 20px;
-  border-bottom: 1px solid #ececec;
-  -webkit-app-region: drag;
-}
-
-.app-title {
-  font-weight: 600;
-  color: #555;
-}
-
-.app-settings-btn {
-  -webkit-app-region: no-drag;
-  border: 1px solid #ddd;
-  background: #fafafa;
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.app-settings-btn:hover {
-  background: #f0f0f0;
-}
-
-/* ============================================================
    Outliner editor (single TipTap document)
    ============================================================ */
 .outliner-main {
@@ -124,6 +94,81 @@ body {
 
 .outliner-editor a[href] {
   cursor: pointer;
+}
+
+.todo-checkbox {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  margin: 3px 7px 0 0;
+  padding: 0;
+  border: 1.5px solid #aaa;
+  border-radius: 4px;
+  background: #fff;
+  color: #fff;
+  cursor: pointer;
+  vertical-align: top;
+}
+
+.todo-checkbox[aria-checked='true'] {
+  border-color: #6a4ce0;
+  background: #6a4ce0;
+}
+
+.todo-checkbox[aria-checked='true']::after {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.todo-checkbox:focus-visible {
+  outline: 2px solid #cfc5f8;
+  outline-offset: 2px;
+}
+
+.outliner-editor li.is-completed > p {
+  color: #999;
+  text-decoration: line-through;
+  text-decoration-color: #bbb;
+}
+
+.outliner-editor li.is-completed > p > .todo-checkbox {
+  text-decoration: none;
+}
+
+.bullet-note {
+  min-height: 20px;
+  margin: 0 4px 3px;
+  padding: 0 4px;
+  color: #858585;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.bullet-note:empty::before {
+  color: #bbb;
+  content: 'Add a note…';
+  pointer-events: none;
+}
+
+.bullet-note:focus {
+  color: #666;
+  outline: none;
+}
+
+.outliner-editor li.is-completed > .bullet-note {
+  color: #aaa;
+}
+
+.outliner-editor li.is-completed-hidden {
+  display: none;
 }
 
 .bullet-controls {
@@ -311,6 +356,7 @@ body.is-dragging-outline .bullet-collapse {
 }
 
 .outliner-editor li.zoom-ancestor > p,
+.outliner-editor li.zoom-ancestor > .bullet-note,
 .outliner-editor li.zoom-ancestor > .bullet-controls {
   display: none;
 }
@@ -871,6 +917,7 @@ body.is-dragging-shortcut * {
 }
 
 .outline-breadcrumbs button,
+.completed-visibility,
 .search-open,
 .trash-open {
   border: 0;
@@ -881,6 +928,7 @@ body.is-dragging-shortcut * {
 }
 
 .outline-breadcrumbs button:hover,
+.completed-visibility:hover,
 .search-open:hover,
 .trash-open:hover {
   color: #6a4ce0;
@@ -908,6 +956,7 @@ body.is-dragging-shortcut * {
   margin-left: auto;
 }
 
+.completed-visibility,
 .search-open,
 .trash-open {
   display: flex;
@@ -918,6 +967,7 @@ body.is-dragging-shortcut * {
   border-radius: 6px;
 }
 
+.completed-visibility:hover,
 .search-open:hover,
 .trash-open:hover {
   background: #f6f4ff;
@@ -971,14 +1021,93 @@ kbd {
   font-size: 16px;
 }
 
+.search-options {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid #f1f1f1;
+}
+
 .search-scope {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 14px;
-  border-bottom: 1px solid #f1f1f1;
   color: #777;
   font-size: 12px;
+}
+
+.search-status-filters {
+  display: flex;
+  margin-left: auto;
+  gap: 4px;
+}
+
+.search-status-filters button {
+  padding: 3px 7px;
+  border: 1px solid #e2def4;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b5aa5;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.search-status-filters button:hover,
+.search-status-filters button:focus-visible {
+  border-color: #c8bdf1;
+  background: #f1eeff;
+  outline: none;
+}
+
+.save-search-open {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #6a4ce0;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.save-search-open:hover {
+  background: #f1eeff;
+}
+
+.save-search-open:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.save-search-form {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.save-search-form input {
+  width: 110px;
+  padding: 3px 6px;
+  border: 1px solid #d9d3ee;
+  border-radius: 5px;
+  outline: none;
+  font-size: 11px;
+}
+
+.save-search-form button {
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #6a4ce0;
+  cursor: pointer;
+  font-size: 11px;
 }
 
 .search-results {
@@ -1044,6 +1173,82 @@ kbd {
   border-radius: 2px;
   background: #fff0a8;
   box-shadow: 0 0 0 1px #ffe170;
+}
+
+/* ============================================================
+   Formatting bubble menu
+   ============================================================ */
+.formatting-bubble {
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.16);
+}
+
+.formatting-bubble > button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #666;
+  cursor: pointer;
+}
+
+.formatting-bubble > button:hover,
+.formatting-bubble > button:focus-visible,
+.formatting-bubble > button.is-active {
+  background: #f0edff;
+  color: #6549c7;
+  outline: none;
+}
+
+.formatting-divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: #e5e5e5;
+}
+
+.formatting-link-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 4px;
+}
+
+.formatting-link-form input {
+  padding: 5px 7px;
+  border: 1px solid #d8d2ef;
+  border-radius: 5px;
+  outline: none;
+  font-size: 12px;
+}
+
+.formatting-link-form button {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #6549c7;
+  cursor: pointer;
+}
+
+.formatting-link-form button:hover {
+  background: #f0edff;
+}
+
+.formatting-link-form small {
+  grid-column: 1 / -1;
+  padding: 1px 4px;
+  color: #a22;
+  font-size: 11px;
 }
 
 /* ============================================================

@@ -11,7 +11,7 @@
 import { Extension, type Editor } from '@tiptap/core'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { newNodeId } from '../types/tree'
-import { moveCurrentBullet } from './outlineModel'
+import { moveCurrentBullet, toggleCurrentBulletCompleted } from './outlineModel'
 
 const idPluginKey = new PluginKey('bulletNodeIds')
 
@@ -39,6 +39,20 @@ export const BulletAttributes = Extension.create({
             parseHTML: (el) => el.getAttribute('data-collapsed') === 'true',
             renderHTML: (attrs) =>
               attrs.collapsed ? { 'data-collapsed': 'true' } : {},
+          },
+          bulletKind: {
+            default: 'bullet',
+            parseHTML: (el) => el.getAttribute('data-bullet-kind') === 'todo' ? 'todo' : 'bullet',
+            renderHTML: (attrs) => attrs.bulletKind === 'todo'
+              ? { 'data-bullet-kind': 'todo' }
+              : {},
+          },
+          completed: {
+            default: false,
+            parseHTML: (el) => el.getAttribute('data-completed') === 'true',
+            renderHTML: (attrs) => attrs.completed
+              ? { 'data-completed': 'true' }
+              : {},
           },
         },
       },
@@ -116,10 +130,17 @@ export const OutlinerKeymap = Extension.create({
   addKeyboardShortcuts() {
     return {
       Enter: () => insertBulletAtParentEnd(this.editor),
-      Tab: () => this.editor.commands.sinkListItem('listItem'),
-      'Shift-Tab': () => this.editor.commands.liftListItem('listItem'),
+      Tab: () => {
+        this.editor.commands.sinkListItem('listItem')
+        return true
+      },
+      'Shift-Tab': () => {
+        this.editor.commands.liftListItem('listItem')
+        return true
+      },
       'Alt-ArrowUp': () => moveCurrentBullet(this.editor, -1),
       'Alt-ArrowDown': () => moveCurrentBullet(this.editor, 1),
+      'Mod-Enter': () => toggleCurrentBulletCompleted(this.editor),
     }
   },
 })

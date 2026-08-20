@@ -2,17 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
+import { BulletNote, focusOrCreateBulletNote, hasBulletNote } from './bulletNote'
 import {
   collectBullets,
   duplicateBullet,
   moveBulletById,
   moveBulletTo,
   restoreBullet,
+  searchBullets,
+  setBulletKind,
+  toggleBulletCompleted,
   trashBullet,
 } from './outlineModel'
 import {
   OutlinerUi,
   setAgentActivity,
+  setHideCompleted,
   setZoom,
   toggleCollapsed,
 } from './outlinerUi'
@@ -20,7 +25,13 @@ import {
 function item(id: string, text: string, children: object[] = []) {
   return {
     type: 'listItem',
-    attrs: { nodeId: id, nodeType: 'user', collapsed: false },
+    attrs: {
+      nodeId: id,
+      nodeType: 'user',
+      collapsed: false,
+      bulletKind: 'bullet',
+      completed: false,
+    },
     content: [
       { type: 'paragraph', content: [{ type: 'text', text }] },
       ...(children.length ? [{ type: 'bulletList', content: children }] : []),
@@ -31,7 +42,7 @@ function item(id: string, text: string, children: object[] = []) {
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, OutlinerKeymap, OutlinerUi],
+    extensions: [StarterKit, BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
     content: {
       type: 'doc',
       content: [
@@ -62,6 +73,21 @@ describe('Workflowy-style outline interactions', () => {
   it('tracks stable hierarchy paths for breadcrumbs and search scope', () => {
     const child = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha-child')
     expect(child?.ancestorIds).toEqual(['alpha'])
+  })
+
+  it('indents and outdents with Tab and Shift+Tab', () => {
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    editor.commands.setTextSelection(bravo.pos + 2)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.ancestorIds).toEqual(['alpha'])
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.ancestorIds).toEqual([])
   })
 
   it('inserts a new first child when Enter follows an expanded parent', () => {
@@ -126,6 +152,90 @@ describe('Workflowy-style outline interactions', () => {
     expect(cancel).toHaveBeenCalledOnce()
     setAgentActivity(editor, 'bravo', null)
     expect(editor.view.dom.querySelector('.agent-activity')).toBeNull()
+  })
+
+  it('converts bullets to todos and toggles completion with undo support', () => {
+    expect(setBulletKind(editor, 'bravo', 'todo')).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')).toMatchObject({
+      bulletKind: 'todo',
+      completed: false,
+    })
+    const checkbox = editor.view.dom.querySelector('[data-node-id="bravo"] .todo-checkbox') as HTMLButtonElement
+    expect(checkbox.getAttribute('aria-checked')).toBe('false')
+    checkbox.click()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.completed).toBe(true)
+
+    editor.commands.undo()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.completed).toBe(false)
+  })
+
+  it('cycles bullet, open todo, and completed todo with Mod-Enter', () => {
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    editor.commands.setTextSelection(bravo.pos + 2)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')).toMatchObject({
+      bulletKind: 'todo', completed: false,
+    })
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')).toMatchObject({
+      bulletKind: 'todo', completed: true,
+    })
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')).toMatchObject({
+      bulletKind: 'bullet', completed: false,
+    })
+  })
+
+  it('filters todos by completion status and can hide completed rows', () => {
+    setBulletKind(editor, 'bravo', 'todo')
+    setBulletKind(editor, 'charlie', 'todo')
+    toggleBulletCompleted(editor, 'charlie')
+    const entries = collectBullets(editor.state.doc)
+
+    expect(searchBullets(entries, 'is:todo').map((entry) => entry.id)).toEqual(['bravo', 'charlie'])
+    expect(searchBullets(entries, 'is:open').map((entry) => entry.id)).toEqual(['bravo'])
+    expect(searchBullets(entries, 'is:complete').map((entry) => entry.id)).toEqual(['charlie'])
+
+    setHideCompleted(editor, true)
+    expect(editor.view.dom.querySelector('[data-node-id="charlie"]')?.classList.contains('is-completed-hidden')).toBe(true)
+    setHideCompleted(editor, false)
+    expect(editor.view.dom.querySelector('[data-node-id="charlie"]')?.classList.contains('is-completed-hidden')).toBe(false)
+  })
+
+  it('keeps an editable node note with duplicate, Trash, and restore operations', () => {
+    expect(focusOrCreateBulletNote(editor, 'bravo')).toBe(true)
+    expect(editor.commands.insertContent('Secondary detail')).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.noteText).toBe('Secondary detail')
+
+    expect(duplicateBullet(editor, 'bravo')).toBe(true)
+    expect(collectBullets(editor.state.doc).filter((entry) => entry.noteText === 'Secondary detail')).toHaveLength(2)
+    const deleted = trashBullet(editor, 'bravo')
+    expect(deleted && restoreBullet(editor, deleted)).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.noteText).toBe('Secondary detail')
+  })
+
+  it('removes an empty note without restructuring its parent bullet', () => {
+    expect(focusOrCreateBulletNote(editor, 'bravo')).toBe(true)
+    expect(hasBulletNote(editor, 'bravo')).toBe(true)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Backspace', bubbles: true, cancelable: true,
+    }))
+
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')
+    expect(hasBulletNote(editor, 'bravo')).toBe(false)
+    expect(bravo?.ancestorIds).toEqual([])
+    expect(bravo?.text).toBe('Bravo')
+    expect(editor.state.selection.$from.parent.type.name).toBe('paragraph')
   })
 
   it('moves a whole branch between siblings as one undoable operation', () => {

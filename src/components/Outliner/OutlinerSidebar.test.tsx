@@ -6,6 +6,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes } from '../../editor/extensions'
 import {
   getOutlinerUiState,
+  OUTLINER_OPEN_SEARCH_EVENT,
   OUTLINER_OPEN_TRASH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   OutlinerUi,
@@ -60,6 +61,32 @@ describe('outliner sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Remove #research shortcut' }))
     expect(onChange).toHaveBeenCalledWith([{ type: 'node', target: 'alpha' }])
+  })
+
+  it('opens a named saved search from the sidebar', async () => {
+    const user = userEvent.setup()
+    const onSearch = vi.fn()
+    window.addEventListener(OUTLINER_OPEN_SEARCH_EVENT, onSearch, { once: true })
+    render(
+      <OutlinerSidebar
+        editor={editor}
+        shortcuts={[{
+          type: 'search',
+          target: 'is:open',
+          label: 'Open tasks',
+          scopeId: 'alpha',
+        }]}
+        onChange={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open tasks' }))
+
+    expect(onSearch).toHaveBeenCalledOnce()
+    expect((onSearch.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      query: 'is:open',
+      scopeId: 'alpha',
+    })
   })
 
   it('searches both tags and nodes from the add menu', async () => {

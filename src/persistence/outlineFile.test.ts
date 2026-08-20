@@ -26,7 +26,7 @@ describe('outline persistence', () => {
 
   it('migrates version 1 files without losing the document', () => {
     expect(normalizeOutline({ version: 1, doc })).toEqual({
-      version: 3,
+      version: 4,
       doc,
       trash: [],
       shortcuts: [],
@@ -35,10 +35,31 @@ describe('outline persistence', () => {
 
   it('migrates version 2 files with empty shortcuts', () => {
     expect(normalizeOutline({ version: 2, doc, trash: [] })).toEqual({
-      version: 3,
+      version: 4,
       doc,
       trash: [],
       shortcuts: [],
+    })
+  })
+
+  it('migrates version 3 shortcuts and accepts named searches in version 4', () => {
+    expect(normalizeOutline({
+      version: 3,
+      doc,
+      trash: [],
+      shortcuts: [{ type: 'tag', target: 'research' }],
+    })).toMatchObject({
+      version: 4,
+      shortcuts: [{ type: 'tag', target: 'research' }],
+    })
+    expect(normalizeOutline({
+      version: 4,
+      doc,
+      trash: [],
+      shortcuts: [{ type: 'search', target: 'is:open', label: 'Open tasks', scopeId: null }],
+    })).toMatchObject({
+      version: 4,
+      shortcuts: [{ type: 'search', target: 'is:open', label: 'Open tasks', scopeId: null }],
     })
   })
 
@@ -54,7 +75,7 @@ describe('outline persistence', () => {
       .mockResolvedValueOnce(undefined)
     const onError = vi.fn()
     const saver = createDebouncedSaver(60_000, onError)
-    saver.schedule({ version: 3, doc, trash: [], shortcuts: [] })
+    saver.schedule({ version: 4, doc, trash: [], shortcuts: [] })
 
     await expect(saver.flush()).rejects.toThrow('iCloud unavailable')
     expect(saver.hasPending()).toBe(true)

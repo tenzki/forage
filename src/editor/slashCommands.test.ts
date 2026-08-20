@@ -25,6 +25,15 @@ describe('slash command styling', () => {
     expect(editor.state.doc.textContent).toBe('/research Workflowy competitors')
   })
 
+  it('styles a local outline command without changing its text', () => {
+    editor = editorWithText('/todo Buy milk')
+
+    const command = editor.view.dom.querySelector<HTMLElement>('.outline-command')
+    expect(command?.textContent).toBe('/todo')
+    expect(command?.dataset.command).toBe('todo')
+    expect(editor.state.doc.textContent).toBe('/todo Buy milk')
+  })
+
   it('does not style unknown slash text', () => {
     editor = editorWithText('/unknown Keep this as plain text')
 

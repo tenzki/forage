@@ -2,17 +2,28 @@ import { Extension, type Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { collectBullets, reorderBullet, type MovePlacement } from './outlineModel'
+import {
+  collectBullets,
+  reorderBullet,
+  toggleBulletCompleted,
+  type MovePlacement,
+} from './outlineModel'
 
 export const OUTLINER_NODE_MENU_EVENT = 'outliner-node-menu'
 export const OUTLINER_POINTER_DRAG_EVENT = 'outliner-pointer-drag'
 export const OUTLINER_OPEN_TRASH_EVENT = 'outliner-open-trash'
+export const OUTLINER_OPEN_SEARCH_EVENT = 'outliner-open-search'
 
 export interface PointerDragEventDetail {
   phase: 'move' | 'drop' | 'cancel'
   nodeId: string
   clientX: number
   clientY: number
+}
+
+export interface SearchRequest {
+  query: string
+  scopeId: string | null
 }
 
 export interface NodeMenuRequest {
@@ -29,6 +40,7 @@ interface AgentActivity {
 interface OutlinerUiState {
   zoomId: string | null
   query: string
+  hideCompleted: boolean
   agentActivity: Record<string, AgentActivity>
 }
 
@@ -36,9 +48,15 @@ const uiKey = new PluginKey<OutlinerUiState>('outlinerUi')
 const zoomMeta = 'zoom'
 const queryMeta = 'query'
 const activityMeta = 'agentActivity'
+const hideCompletedMeta = 'hideCompleted'
 
 export function getOutlinerUiState(editor: Editor): OutlinerUiState {
-  return uiKey.getState(editor.state) ?? { zoomId: null, query: '', agentActivity: {} }
+  return uiKey.getState(editor.state) ?? {
+    zoomId: null,
+    query: '',
+    hideCompleted: false,
+    agentActivity: {},
+  }
 }
 
 export function setZoom(editor: Editor, nodeId: string | null): void {
@@ -47,6 +65,10 @@ export function setZoom(editor: Editor, nodeId: string | null): void {
 
 export function setSearchQuery(editor: Editor, query: string): void {
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: queryMeta, query }))
+}
+
+export function setHideCompleted(editor: Editor, hideCompleted: boolean): void {
+  editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: hideCompletedMeta, hideCompleted }))
 }
 
 export function setAgentActivity(
@@ -319,6 +341,21 @@ function createMenuButton(nodeId: string): HTMLButtonElement {
   return button
 }
 
+function createTodoCheckbox(editor: Editor, nodeId: string, completed: boolean): HTMLElement {
+  const button = iconButton(
+    completed ? 'Mark todo as open' : 'Mark todo as complete',
+    'todo-checkbox',
+    '',
+  )
+  button.setAttribute('role', 'checkbox')
+  button.setAttribute('aria-checked', String(completed))
+  button.addEventListener('click', (event) => {
+    event.stopPropagation()
+    toggleBulletCompleted(editor, nodeId)
+  })
+  return button
+}
+
 function createControls(editor: Editor, node: ProseMirrorNode): HTMLElement {
   const nodeId = node.attrs.nodeId as string
   const controls = document.createElement('span')
@@ -342,6 +379,8 @@ function nodeClasses(
 ): string[] {
   const classes: string[] = []
   if (entry.node.attrs.collapsed) classes.push('is-collapsed')
+  if (entry.bulletKind === 'todo') classes.push('is-todo')
+  if (entry.completed) classes.push('is-completed')
   if (!ui.zoomId) return classes
   if (entry.id === ui.zoomId) classes.push('zoom-root')
   else if (entry.ancestorIds.includes(ui.zoomId)) classes.push('zoom-descendant')
@@ -393,16 +432,21 @@ function addSearchHighlights(
   entry: ReturnType<typeof collectBullets>[number],
   query: string,
 ) {
-  const paragraph = entry.node.firstChild
-  if (!paragraph || !query) return
-  const lowerText = paragraph.textContent.toLocaleLowerCase()
+  if (!query) return
   const lowerQuery = query.toLocaleLowerCase()
-  let index = lowerText.indexOf(lowerQuery)
-  while (index >= 0) {
-    const from = entry.pos + 2 + index
-    decorations.push(Decoration.inline(from, from + query.length, { class: 'search-match' }))
-    index = lowerText.indexOf(lowerQuery, index + Math.max(query.length, 1))
-  }
+  let childOffset = 0
+  entry.node.forEach((child) => {
+    if (child.type.name === 'paragraph' || child.type.name === 'bulletNote') {
+      const lowerText = child.textContent.toLocaleLowerCase()
+      let index = lowerText.indexOf(lowerQuery)
+      while (index >= 0) {
+        const from = entry.pos + 2 + childOffset + index
+        decorations.push(Decoration.inline(from, from + query.length, { class: 'search-match' }))
+        index = lowerText.indexOf(lowerQuery, index + Math.max(query.length, 1))
+      }
+    }
+    childOffset += child.nodeSize
+  })
 }
 
 function buildDecorations(editor: Editor): DecorationSet {
@@ -420,6 +464,9 @@ function buildDecorations(editor: Editor): DecorationSet {
     } else if (ui.zoomId && zoomPath.has(entry.id) && entry.id !== ui.zoomId) {
       classes.push('zoom-ancestor')
     }
+    if (ui.hideCompleted && entry.completed && !zoomPath.has(entry.id)) {
+      classes.push('is-completed-hidden')
+    }
     if (classes.length) {
       decorations.push(Decoration.node(entry.pos, entry.pos + entry.node.nodeSize, { class: classes.join(' ') }))
     }
@@ -429,6 +476,13 @@ function buildDecorations(editor: Editor): DecorationSet {
         side: -1,
       }),
     )
+    if (entry.bulletKind === 'todo') {
+      decorations.push(Decoration.widget(
+        entry.pos + 2,
+        () => createTodoCheckbox(editor, entry.id, entry.completed),
+        { key: `todo-${entry.id}-${entry.completed}`, side: -2 },
+      ))
+    }
     if (activity && (activity.notes.length || activity.onCancel)) {
       decorations.push(Decoration.widget(
         entry.pos + 2,
@@ -450,13 +504,16 @@ export const OutlinerUi = Extension.create({
       new Plugin<OutlinerUiState>({
         key: uiKey,
         state: {
-          init: () => ({ zoomId: null, query: '', agentActivity: {} }),
+          init: () => ({ zoomId: null, query: '', hideCompleted: false, agentActivity: {} }),
           apply: (transaction, previous) => {
             const meta = transaction.getMeta(uiKey) as
-              | { type: string; nodeId?: string | null; query?: string; activity?: AgentActivity | null }
+              | { type: string; nodeId?: string | null; query?: string; hideCompleted?: boolean; activity?: AgentActivity | null }
               | undefined
             if (meta?.type === zoomMeta) return { ...previous, zoomId: meta.nodeId ?? null }
             if (meta?.type === queryMeta) return { ...previous, query: meta.query ?? '' }
+            if (meta?.type === hideCompletedMeta) {
+              return { ...previous, hideCompleted: Boolean(meta.hideCompleted) }
+            }
             if (meta?.type === activityMeta && meta.nodeId) {
               const agentActivity = { ...previous.agentActivity }
               if (meta.activity && (meta.activity.notes.length || meta.activity.onCancel)) {

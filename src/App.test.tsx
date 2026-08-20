@@ -90,6 +90,48 @@ describe('App view switching', () => {
     expect(container.querySelector('.ProseMirror')).toBe(editorBefore)
   })
 
+  it('keeps Tab and Shift+Tab restructuring active in the complete app', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('Parent{Enter}Child{Tab}')
+    const rootList = editor.querySelector(':scope > ul')
+    expect(rootList?.children).toHaveLength(1)
+    expect(rootList?.querySelector('ul li')?.textContent).toContain('Child')
+
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(rootList?.children).toHaveLength(2)
+  })
+
+  it('runs a todo slash command after Tab completion', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('/todo')
+    expect(container.querySelector('.slash-menu')?.textContent).toContain('/todo')
+    await user.keyboard('{Tab}Buy milk{Enter}')
+
+    const todo = container.querySelector('li[data-bullet-kind="todo"]')
+    expect(todo?.textContent).toContain('Buy milk')
+    expect(todo?.querySelector('.todo-checkbox')).toBeTruthy()
+  })
+
+  it('runs a local outline command directly with Enter', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('/done{Enter}')
+
+    const todo = container.querySelector('li[data-bullet-kind="todo"]')
+    expect(todo?.getAttribute('data-completed')).toBe('true')
+  })
+
   it('hides slash suggestions after Tab completes a command', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()

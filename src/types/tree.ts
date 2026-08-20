@@ -18,11 +18,16 @@ export type JsonValue =
 /** Distinguishes user-written bullets from agent-generated ones (EDIT-04). */
 export type NodeType = 'user' | 'ai'
 
+/** User-facing behavior of a list item; provenance remains in NodeType. */
+export type BulletKind = 'bullet' | 'todo'
+
 /** Attributes we attach to every listItem in the document. */
 export interface BulletAttrs {
   nodeId: string
   nodeType: NodeType
   collapsed: boolean
+  bulletKind: BulletKind
+  completed: boolean
 }
 
 /** A branch held outside the live editor until it is restored or purged. */
@@ -34,14 +39,15 @@ export interface TrashEntry {
   node: JsonValue
 }
 
-/** A persistent sidebar link to a bullet or tag search. */
+/** A persistent sidebar link to a bullet, tag, or named search. */
 export type OutlineShortcut =
   | { type: 'node'; target: string }
   | { type: 'tag'; target: string }
+  | { type: 'search'; target: string; label: string; scopeId: string | null }
 
 /** Current persisted envelope written to the iCloud Drive file. */
 export interface OutlineDoc {
-  version: 3
+  version: 4
   /** Raw ProseMirror doc JSON (a `doc` node containing one `bulletList`). */
   doc: JsonValue
   trash: TrashEntry[]
@@ -52,6 +58,7 @@ export interface OutlineDoc {
 export type LegacyOutlineDoc =
   | { version: 1; doc: JsonValue }
   | { version: 2; doc: JsonValue; trash: TrashEntry[] }
+  | { version: 3; doc: JsonValue; trash: TrashEntry[]; shortcuts: OutlineShortcut[] }
 
 /** Stable id generator for bullets. crypto.randomUUID is available in the webview. */
 export function newNodeId(): string {

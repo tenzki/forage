@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
+import { BookmarkPlus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import {
   breadcrumbFor,
   collectBullets,
+  searchBullets,
+  searchText,
   selectBullet,
   updateBulletText,
   type BulletEntry,
@@ -11,10 +13,13 @@ import {
 import {
   getOutlinerUiState,
   OUTLINER_NODE_MENU_EVENT,
+  OUTLINER_OPEN_SEARCH_EVENT,
   OUTLINER_OPEN_TRASH_EVENT,
+  setHideCompleted,
   setSearchQuery,
   setZoom,
   type NodeMenuRequest,
+  type SearchRequest,
 } from '../../editor/outlinerUi'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
@@ -35,7 +40,7 @@ function useEditorUi(editor: Editor | null) {
       editor.off('transaction', update)
     }
   }, [editor])
-  return editor ? getOutlinerUiState(editor).zoomId : null
+  return editor ? getOutlinerUiState(editor) : null
 }
 
 function Breadcrumbs({ editor, zoomId }: { editor: Editor; zoomId: string | null }) {
@@ -57,13 +62,17 @@ function Toolbar({
   editor,
   zoomId,
   sidebarCollapsed,
+  hideCompleted,
   onToggleSidebar,
+  onToggleCompleted,
   onOpenSearch,
 }: {
   editor: Editor
   zoomId: string | null
   sidebarCollapsed: boolean
+  hideCompleted: boolean
   onToggleSidebar: () => void
+  onToggleCompleted: () => void
   onOpenSearch: () => void
 }) {
   return (
@@ -81,6 +90,12 @@ function Toolbar({
         <Breadcrumbs editor={editor} zoomId={zoomId} />
       </div>
       <div className="outline-toolbar-actions">
+        <button className="completed-visibility" onClick={onToggleCompleted}>
+          {hideCompleted
+            ? <Eye size={15} aria-hidden="true" />
+            : <EyeOff size={15} aria-hidden="true" />}
+          {hideCompleted ? 'Show completed' : 'Hide completed'}
+        </button>
         <button className="search-open" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
           <Search size={15} aria-hidden="true" /> Search <kbd>⌘K</kbd>
         </button>
@@ -128,7 +143,9 @@ function SearchResultRow({
           if (event.key === 'Escape') setDraft(entry.text)
         }}
       />
-      <small>{path || 'Home'}</small>
+      <small>
+        {entry.noteText ? `${path || 'Home'} · Note: ${entry.noteText}` : (path || 'Home')}
+      </small>
       <button onMouseDown={(event) => event.preventDefault()} onClick={onChoose}>Open</button>
     </li>
   )
@@ -167,15 +184,57 @@ function SearchResults({
   )
 }
 
+function SaveSearchControl({
+  query,
+  onSave,
+}: {
+  query: string
+  onSave: (label: string) => void
+}) {
+  const [naming, setNaming] = useState(false)
+  const [label, setLabel] = useState('')
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!label.trim() || !query.trim()) return
+    onSave(label.trim())
+    setLabel('')
+    setNaming(false)
+  }
+
+  if (!naming) {
+    return (
+      <button className="save-search-open" disabled={!query.trim()} onClick={() => setNaming(true)}>
+        <BookmarkPlus size={13} aria-hidden="true" /> Save search
+      </button>
+    )
+  }
+  return (
+    <form className="save-search-form" onSubmit={submit}>
+      <input
+        aria-label="Saved search name"
+        placeholder="Search name"
+        value={label}
+        onChange={(event) => setLabel(event.target.value)}
+        autoFocus
+      />
+      <button type="submit" disabled={!label.trim()}>Save</button>
+      <button type="button" onClick={() => setNaming(false)}>Cancel</button>
+    </form>
+  )
+}
+
 function OutlineSearch({
   editor,
   zoomId,
   initialQuery,
+  onSaveSearch,
   onClose,
 }: {
   editor: Editor
   zoomId: string | null
   initialQuery: string
+  onSaveSearch: (query: string, label: string, scopeId: string | null) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState(initialQuery)
@@ -184,16 +243,15 @@ function OutlineSearch({
   const inputRef = useRef<HTMLInputElement>(null)
   const allEntries = collectBullets(editor.state.doc)
   const results = useMemo(() => {
-    const term = query.trim().toLocaleLowerCase()
     const scoped = allOutline || !zoomId
       ? allEntries
       : allEntries.filter((entry) => entry.id === zoomId || entry.ancestorIds.includes(zoomId))
-    return term ? scoped.filter((entry) => entry.text.toLocaleLowerCase().includes(term)) : []
+    return query.trim() ? searchBullets(scoped, query) : []
   }, [allEntries, allOutline, query, zoomId])
 
   useEffect(() => {
     inputRef.current?.focus()
-    setSearchQuery(editor, initialQuery)
+    setSearchQuery(editor, searchText(initialQuery))
     return () => setSearchQuery(editor, '')
   }, [editor, initialQuery])
 
@@ -217,7 +275,7 @@ function OutlineSearch({
   function changeQuery(value: string) {
     setQuery(value)
     setActive(0)
-    setSearchQuery(editor, value)
+    setSearchQuery(editor, searchText(value))
   }
 
   return (
@@ -228,12 +286,23 @@ function OutlineSearch({
           <input ref={inputRef} value={query} onChange={(event) => changeQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search bullets…" aria-label="Search bullets" role="combobox" aria-expanded="true" />
           <kbd>esc</kbd>
         </div>
-        {zoomId && (
-          <label className="search-scope">
-            <input type="checkbox" checked={allOutline} onChange={(event) => setAllOutline(event.target.checked)} />
-            Search all outline
-          </label>
-        )}
+        <div className="search-options">
+          {zoomId && (
+            <label className="search-scope">
+              <input type="checkbox" checked={allOutline} onChange={(event) => setAllOutline(event.target.checked)} />
+              Search all outline
+            </label>
+          )}
+          <div className="search-status-filters" aria-label="Todo filters">
+            <button onClick={() => changeQuery('is:todo')}>Todos</button>
+            <button onClick={() => changeQuery('is:open')}>Open</button>
+            <button onClick={() => changeQuery('is:complete')}>Completed</button>
+          </div>
+          <SaveSearchControl
+            query={query}
+            onSave={(label) => onSaveSearch(query.trim(), label, allOutline ? null : zoomId)}
+          />
+        </div>
         <SearchResults editor={editor} entries={results} allEntries={allEntries} query={query} active={active} onChoose={choose} />
       </section>
     </div>
@@ -282,7 +351,9 @@ export function OutlinerChrome({
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
 }) {
-  const zoomId = useEditorUi(editor)
+  const editorUi = useEditorUi(editor)
+  const zoomId = editorUi?.zoomId ?? null
+  const hideCompleted = editorUi?.hideCompleted ?? false
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQueryText] = useState('')
   const [trashOpen, setTrashOpen] = useState(false)
@@ -293,6 +364,16 @@ export function OutlinerChrome({
   function openSearch(query = '') {
     setSearchQueryText(query)
     setSearchOpen(true)
+  }
+
+  function saveSearch(query: string, label: string, scopeId: string | null) {
+    const duplicate = shortcuts.some((item) => item.type === 'search'
+      && item.target === query && item.scopeId === scopeId)
+    if (duplicate) {
+      setActionError('That search is already saved in the sidebar.')
+      return
+    }
+    onShortcutsChange([...shortcuts, { type: 'search', target: query, label, scopeId }])
   }
 
   function toggleNodeShortcut(nodeId: string) {
@@ -312,6 +393,18 @@ export function OutlinerChrome({
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
   }, [])
+
+  useEffect(() => {
+    const openSavedSearch = (event: Event) => {
+      if (!editor) return
+      const { query, scopeId } = (event as CustomEvent<SearchRequest>).detail
+      const validScope = scopeId && collectBullets(editor.state.doc).some((entry) => entry.id === scopeId)
+      setZoom(editor, validScope ? scopeId : null)
+      openSearch(query)
+    }
+    window.addEventListener(OUTLINER_OPEN_SEARCH_EVENT, openSavedSearch)
+    return () => window.removeEventListener(OUTLINER_OPEN_SEARCH_EVENT, openSavedSearch)
+  }, [editor])
 
   useEffect(() => {
     const openTrash = () => setTrashOpen(true)
@@ -335,7 +428,9 @@ export function OutlinerChrome({
         editor={editor}
         zoomId={zoomId}
         sidebarCollapsed={sidebarCollapsed}
+        hideCompleted={hideCompleted}
         onToggleSidebar={onToggleSidebar}
+        onToggleCompleted={() => setHideCompleted(editor, !hideCompleted)}
         onOpenSearch={() => openSearch()}
       />
       {actionError && <div className="action-error" role="alert">{actionError}<button onClick={() => setActionError(null)}>Dismiss</button></div>}
@@ -344,6 +439,7 @@ export function OutlinerChrome({
           editor={editor}
           zoomId={zoomId}
           initialQuery={searchQuery}
+          onSaveSearch={saveSearch}
           onClose={() => setSearchOpen(false)}
         />
       )}

@@ -4,9 +4,16 @@ import {
   collectBullets,
   duplicateBullet,
   moveBulletTo,
+  setBulletKind,
+  toggleBulletCompleted,
   trashBullet,
   type MovePlacement,
 } from '../../editor/outlineModel'
+import {
+  focusOrCreateBulletNote,
+  hasBulletNote,
+  removeBulletNote,
+} from '../../editor/bulletNote'
 import { toggleCollapsed } from '../../editor/outlinerUi'
 import type { TrashEntry } from '../../types/tree'
 
@@ -115,6 +122,7 @@ export function NodeActions({
   const menuRef = useRef<HTMLDivElement>(null)
   const entry = collectBullets(editor.state.doc).find((item) => item.id === request.nodeId)
   const children = hasChildren(editor, request.nodeId)
+  const hasNote = hasBulletNote(editor, request.nodeId)
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -144,6 +152,28 @@ export function NodeActions({
         {children && (
           <button role="menuitem" onClick={() => { toggleCollapsed(editor, request.nodeId); onClose() }}>
             {entry.node.attrs.collapsed ? 'Expand branch' : 'Collapse branch'}
+          </button>
+        )}
+        {entry.bulletKind === 'todo' ? (
+          <>
+            <button role="menuitem" onClick={() => { toggleBulletCompleted(editor, request.nodeId); onClose() }}>
+              {entry.completed ? 'Mark as open' : 'Mark as complete'}
+            </button>
+            <button role="menuitem" onClick={() => { setBulletKind(editor, request.nodeId, 'bullet'); onClose() }}>
+              Convert to bullet
+            </button>
+          </>
+        ) : (
+          <button role="menuitem" onClick={() => { setBulletKind(editor, request.nodeId, 'todo'); onClose() }}>
+            Convert to todo
+          </button>
+        )}
+        <button role="menuitem" onClick={() => { focusOrCreateBulletNote(editor, request.nodeId); onClose() }}>
+          {hasNote ? 'Edit note' : 'Add note'}
+        </button>
+        {hasNote && (
+          <button role="menuitem" onClick={() => { removeBulletNote(editor, request.nodeId); onClose() }}>
+            Remove note
           </button>
         )}
         <button role="menuitem" onClick={() => setMoving(true)}>Move to…</button>
