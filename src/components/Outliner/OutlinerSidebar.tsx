@@ -14,7 +14,6 @@ import type { Editor } from '@tiptap/react'
 import { collectBullets, selectBullet, type BulletEntry } from '../../editor/outlineModel'
 import {
   OUTLINER_OPEN_SEARCH_EVENT,
-  OUTLINER_OPEN_TRASH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   setZoom,
   type PointerDragEventDetail,
@@ -27,8 +26,11 @@ interface OutlinerSidebarProps {
   shortcuts: OutlineShortcut[]
   collapsed?: boolean
   trashCount?: number
+  activeView?: 'outliner' | 'settings' | 'trash'
   onChange: (shortcuts: OutlineShortcut[]) => void
+  onOpenOutline?: () => void
   onOpenSettings?: () => void
+  onOpenTrash?: () => void
 }
 
 interface ShortcutDragGhost {
@@ -58,7 +60,7 @@ function ShortcutPicker({ entries, tags, shortcuts, onAdd, onClose }: ShortcutPi
   const pinned = new Set(shortcuts.map(shortcutKey))
   const term = query.trim().toLocaleLowerCase()
   const candidates = [
-    ...tags.map((tag) => ({ shortcut: { type: 'tag', target: tag } as OutlineShortcut, label: `#${tag}` })),
+    ...tags.map((tag) => ({ shortcut: { type: 'tag', target: tag } as OutlineShortcut, label: tag })),
     ...entries.map((entry) => ({
       shortcut: { type: 'node', target: entry.id } as OutlineShortcut,
       label: entry.text.trim() || 'Untitled',
@@ -84,7 +86,10 @@ function ShortcutPicker({ entries, tags, shortcuts, onAdd, onClose }: ShortcutPi
       <ul>
         {candidates.slice(0, 30).map(({ shortcut, label }) => (
           <li key={shortcutKey(shortcut)}>
-            <button onClick={() => { onAdd(shortcut); onClose() }}>
+            <button
+              aria-label={shortcut.type === 'tag' ? `#${shortcut.target}` : undefined}
+              onClick={() => { onAdd(shortcut); onClose() }}
+            >
               <span aria-hidden="true">{shortcut.type === 'tag' ? <Hash size={14} /> : <Circle size={9} />}</span>
               <span>{label}</span>
               <small>{shortcut.type === 'tag' ? 'Tag' : 'Node'}</small>
@@ -102,8 +107,11 @@ export function OutlinerSidebar({
   shortcuts,
   collapsed = false,
   trashCount = 0,
+  activeView = 'outliner',
   onChange,
+  onOpenOutline = () => undefined,
   onOpenSettings = () => undefined,
+  onOpenTrash = () => undefined,
 }: OutlinerSidebarProps) {
   const [, setRevision] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -158,6 +166,7 @@ export function OutlinerSidebar({
 
   function open(shortcut: OutlineShortcut) {
     if (!editor) return
+    onOpenOutline()
     if (shortcut.type === 'tag') {
       window.dispatchEvent(new CustomEvent(OUTLINE_TAG_EVENT, { detail: { tag: shortcut.target } }))
     } else if (shortcut.type === 'search') {
@@ -229,7 +238,12 @@ export function OutlinerSidebar({
   return (
     <aside ref={sidebarRef} className={`outline-sidebar${collapsed ? ' is-collapsed' : ''}${dragOver ? ' is-drop-target' : ''}`} aria-label="Outline sidebar">
       <div className="sidebar-top-row">
-        <button className="sidebar-home" onClick={() => editor && setZoom(editor, null)} title="Home">
+        <button
+          className={`sidebar-home${activeView === 'outliner' ? ' is-active' : ''}`}
+          aria-current={activeView === 'outliner' ? 'page' : undefined}
+          onClick={() => { onOpenOutline(); if (editor) setZoom(editor, null) }}
+          title="Home"
+        >
           <Home className="sidebar-primary-icon" aria-hidden="true" /><span className="sidebar-primary-label">Home</span>
         </button>
       </div>
@@ -257,14 +271,12 @@ export function OutlinerSidebar({
                   className={shortcutGhost?.sourceIndex === index ? 'is-shortcut-drag-source' : ''}
                 >
                   <button
-                    className="sidebar-shortcut-drag"
-                    aria-label={`Reorder ${label}`}
-                    title="Drag to reorder"
-                    onPointerDown={(event) => startShortcutDrag(event, index, label)}
+                    className="sidebar-shortcut-open"
+                    aria-label={shortcut.type === 'tag' ? `#${shortcut.target}` : undefined}
+                    disabled={missing}
+                    onClick={() => open(shortcut)}
+                    title={label}
                   >
-                    <GripVertical size={14} aria-hidden="true" />
-                  </button>
-                  <button className="sidebar-shortcut-open" disabled={missing} onClick={() => open(shortcut)} title={label}>
                     <span className="sidebar-shortcut-icon" aria-hidden="true">
                       {shortcut.type === 'tag'
                         ? <Hash size={13} />
@@ -272,9 +284,19 @@ export function OutlinerSidebar({
                           ? <SearchIcon size={13} />
                           : <Circle size={8} />}
                     </span>
-                    <span>{label}</span>
+                    <span>{shortcut.type === 'tag' ? shortcut.target : label}</span>
                   </button>
-                  <button className="sidebar-shortcut-remove" aria-label={`Remove ${label} shortcut`} onClick={() => remove(shortcut)}>×</button>
+                  <button
+                    className="sidebar-shortcut-drag"
+                    aria-label={`Reorder ${label}`}
+                    title="Drag to reorder"
+                    onPointerDown={(event) => startShortcutDrag(event, index, label)}
+                  >
+                    <GripVertical size={14} aria-hidden="true" />
+                  </button>
+                  <button className="sidebar-shortcut-remove" aria-label={`Remove ${label} shortcut`} onClick={() => remove(shortcut)}>
+                    <X size={13} aria-hidden="true" />
+                  </button>
                 </li>
               )
             })}
@@ -282,14 +304,20 @@ export function OutlinerSidebar({
         </div>
       )}
       <nav className="sidebar-bottom" aria-label="Sidebar actions">
-        <button className="sidebar-settings" onClick={onOpenSettings} title="Settings">
+        <button
+          className={`sidebar-settings${activeView === 'settings' ? ' is-active' : ''}`}
+          aria-current={activeView === 'settings' ? 'page' : undefined}
+          onClick={onOpenSettings}
+          title="Settings"
+        >
           <SettingsIcon className="sidebar-primary-icon" aria-hidden="true" />
           <span className="sidebar-primary-label">Settings</span>
         </button>
         <button
-          className="sidebar-trash"
+          className={`sidebar-trash${activeView === 'trash' ? ' is-active' : ''}`}
+          aria-current={activeView === 'trash' ? 'page' : undefined}
           aria-label="Trash"
-          onClick={() => window.dispatchEvent(new Event(OUTLINER_OPEN_TRASH_EVENT))}
+          onClick={onOpenTrash}
           title="Trash"
         >
           <Trash2 className="sidebar-primary-icon" aria-hidden="true" />

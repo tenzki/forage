@@ -10,7 +10,7 @@ import {
   setBulletKind,
   toggleBulletCompleted,
 } from '../../editor/outlineModel'
-import { OUTLINER_OPEN_TRASH_EVENT, OutlinerUi } from '../../editor/outlinerUi'
+import { OutlinerUi } from '../../editor/outlinerUi'
 import { OutlinerChrome } from './OutlinerChrome'
 
 function makeEditor(): Editor {
@@ -143,14 +143,6 @@ describe('outliner chrome', () => {
     await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
 
     expect(onToggleSidebar).toHaveBeenCalledOnce()
-  })
-
-  it('opens Trash when requested from the sidebar', async () => {
-    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
-
-    act(() => window.dispatchEvent(new Event(OUTLINER_OPEN_TRASH_EVENT)))
-
-    expect(await screen.findByRole('dialog', { name: 'Trash' })).toBeTruthy()
   })
 
   it('adds a node to sidebar shortcuts from its action menu', async () => {

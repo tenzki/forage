@@ -15,6 +15,7 @@ import {
   useSettingsStore,
   type CodexAuthMode,
 } from '../../store/settingsStore'
+import { SecondaryViewHeader } from '../SecondaryViewHeader'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -155,13 +156,10 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="settings-panel">
-      <header className="settings-header">
-        <button className="settings-back" onClick={onBack}>← Back</button>
-        <h1>Settings</h1>
-      </header>
-
-      <section className="settings-section">
+    <div className="secondary-view">
+      <SecondaryViewHeader title="Settings" onBack={onBack} />
+      <div className="settings-panel">
+        <section className="settings-section">
         <h2>Codex</h2>
         <div className="auth-mode" role="group" aria-label="Codex authentication method">
           <button
@@ -349,9 +347,10 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         </p>
       </section>
 
-      {(actionError || storeError) && (
-        <p className="settings-error" role="alert">{actionError || storeError}</p>
-      )}
+        {(actionError || storeError) && (
+          <p className="settings-error" role="alert">{actionError || storeError}</p>
+        )}
+      </div>
     </div>
   )
 }

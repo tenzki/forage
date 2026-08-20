@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { restoreBullet } from '../../editor/outlineModel'
 import { extractText, type TrashEntry } from '../../types/tree'
+import { SecondaryViewHeader } from '../SecondaryViewHeader'
 
 interface TrashPanelProps {
   editor: Editor
@@ -43,15 +44,10 @@ export function TrashPanel({ editor, entries, onClose, onChange, onError }: Tras
   }
 
   return (
-    <div className="search-backdrop" onMouseDown={onClose}>
-      <section className="trash-panel" role="dialog" aria-modal="true" aria-labelledby="trash-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header>
-          <div>
-            <h2 id="trash-title">Trash</h2>
-            <p>Deleted branches remain here until permanently removed.</p>
-          </div>
-          <button aria-label="Close Trash" onClick={onClose}>×</button>
-        </header>
+    <div className="secondary-view">
+      <SecondaryViewHeader title="Trash" onBack={onClose} />
+      <section className="trash-page" aria-label="Trash contents">
+        <p className="trash-description">Deleted branches remain here until permanently removed.</p>
         {entries.length === 0 ? (
           <p className="trash-empty">Trash is empty.</p>
         ) : (

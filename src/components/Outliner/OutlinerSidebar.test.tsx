@@ -7,7 +7,6 @@ import { BulletAttributes } from '../../editor/extensions'
 import {
   getOutlinerUiState,
   OUTLINER_OPEN_SEARCH_EVENT,
-  OUTLINER_OPEN_TRASH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   OutlinerUi,
 } from '../../editor/outlinerUi'
@@ -56,7 +55,9 @@ describe('outliner sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Alpha #research' }))
     expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
-    await user.click(screen.getByRole('button', { name: '#research' }))
+    const tagShortcut = screen.getByRole('button', { name: '#research' })
+    expect(tagShortcut.textContent).toBe('research')
+    await user.click(tagShortcut)
     expect(onTag).toHaveBeenCalledOnce()
 
     await user.click(screen.getByRole('button', { name: 'Remove #research shortcut' }))
@@ -96,10 +97,12 @@ describe('outliner sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add shortcut' }))
     const search = screen.getByLabelText('Search nodes and tags')
-    expect(screen.getByText('#research')).toBeTruthy()
+    const tagCandidate = screen.getByRole('button', { name: '#research' })
+    expect(tagCandidate.textContent).toContain('research')
+    expect(tagCandidate.textContent).not.toContain('#research')
     expect(screen.getByText('Alpha #research')).toBeTruthy()
     await user.type(search, 'research')
-    await user.click(screen.getByText('#research'))
+    await user.click(tagCandidate)
 
     expect(onChange).toHaveBeenCalledWith([{ type: 'tag', target: 'research' }])
   })
@@ -108,7 +111,6 @@ describe('outliner sidebar', () => {
     const user = userEvent.setup()
     const onTrash = vi.fn()
     const onSettings = vi.fn()
-    window.addEventListener(OUTLINER_OPEN_TRASH_EVENT, onTrash, { once: true })
     const view = render(
       <OutlinerSidebar
         editor={editor}
@@ -116,6 +118,7 @@ describe('outliner sidebar', () => {
         trashCount={2}
         onChange={vi.fn()}
         onOpenSettings={onSettings}
+        onOpenTrash={onTrash}
       />,
     )
 
@@ -130,6 +133,7 @@ describe('outliner sidebar', () => {
         trashCount={2}
         onChange={vi.fn()}
         onOpenSettings={onSettings}
+        onOpenTrash={onTrash}
       />,
     )
     expect(screen.queryByRole('heading', { name: 'Shortcuts' })).toBeNull()

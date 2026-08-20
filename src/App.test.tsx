@@ -90,6 +90,28 @@ describe('App view switching', () => {
     expect(container.querySelector('.ProseMirror')).toBe(editorBefore)
   })
 
+  it('opens Settings and Trash in the main panel while keeping the sidebar', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const sidebar = screen.getByRole('complementary', { name: 'Outline sidebar' })
+
+    const settingsNav = screen.getByRole('button', { name: 'Settings' })
+    await user.click(settingsNav)
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    expect(settingsNav.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('button', { name: 'Back to outline' }).closest('.secondary-view-header')).toBeTruthy()
+    expect(document.body.contains(sidebar)).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Back to outline' }))
+    const trashNav = screen.getByRole('button', { name: 'Trash' })
+    await user.click(trashNav)
+    expect(await screen.findByRole('heading', { name: 'Trash' })).toBeTruthy()
+    expect(trashNav.getAttribute('aria-current')).toBe('page')
+    expect(screen.queryByRole('dialog', { name: 'Trash' })).toBeNull()
+    expect(document.body.contains(sidebar)).toBe(true)
+    expect(container.querySelector('.outline-editor-view')?.hasAttribute('hidden')).toBe(true)
+  })
+
   it('keeps Tab and Shift+Tab restructuring active in the complete app', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()

@@ -14,7 +14,6 @@ import {
   getOutlinerUiState,
   OUTLINER_NODE_MENU_EVENT,
   OUTLINER_OPEN_SEARCH_EVENT,
-  OUTLINER_OPEN_TRASH_EVENT,
   setHideCompleted,
   setSearchQuery,
   setZoom,
@@ -24,7 +23,6 @@ import {
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
-import { TrashPanel } from './TrashPanel'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -356,7 +354,6 @@ export function OutlinerChrome({
   const hideCompleted = editorUi?.hideCompleted ?? false
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQueryText] = useState('')
-  const [trashOpen, setTrashOpen] = useState(false)
   const [nodeMenu, setNodeMenu] = useNodeMenu()
   const [actionError, setActionError] = useState<string | null>(null)
   useDeepLinks(editor)
@@ -407,12 +404,6 @@ export function OutlinerChrome({
   }, [editor])
 
   useEffect(() => {
-    const openTrash = () => setTrashOpen(true)
-    window.addEventListener(OUTLINER_OPEN_TRASH_EVENT, openTrash)
-    return () => window.removeEventListener(OUTLINER_OPEN_TRASH_EVENT, openTrash)
-  }, [])
-
-  useEffect(() => {
     const openTag = (event: Event) => {
       const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
       if (tag) openSearch(`#${tag}`)
@@ -443,7 +434,6 @@ export function OutlinerChrome({
           onClose={() => setSearchOpen(false)}
         />
       )}
-      {trashOpen && <TrashPanel editor={editor} entries={trash} onChange={onTrashChange} onError={setActionError} onClose={() => setTrashOpen(false)} />}
       {nodeMenu && (
         <NodeActions
           editor={editor}

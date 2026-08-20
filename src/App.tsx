@@ -6,6 +6,7 @@ import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
 import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
 import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
+import { TrashPanel } from './components/Outliner/TrashPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
 import {
   loadOutline,
@@ -15,7 +16,7 @@ import {
 import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 
-type View = 'outliner' | 'settings'
+type View = 'outliner' | 'settings' | 'trash'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -32,6 +33,7 @@ export default function App() {
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [viewError, setViewError] = useState<string | null>(null)
   const loadSettings = useSettingsStore((state) => state.load)
   const saver = useRef<DebouncedSaver | null>(null)
 
@@ -130,33 +132,47 @@ export default function App() {
         </div>
       )}
 
-      <main className="outliner-main" hidden={view === 'settings'}>
+      <main className="outliner-main">
         <OutlinerSidebar
           editor={editor}
           shortcuts={shortcuts}
           collapsed={sidebarCollapsed}
           trashCount={trash.length}
+          activeView={view}
           onChange={setShortcuts}
-          onOpenSettings={() => setView('settings')}
+          onOpenOutline={() => { setViewError(null); setView('outliner') }}
+          onOpenSettings={() => { setViewError(null); setView('settings') }}
+          onOpenTrash={() => { setViewError(null); setView('trash') }}
         />
         <section className="outline-workspace">
-          <OutlinerChrome
-            editor={editor}
-            trash={trash}
-            onTrashChange={setTrash}
-            shortcuts={shortcuts}
-            onShortcutsChange={setShortcuts}
-            sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
-          />
-          <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
-          <FormattingBubbleMenu editor={editor} />
-          <SlashMenu editor={editor} />
-          <TagMenu editor={editor} />
+          <div className="outline-editor-view" hidden={view !== 'outliner'}>
+            <OutlinerChrome
+              editor={editor}
+              trash={trash}
+              onTrashChange={setTrash}
+              shortcuts={shortcuts}
+              onShortcutsChange={setShortcuts}
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            />
+            <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
+            <FormattingBubbleMenu editor={editor} />
+            <SlashMenu editor={editor} />
+            <TagMenu editor={editor} />
+          </div>
+          {viewError && <div className="action-error" role="alert">{viewError}<button onClick={() => setViewError(null)}>Dismiss</button></div>}
+          {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}
+          {view === 'trash' && editor && (
+            <TrashPanel
+              editor={editor}
+              entries={trash}
+              onChange={setTrash}
+              onError={setViewError}
+              onClose={() => setView('outliner')}
+            />
+          )}
         </section>
       </main>
-
-      {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}
     </div>
   )
 }

@@ -83,7 +83,7 @@ The app's clearest differentiation is its **bring-your-own Codex/OpenAI setup wi
 | Back/forward navigation history | Page/pane history supports backward and forward navigation | Zoom state has no navigation history | **Missing** |
 | Collapse/expand a branch | Arrow hides or reveals descendants | Per-parent collapse control; state is stored in the document | **Supported** |
 | Expand/collapse all | Menu and double-click behavior operate over a whole level/subtree | No expand-all or collapse-all action | **Missing** |
-| Sidebar tree | Collapsible sidebar shows Home tree and enables navigation/editing | Collapsible sidebar provides Home, node/tag shortcuts, Settings, and Trash navigation | **Supported** |
+| Sidebar tree | Collapsible sidebar shows Home tree and enables navigation/editing | Collapsible sidebar provides Home and node/tag/search shortcuts; Settings and Trash open in the main panel without hiding the sidebar | **Supported** |
 | Create/move from sidebar | Add children or drag nodes to remote branches in sidebar | Nodes can be dragged onto the sidebar to create navigation shortcuts; structural editing remains in the outline | **Partial** |
 | Star nodes | Pin frequently used nodes in the sidebar | Nodes can be pinned, removed, and reordered as persistent sidebar shortcuts | **Supported** |
 | Star/save searches | Save a live filtered view with a custom name | Queries can be named, scoped, persisted, reordered, and reopened from the sidebar | **Supported** |
