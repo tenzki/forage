@@ -34,7 +34,7 @@ function makeEditor(withAliases = false): Editor {
   }
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, InternalLink],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, InternalLink],
     content: {
       type: 'doc',
       content: [{

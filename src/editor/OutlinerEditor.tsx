@@ -12,7 +12,7 @@ import { InternalLink } from './internalLinks'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
 import { SlashCommandDecorations } from './slashCommands'
-import { EMPTY_DOC } from './emptyDoc'
+import { EMPTY_DOC, normalizeOutlinerDoc } from './emptyDoc'
 import type { JsonValue } from '../types/tree'
 
 interface OutlinerEditorProps {
@@ -31,7 +31,7 @@ export function OutlinerEditor({
 }: OutlinerEditorProps) {
   const editor = useEditor({
     extensions: [
-      StarterKit, // bulletList, listItem, paragraph, marks, history (undo/redo)
+      StarterKit.configure({ trailingNode: false }), // the document itself is always one bullet list
       BulletAttributes,
       BulletNote,
       InternalLink,
@@ -40,7 +40,7 @@ export function OutlinerEditor({
       SlashCommandDecorations,
       OutlinerUi,
     ],
-    content: (initialContent ?? EMPTY_DOC) as object,
+    content: normalizeOutlinerDoc(initialContent ?? EMPTY_DOC) as object,
     onUpdate: ({ editor }) => {
       onDocChange(editor.getJSON() as JsonValue)
     },

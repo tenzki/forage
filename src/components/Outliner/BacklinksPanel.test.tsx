@@ -11,7 +11,7 @@ import { BacklinksPanel } from './BacklinksPanel'
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, InternalLink, OutlinerUi],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, InternalLink, OutlinerUi],
     content: {
       type: 'doc',
       content: [{

@@ -16,7 +16,7 @@ import { OutlinerSidebar } from './OutlinerSidebar'
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, OutlinerUi],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, OutlinerUi],
     content: {
       type: 'doc',
       content: [{

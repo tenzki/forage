@@ -9,9 +9,10 @@
 //   - OutlinerKeymap: Tab / Shift-Tab to nest / un-nest, Workflowy-style.
 
 import { Extension, type Editor } from '@tiptap/core'
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
+import { Fragment, Slice } from '@tiptap/pm/model'
+import { AllSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { newNodeId } from '../types/tree'
-import { moveCurrentBullet, toggleCurrentBulletCompleted } from './outlineModel'
+import { collectBullets, currentBulletId, moveCurrentBullet, toggleCurrentBulletCompleted } from './outlineModel'
 
 const idPluginKey = new PluginKey('bulletNodeIds')
 
@@ -90,6 +91,42 @@ export const BulletAttributes = Extension.create({
   },
 })
 
+function preserveEmptyOutline(editor: Editor): boolean {
+  const { state, view } = editor
+  const coversDocument = state.selection.from <= 1
+    && state.selection.to >= state.doc.content.size - 1
+  if (state.selection instanceof AllSelection || coversDocument) {
+    const paragraph = state.schema.nodes.paragraph.create()
+    const item = state.schema.nodes.listItem.create({
+      nodeId: newNodeId(),
+      nodeType: 'user',
+      collapsed: false,
+      bulletKind: 'bullet',
+      completed: false,
+    }, paragraph)
+    const list = state.schema.nodes.bulletList.create(null, item)
+    const replacement = new Slice(Fragment.from(list), 0, 0)
+    const tr = state.tr.replace(0, state.doc.content.size, replacement)
+    if (tr.doc.childCount > 1 && tr.doc.firstChild) {
+      tr.delete(tr.doc.firstChild.nodeSize, tr.doc.content.size)
+    }
+    tr.setSelection(TextSelection.create(tr.doc, 3))
+    view.dispatch(tr.scrollIntoView())
+    return true
+  }
+
+  if (state.selection.$from.parent.type.name === 'bulletNote') return false
+  const bullets = collectBullets(state.doc)
+  const onlyBullet = bullets.length === 1 ? bullets[0] : null
+  return Boolean(
+    state.selection.empty
+    && onlyBullet
+    && currentBulletId(editor) === onlyBullet.id
+    && !onlyBullet.text
+    && !onlyBullet.noteText,
+  )
+}
+
 function insertBulletAtParentEnd(editor: Editor): boolean {
   const { state, view } = editor
   const { $from } = state.selection
@@ -129,6 +166,8 @@ export const OutlinerKeymap = Extension.create({
 
   addKeyboardShortcuts() {
     return {
+      Backspace: () => preserveEmptyOutline(this.editor),
+      Delete: () => preserveEmptyOutline(this.editor),
       Enter: () => insertBulletAtParentEnd(this.editor),
       Tab: () => {
         this.editor.commands.sinkListItem('listItem')

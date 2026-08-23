@@ -16,7 +16,7 @@ import { OutlinerChrome } from './OutlinerChrome'
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
     content: {
       type: 'doc',
       content: [{

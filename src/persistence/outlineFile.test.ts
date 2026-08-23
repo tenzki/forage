@@ -21,13 +21,31 @@ const doc = {
   content: [{ type: 'bulletList', content: [] }],
 }
 
+const normalizedDoc = {
+  type: 'doc',
+  content: [{
+    type: 'bulletList',
+    content: [{
+      type: 'listItem',
+      attrs: {
+        nodeId: expect.any(String),
+        nodeType: 'user',
+        collapsed: false,
+        bulletKind: 'bullet',
+        completed: false,
+      },
+      content: [{ type: 'paragraph' }],
+    }],
+  }],
+}
+
 describe('outline persistence', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('migrates version 1 files without losing the document', () => {
     expect(normalizeOutline({ version: 1, doc })).toEqual({
       version: 4,
-      doc,
+      doc: normalizedDoc,
       trash: [],
       shortcuts: [],
     })
@@ -36,10 +54,18 @@ describe('outline persistence', () => {
   it('migrates version 2 files with empty shortcuts', () => {
     expect(normalizeOutline({ version: 2, doc, trash: [] })).toEqual({
       version: 4,
-      doc,
+      doc: normalizedDoc,
       trash: [],
       shortcuts: [],
     })
+  })
+
+  it('repairs an empty document with stray root content', () => {
+    const malformed = {
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [] }, { type: 'paragraph' }],
+    }
+    expect(normalizeOutline({ version: 1, doc: malformed }).doc).toEqual(normalizedDoc)
   })
 
   it('migrates version 3 shortcuts and accepts named searches in version 4', () => {

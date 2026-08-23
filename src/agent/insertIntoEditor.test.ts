@@ -20,7 +20,7 @@ import {
 function makeEditor(text: string): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, BulletNote, OutlinerKeymap],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap],
     content: {
       type: 'doc',
       content: [

@@ -42,7 +42,7 @@ function item(id: string, text: string, children: object[] = []) {
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
     content: {
       type: 'doc',
       content: [
@@ -68,6 +68,17 @@ describe('Workflowy-style outline interactions', () => {
 
   afterEach(() => {
     editor.destroy()
+  })
+
+  it('keeps one editable bullet when all outline data is deleted', () => {
+    editor.commands.selectAll()
+    editor.commands.keyboardShortcut('Backspace')
+
+    const bullets = collectBullets(editor.state.doc)
+    expect(editor.state.doc.childCount).toBe(1)
+    expect(editor.state.doc.firstChild?.type.name).toBe('bulletList')
+    expect(bullets).toHaveLength(1)
+    expect(bullets[0].text).toBe('')
   })
 
   it('tracks stable hierarchy paths for breadcrumbs and search scope', () => {

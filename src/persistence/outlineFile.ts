@@ -8,6 +8,7 @@ import {
   writeTextFile,
 } from '@tauri-apps/plugin-fs'
 import { homeDir, join } from '@tauri-apps/api/path'
+import { normalizeOutlinerDoc } from '../editor/emptyDoc'
 import type {
   JsonValue,
   LegacyOutlineDoc,
@@ -66,13 +67,18 @@ export function normalizeOutline(value: unknown): OutlineDoc {
   }
   if (value.version === 1) {
     const legacy = value as unknown as LegacyOutlineDoc
-    return { version: 4, doc: legacy.doc, trash: [], shortcuts: [] }
+    return { version: 4, doc: normalizeOutlinerDoc(legacy.doc), trash: [], shortcuts: [] }
   }
   if (!Array.isArray(value.trash) || !value.trash.every(validTrashEntry)) {
     throw new Error('The outline file uses an unsupported or invalid format.')
   }
   if (value.version === 2) {
-    return { version: 4, doc: value.doc as JsonValue, trash: value.trash, shortcuts: [] }
+    return {
+      version: 4,
+      doc: normalizeOutlinerDoc(value.doc as JsonValue),
+      trash: value.trash,
+      shortcuts: [],
+    }
   }
   if (!Array.isArray(value.shortcuts)) {
     throw new Error('The outline file uses an unsupported or invalid format.')
@@ -80,7 +86,7 @@ export function normalizeOutline(value: unknown): OutlineDoc {
   if (value.version === 3 && value.shortcuts.every((item) => validShortcut(item, false))) {
     return {
       version: 4,
-      doc: value.doc as JsonValue,
+      doc: normalizeOutlinerDoc(value.doc as JsonValue),
       trash: value.trash,
       shortcuts: value.shortcuts,
     }
@@ -90,7 +96,7 @@ export function normalizeOutline(value: unknown): OutlineDoc {
   }
   return {
     version: 4,
-    doc: value.doc as JsonValue,
+    doc: normalizeOutlinerDoc(value.doc as JsonValue),
     trash: value.trash,
     shortcuts: value.shortcuts,
   }

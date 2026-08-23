@@ -30,7 +30,7 @@ function item(id: string, text: string, targetId?: string) {
 function makeEditor(includeTarget = true): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes, InternalLink],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, InternalLink],
     content: {
       type: 'doc',
       content: [{
@@ -86,7 +86,7 @@ describe('internal outline links', () => {
   it('marks missing targets as broken and prevents dead navigation', () => {
     const editor = new Editor({
       element: document.createElement('div'),
-      extensions: [StarterKit, BulletAttributes, InternalLink],
+      extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, InternalLink],
       content: {
         type: 'doc',
         content: [{ type: 'bulletList', content: [item('alpha', 'Missing', 'deleted')] }],
