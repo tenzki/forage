@@ -216,6 +216,7 @@ describe('App view switching', () => {
     await renderApp()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Agents' }))
     expect(await screen.findByText('Web search')).not.toBeNull()
     expect(screen.getByText('Read webpages')).not.toBeNull()
 
@@ -237,6 +238,7 @@ describe('App view switching', () => {
     await renderApp()
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Agents' }))
     await user.click(screen.getByRole('button', { name: /Add agent/ }))
     await user.type(screen.getByLabelText('Agent name'), 'Editor')
     await user.type(screen.getByLabelText('Agent description'), 'Edits prose')
