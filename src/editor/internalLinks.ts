@@ -22,6 +22,25 @@ export interface BacklinkEntry {
   label: string
 }
 
+export interface InternalLinkReference {
+  targetId: string
+  label: string
+}
+
+/** Structured links in document order. Callers should pass only the content they own. */
+export function collectInternalLinkReferences(node: ProseMirrorNode): InternalLinkReference[] {
+  const references: InternalLinkReference[] = []
+  node.descendants((child) => {
+    if (!child.isText) return
+    const link = child.marks.find((mark) => mark.type.name === 'internalLink')
+    const targetId = link?.attrs.targetId
+    if (typeof targetId === 'string' && targetId) {
+      references.push({ targetId, label: child.text ?? '' })
+    }
+  })
+  return references
+}
+
 export function activeInternalLinkAtSelection(state: EditorState): ActiveInternalLink | null {
   const { $from, empty } = state.selection
   if (!empty || !$from.parent.isTextblock) return null

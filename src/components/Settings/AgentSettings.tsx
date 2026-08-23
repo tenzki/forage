@@ -1,9 +1,6 @@
 import { useMemo, useState } from 'react'
 import { codexModelOptions } from '../../agent/client'
 import {
-  cloneContextStrategy,
-  CONTEXT_PRESET_OPTIONS,
-  contextStrategyForPreset,
   type AgentDefinition,
   type AgentDraft,
   type SkillDefinition,
@@ -11,7 +8,6 @@ import {
 } from '../../agent/definitions'
 import { BUILTIN_TOOL_OPTIONS, type ToolOption } from '../../agent/tools'
 import { useSettingsStore } from '../../store/settingsStore'
-import { SkillContextSettings } from './SkillContextSettings'
 
 const EMPTY_AGENT: AgentDraft = {
   name: '', description: '', systemPrompt: '', modelId: '', toolIds: [],
@@ -60,14 +56,9 @@ function SkillForm({ initial, agents, onSave, onCancel }: {
       <label>Description<input aria-label="Skill description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></label>
       <label>Agent<select aria-label="Skill agent" value={draft.agentId} onChange={(event) => update('agentId', event.target.value)}>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
       <label>Workflow instructions<textarea aria-label="Skill instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></label>
-      <SkillContextSettings value={draft.contextStrategy ?? contextStrategyForPreset('lineage')} onChange={(contextStrategy) => update('contextStrategy', contextStrategy)} />
       <div className="settings-actions"><button className="settings-save" onClick={() => onSave(draft)}>Save skill</button><button className="settings-secondary" onClick={onCancel}>Cancel</button></div>
     </div>
   )
-}
-
-function contextStrategyName(skill: SkillDefinition): string {
-  return CONTEXT_PRESET_OPTIONS.find((option) => option.id === skill.contextStrategy.preset)?.name ?? 'Custom'
 }
 
 export function AgentSettings({ reportError }: { reportError: (error: unknown) => void }) {
@@ -90,8 +81,8 @@ export function AgentSettings({ reportError }: { reportError: (error: unknown) =
       {agentDraft ? <AgentForm key={agentDraft.id ?? 'new'} initial={agentDraft} tools={tools} onSave={(draft) => void perform(() => saveAgent(draft), () => setAgentDraft(null))} onCancel={() => setAgentDraft(null)} /> : <button className="settings-secondary add-tool" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.map((tool) => tool.id) })}>+ Add agent</button>}
     </section>
     <section className="settings-section"><h2>Skills</h2><p className="settings-hint">Skills become slash commands and run through their assigned agent.</p>
-      <div className="tool-list">{skills.map((skill: SkillDefinition) => <div className="tool-setting" key={skill.id}><span><strong>/{skill.label}</strong><small>{skill.description}</small><code>{agents.find((agent) => agent.id === skill.agentId)?.name ?? 'Missing agent'} · {contextStrategyName(skill)}</code></span><div className="tool-setting-actions"><button onClick={() => setSkillDraft({ ...skill, contextStrategy: cloneContextStrategy(skill.contextStrategy) })}>Edit</button><button onClick={() => void perform(() => removeSkill(skill.id))}>Remove</button></div></div>)}</div>
-      {skillDraft ? <SkillForm key={skillDraft.id ?? 'new'} initial={skillDraft} agents={agents} onSave={(draft) => void perform(() => saveSkill(draft), () => setSkillDraft(null))} onCancel={() => setSkillDraft(null)} /> : <button className="settings-secondary add-tool" onClick={() => setSkillDraft({ label: '', description: '', systemPrompt: '', agentId: agents[0]?.id ?? '', contextStrategy: contextStrategyForPreset('lineage') })}>+ Add skill</button>}
+      <div className="tool-list">{skills.map((skill: SkillDefinition) => <div className="tool-setting" key={skill.id}><span><strong>/{skill.label}</strong><small>{skill.description}</small><code>{agents.find((agent) => agent.id === skill.agentId)?.name ?? 'Missing agent'}</code></span><div className="tool-setting-actions"><button onClick={() => setSkillDraft({ ...skill })}>Edit</button><button onClick={() => void perform(() => removeSkill(skill.id))}>Remove</button></div></div>)}</div>
+      {skillDraft ? <SkillForm key={skillDraft.id ?? 'new'} initial={skillDraft} agents={agents} onSave={(draft) => void perform(() => saveSkill(draft), () => setSkillDraft(null))} onCancel={() => setSkillDraft(null)} /> : <button className="settings-secondary add-tool" onClick={() => setSkillDraft({ label: '', description: '', systemPrompt: '', agentId: agents[0]?.id ?? '' })}>+ Add skill</button>}
       <button className="settings-secondary reset-agents" onClick={() => void perform(reset)}>Restore built-in agents and skills</button>
     </section>
   </>

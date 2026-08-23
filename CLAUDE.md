@@ -35,15 +35,16 @@ Four things carry the design:
 
 ### Agent flow
 
-`SlashMenu` (`src/components/Agent/SlashMenu.tsx`) opens only when the current bullet's text *starts* with `/` — this is deliberate (no false positives on mid-sentence slashes). Picking a skill replaces the `/skill …` text with the prompt, then `runSkillIntoEditor` (`src/agent/insertIntoEditor.ts`):
+`SlashMenu` (`src/components/Agent/SlashMenu.tsx`) opens only when the current bullet's text *starts* with `/` — this is deliberate (no false positives on mid-sentence slashes). Picking a skill completes `/skill ` so the user can type a prompt and add stable internal links with `[[`. On Enter, `runSkillIntoEditor` (`src/agent/insertIntoEditor.ts`):
 
-1. resolves the skill's command-relative automatic context strategy from the live TipTap tree,
-2. inserts an empty child bullet with `nodeType: 'ai'`,
-3. sends the skill instructions, prompt, and indentation-preserving selected context through Pi RPC using `/ai-chat-run`,
-4. applies `emit_outline` tool results as nested bullets (or streamed text as a fallback); generated images become separate `generatedImageItem` outline nodes rather than content appended to text `listItem`s, with each write using `tr.setMeta('addToHistory', false)`,
-5. writes `[cancelled]` / `[error: …]` into the same bullet on abort/failure.
+1. resolves the full ancestor path plus the invocation's complete parent branch, excluding the invocation subtree and unrelated higher-level sibling branches, then adds explicitly linked branches in reference appearance order,
+2. blocks missing references or context over the fixed 100-node/40,000-character safety budget before inserting output,
+3. inserts an empty child bullet with `nodeType: 'ai'` and removes only the slash prefix, preserving structured links in the prompt,
+4. sends the skill instructions, prompt, and indentation-preserving context sections through Pi RPC using `/ai-chat-run`,
+5. applies `emit_outline` tool results as nested bullets (or streamed text as a fallback); generated images become separate `generatedImageItem` outline nodes rather than content appended to text `listItem`s, with each write using `tr.setMeta('addToHistory', false)`,
+6. writes `[cancelled]` / `[error: …]` into the same bullet on abort/failure.
 
-Agents and slash-command skills are typed definitions in `src/agent/definitions.ts`, persisted by `src/store/settingsStore.ts`, and configurable in Settings. An agent controls instructions, model override, and a tool allowlist; a skill controls its slash label, workflow instructions, assigned agent, and bounded automatic context strategy. `src/agent/context.ts` resolves self/ancestor/descendant/sibling selectors, and `src/editor/contextPreview.ts` highlights the resulting nodes while the command is focused. The bridge exposes only globally enabled tools that the selected agent also allows. In subscription mode, `generate_image` starts an isolated ephemeral Codex app-server with externally managed ChatGPT tokens, external tools disabled, and read-only sandboxing, so GPT Image 2 usage counts against Codex limits. In API-key mode it calls the billed OpenAI Images API directly. Development therefore requires both `pi` and `codex` on `PATH`.
+Agents and slash-command skills are typed definitions in `src/agent/definitions.ts`, persisted by `src/store/settingsStore.ts`, and configurable in Settings. An agent controls instructions, model override, and a tool allowlist; a skill controls its slash label, workflow instructions, and assigned agent. Context selection is not skill-configurable: command placement supplies the ancestor path and local parent branch, while structured stable-ID links are the only external-context mechanism. `src/agent/context.ts` resolves and bounds both sections, while `src/editor/contextPreview.ts` highlights local, referenced, excluded invocation, and error states ephemerally. The bridge exposes only globally enabled tools that the selected agent also allows. In subscription mode, `generate_image` starts an isolated ephemeral Codex app-server with externally managed ChatGPT tokens, external tools disabled, and read-only sandboxing, so GPT Image 2 usage counts against Codex limits. In API-key mode it calls the billed OpenAI Images API directly. Development therefore requires both `pi` and `codex` on `PATH`.
 
 ### Stale files — ignore, don't build on
 

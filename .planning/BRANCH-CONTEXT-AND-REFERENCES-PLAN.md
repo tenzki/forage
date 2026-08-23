@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned for implementation after rebasing onto the branch that already implements cross-branch node references.
+Implemented after integrating the rebased branch's stable internal-link references.
 
 ## Goal
 
@@ -42,7 +42,7 @@ Because the command is a child of `Project findings`, the complete parent branch
 
 ```text
 Battery technology
-└─ /compare with @Hydrogen technology
+└─ /compare with [[Hydrogen technology]]
 ```
 
 The agent receives the local `Battery technology` branch plus the structured reference to `Hydrogen technology`. References are resolved by the editor's reference model, not inferred by the LLM from prompt text.
@@ -51,12 +51,11 @@ The agent receives the local `Battery technology` branch plus the structured ref
 
 ### Local input branch
 
-1. The context root is the invocation node's parent `listItem`.
-2. Include the root and all of its descendants in document order, including collapsed descendants.
+1. The local context includes the full ancestor path from the top-level branch to the invocation node's parent `listItem`.
+2. Include the immediate parent and all of its descendants in document order, including collapsed descendants.
 3. Exclude the active invocation node and anything nested beneath it.
-4. Do not automatically include sibling branches outside the root.
-5. Do not automatically include ancestor branches.
-6. A top-level command has no local input branch; it uses its prompt and explicit references only.
+4. Do not include unrelated sibling subtrees attached to higher ancestors; only the ancestor path and complete immediate-parent branch are automatic.
+5. A top-level command has no local input branch; it uses its prompt and explicit references only.
 
 ### Explicit references
 
@@ -196,8 +195,8 @@ The resolver must operate on the ProseMirror document rather than rendered DOM, 
 
 ### Local branch
 
-- A command under a leaf sends the parent node.
-- A command under a populated branch sends the parent and all descendants.
+- A command under a leaf sends the full ancestor path through the parent node.
+- A command under a populated branch sends the ancestor path, parent, and all parent descendants.
 - Sibling notes and nested descendants are included.
 - The invocation node and its descendants are excluded.
 - Collapsed descendants are included.
@@ -225,7 +224,7 @@ The resolver must operate on the ProseMirror document rather than rendered DOM, 
 
 - Users can predict input solely from command placement and visible references.
 - Skills contain no context-selection configuration.
-- A child command receives its parent branch automatically.
+- A child command receives its full ancestor path and complete parent branch automatically.
 - Cross-branch context comes only from structured references.
 - The exact included nodes are visible while composing the command.
 - Context hierarchy is preserved and bounded without silent truncation.

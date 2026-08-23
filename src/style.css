@@ -198,20 +198,20 @@ body {
   display: none;
 }
 
-/* Automatic skill context is visible only while its slash command has focus. */
-.outliner-editor li.skill-context-included > p {
+/* Agent context is visible only while its slash command has focus. */
+.outliner-editor li.skill-context-local > p {
   background: #eeeaff;
+  box-shadow: inset 3px 0 #7357d8;
   transition: background 120ms ease, box-shadow 120ms ease;
 }
-.outliner-editor li.skill-context-anchor > p {
-  box-shadow: inset 3px 0 #7357d8;
+.outliner-editor li.skill-context-reference > p {
+  background: #e7f5f1;
+  box-shadow: inset 3px 0 #27836d;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
-.outliner-editor li.skill-context-invocation:not(.skill-context-included) > p {
+.outliner-editor li.skill-context-invocation > p {
   background: #fff4dd;
   box-shadow: inset 3px 0 #d99123;
-}
-.outliner-editor li.skill-context-truncated > p {
-  outline: 1px dotted #9b87df;
 }
 .outliner-editor li.skill-context-error > p {
   background: #ffebea;
@@ -433,19 +433,6 @@ body.is-dragging-outline .bullet-collapse {
   display: list-item !important;
 }
 
-/* AI-generated bullets are visually distinct (EDIT-04) */
-.outliner-editor li[data-node-type='ai'] > p {
-  color: #6a4ce0;
-}
-.outliner-editor li[data-node-type='ai'] > .bullet-controls .bullet-dot::after {
-  background: #6a4ce0;
-}
-.outliner-editor li[data-node-type='ai'] > p::after {
-  content: ' ✦';
-  font-size: 0.75em;
-  color: #6a4ce0;
-  opacity: 0.7;
-}
 .outliner-editor li[data-generated-image-item] {
   list-style: none;
   margin-left: 0;
@@ -1536,6 +1523,12 @@ kbd {
   font-size: 12px;
   color: #888;
 }
+.slash-context-error {
+  max-width: 360px;
+  padding: 7px 10px;
+  color: #a52f2a;
+  font-size: 12px;
+}
 
 /* ============================================================
    Secondary views and settings
@@ -1643,48 +1636,6 @@ kbd {
   gap: 7px;
   margin: 0;
   font-weight: 400;
-}
-.skill-context-settings {
-  display: grid;
-  gap: 12px;
-  margin: 8px 0;
-  padding: 14px;
-  border: 1px solid #ddd8f4;
-  border-radius: 8px;
-  background: #faf9ff;
-}
-.skill-context-settings > label,
-.context-budget-grid > label,
-.context-sibling-options > label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.context-selector-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
-  gap: 8px 14px;
-}
-.context-selector-grid label,
-.context-sibling-options label:has(input[type='checkbox']) {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 400;
-}
-.context-selector-grid input[type='checkbox'],
-.context-sibling-options input[type='checkbox'] {
-  width: auto;
-  padding: 0;
-}
-.context-selector-grid label:has(input[type='number']) {
-  align-items: stretch;
-}
-.context-sibling-options,
-.context-budget-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
 }
 .agent-tool-list input {
   width: auto;

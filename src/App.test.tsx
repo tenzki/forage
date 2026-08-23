@@ -173,10 +173,27 @@ describe('App view switching', () => {
 
     await user.keyboard('Workflowy alternatives')
     expect(container.querySelector('.slash-menu')).toBeNull()
-    await waitFor(() => expect(container.querySelector('li.skill-context-included')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('li.skill-context-invocation')).not.toBeNull())
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
-    expect(container.querySelector('li.skill-context-included')).toBeNull()
+    expect(container.querySelector('li.skill-context-invocation')).toBeNull()
+  })
+
+  it('lets internal-link autocomplete finish before running a skill', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('Reference topic{Enter}/ask [[[[Reference')
+    expect(await screen.findByRole('list', { name: 'Internal link suggestions' })).not.toBeNull()
+
+    await user.keyboard('{Enter}')
+
+    const link = container.querySelector<HTMLAnchorElement>('a[data-internal-node-id]')
+    expect(link?.textContent).toBe('Reference topic')
+    expect(editor.textContent).toContain('/ask Reference topic')
+    expect(container.querySelector('li[data-node-type="ai"]')).toBeNull()
   })
 
   it('opens tag-filtered search when a hashtag is clicked', async () => {
@@ -232,11 +249,10 @@ describe('App view switching', () => {
     await user.type(screen.getByLabelText('Skill description'), 'Polish this branch')
     await user.selectOptions(screen.getByLabelText('Skill agent'), 'Editor')
     await user.type(screen.getByLabelText('Skill instructions'), 'Rewrite the requested text clearly.')
-    await user.selectOptions(screen.getByLabelText('Context strategy preset'), 'parent-branch')
-    expect((screen.getByLabelText('Context root') as HTMLSelectElement).value).toBe('parent')
+    expect(screen.queryByLabelText('Context strategy preset')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Save skill' }))
     expect(await screen.findByText('/polish')).not.toBeNull()
-    expect(screen.getByText(/Editor · Parent branch/)).not.toBeNull()
+    expect(screen.getAllByText('Editor').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Back to outline' }))
     const editor = document.querySelector('.ProseMirror') as HTMLElement

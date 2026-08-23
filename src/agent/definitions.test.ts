@@ -52,7 +52,7 @@ describe('agent and skill definitions', () => {
     }, [agent])).toThrow(/Choose an agent/)
   })
 
-  it('migrates old skills to the lineage context strategy', () => {
+  it('discards obsolete persisted context strategy fields', () => {
     const agent = validateAgentDraft({
       id: DEFAULT_AGENT_ID,
       name: 'General',
@@ -66,9 +66,16 @@ describe('agent and skill definitions', () => {
       description: 'Summarize a branch',
       systemPrompt: 'Summarize.',
       agentId: agent.id,
+      contextStrategy: { preset: 'lineage', selectors: [{ kind: 'ancestors' }] },
     }, [agent])
 
-    expect(skill.contextStrategy.preset).toBe('lineage')
-    expect(skill.contextStrategy.selectors.map((selector) => selector.kind)).toEqual(['self', 'ancestors'])
+    expect(skill).toEqual({
+      id: expect.any(String),
+      label: 'summarize',
+      description: 'Summarize a branch',
+      systemPrompt: 'Summarize.',
+      agentId: agent.id,
+    })
+    expect(skill).not.toHaveProperty('contextStrategy')
   })
 })

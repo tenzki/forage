@@ -1,5 +1,5 @@
-// Bridges the Pi stream to the single TipTap document: resolve the skill's
-// bounded context strategy, insert an AI-styled child bullet under the current
+// Bridges the Pi stream to the single TipTap document: resolve the command's
+// local branch and explicit references, then insert an AI-styled child bullet under the current
 // one, and stream text into it.
 //
 // Two rules shape this file:
@@ -16,7 +16,7 @@ import { setAgentActivity } from '../editor/outlinerUi'
 import { newNodeId } from '../types/tree'
 import type { CodexAuthConfig } from './client'
 import type { AgentDefinition } from './definitions'
-import { resolveSkillContext } from './context'
+import { resolveAgentContext } from './context'
 import { generateWithPi, type PiOutlineNode } from './piGeneration'
 import type { Skill } from './skills'
 import type { CustomHttpToolConfig } from './tools'
@@ -100,6 +100,21 @@ export function setCurrentBulletText(
     tr.setSelection(TextSelection.create(tr.doc, paraStart + text.length))
   }
   editor.view.dispatch(tr)
+}
+
+/** Remove only the slash-command prefix, retaining structured links in the prompt. */
+export function removeCurrentSlashCommand(editor: Editor, label: string): void {
+  const item = currentListItem(editor)
+  if (!item) return
+  const paragraph = item.node.firstChild
+  const text = paragraph?.textContent ?? ''
+  const prefix = `/${label}`
+  if (!text.startsWith(prefix)) return
+  let prefixLength = prefix.length
+  while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
+  const paragraphStart = item.pos + 2
+  const transaction = editor.state.tr.delete(paragraphStart, paragraphStart + prefixLength)
+  editor.view.dispatch(transaction)
 }
 
 /**
@@ -260,27 +275,22 @@ export function runSkillIntoEditor(
   const controller = new AbortController()
   const cancel = () => controller.abort()
   const invocationNodeId = currentListItemId(editor)
-  let context: string[] = []
-  let contextError: unknown = null
-  try {
-    if (!invocationNodeId) throw new Error('Could not find the skill invocation bullet.')
-    context = resolveSkillContext(editor.state.doc, invocationNodeId, skill.contextStrategy).lines
-  } catch (error) {
-    contextError = error
-  }
-  const nodeId = insertAiChild(editor)
+  if (!invocationNodeId) throw new Error('Could not find the skill invocation bullet.')
 
-  // Build a searchable snapshot of the outline for the search_outline tool.
+  // Preflight must finish before creating output so invalid references and
+  // oversized context never leave an empty AI placeholder behind.
+  const context = resolveAgentContext(editor.state.doc, invocationNodeId)
   const outlineSnapshot = JSON.stringify(buildOutlineSnapshot(editor.state.doc))
+  removeCurrentSlashCommand(editor, skill.label)
+  const nodeId = insertAiChild(editor)
+  if (!nodeId) throw new Error('Could not find a bullet to generate under.')
 
   const promise = (async () => {
-    if (!nodeId) throw new Error('Could not find a bullet to generate under.')
     try {
-      if (contextError) throw contextError
       setAgentActivity(editor, nodeId, ['Thinking…'], cancel)
       await generateWithPi(
         auth,
-        { skill, agent, prompt, context, enabledToolIds, customTools, outlineSnapshot },
+        { skill, agent, prompt, context: context.lines, enabledToolIds, customTools, outlineSnapshot },
         {
           signal: controller.signal,
           onDelta: (textSoFar) => {

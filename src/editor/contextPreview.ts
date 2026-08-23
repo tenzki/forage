@@ -1,13 +1,12 @@
 import { Extension, type Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
 interface ContextPreviewValue {
-  nodeIds: string[]
-  anchorNodeId: string
+  localNodeIds: string[]
+  referencedNodeIds: string[]
   invocationNodeId: string
-  truncated: boolean
   error?: string
 }
 
@@ -16,21 +15,23 @@ const contextPreviewMeta = 'setSkillContextPreview'
 
 function decorations(doc: ProseMirrorNode, value: ContextPreviewValue | null) {
   if (!value) return DecorationSet.empty
-  const included = new Set(value.nodeIds)
+  const local = new Set(value.localNodeIds)
+  const referenced = new Set(value.referencedNodeIds)
   const result: Decoration[] = []
   doc.descendants((node, pos) => {
     if (node.type.name !== 'listItem') return
     const nodeId = node.attrs.nodeId
     const classes: string[] = []
-    if (included.has(nodeId)) classes.push('skill-context-included')
-    if (nodeId === value.anchorNodeId) classes.push('skill-context-anchor')
+    if (local.has(nodeId)) classes.push('skill-context-local')
+    if (referenced.has(nodeId)) classes.push('skill-context-reference')
     if (nodeId === value.invocationNodeId) classes.push('skill-context-invocation')
-    if (value.truncated && included.has(nodeId)) classes.push('skill-context-truncated')
     if (value.error && nodeId === value.invocationNodeId) classes.push('skill-context-error')
     if (classes.length) {
       result.push(Decoration.node(pos, pos + node.nodeSize, {
         class: classes.join(' '),
-        ...(value.error && nodeId === value.invocationNodeId ? { title: `Context error: ${value.error}` } : {}),
+        ...(value.error && nodeId === value.invocationNodeId
+          ? { title: `Context error: ${value.error}` }
+          : {}),
       }))
     }
   })
@@ -63,7 +64,7 @@ export function showSkillContext(editor: Editor, value: ContextPreviewValue): vo
 
 export function showSkillContextError(editor: Editor, invocationNodeId: string, error: string): void {
   showSkillContext(editor, {
-    nodeIds: [], anchorNodeId: invocationNodeId, invocationNodeId, truncated: false, error,
+    localNodeIds: [], referencedNodeIds: [], invocationNodeId, error,
   })
 }
 

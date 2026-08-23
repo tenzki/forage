@@ -1,89 +1,165 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
-import { contextStrategyForPreset } from './definitions'
 import { BulletAttributes } from '../editor/extensions'
-import { resolveSkillContext } from './context'
+import { InternalLink } from '../editor/internalLinks'
+import {
+  AGENT_CONTEXT_MAX_CHARACTERS,
+  resolveAgentContext,
+} from './context'
 
-function item(id: string, text: string, children: object[] = [], nodeType = 'user') {
+type TextPart = { text: string; targetId?: string }
+
+function item(
+  id: string,
+  text: string | TextPart[],
+  children: object[] = [],
+  attrs: Record<string, unknown> = {},
+) {
+  const parts = typeof text === 'string' ? [{ text }] : text
   return {
-    type: 'listItem', attrs: { nodeId: id, nodeType },
+    type: 'listItem',
+    attrs: { nodeId: id, ...attrs },
     content: [
-      { type: 'paragraph', content: text ? [{ type: 'text', text }] : undefined },
+      {
+        type: 'paragraph',
+        content: parts.filter((part) => part.text).map((part) => ({
+          type: 'text',
+          text: part.text,
+          ...(part.targetId
+            ? { marks: [{ type: 'internalLink', attrs: { targetId: part.targetId } }] }
+            : {}),
+        })),
+      },
       ...(children.length ? [{ type: 'bulletList', content: children }] : []),
     ],
   }
 }
 
-function makeEditor(): Editor {
+function makeEditor(content?: object[]): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit, BulletAttributes],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, InternalLink],
     content: {
-      type: 'doc', content: [{ type: 'bulletList', content: [
-        item('a', 'A', [
-          item('a1', 'A1', [item('a1a', 'A1a')]),
-          item('a2', 'A2'),
-          item('command', '/summarize'),
-        ]),
-        item('b', 'B', [item('b1', 'B1', [], 'ai')]),
-        item('root-command', '/summarize-above'),
-      ] }],
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: content ?? [
+          item('a', 'A', [
+            item('a1', 'A1'),
+            item('a2', 'A2', [item('a2a', 'A2a')], { collapsed: true }),
+            item('command', [
+              { text: '/compare ' },
+              { text: 'B', targetId: 'b' },
+              { text: ' then ' },
+              { text: 'C', targetId: 'c' },
+              { text: ' and again ' },
+              { text: 'B', targetId: 'b' },
+            ], [item('old-output', 'Old output')]),
+          ]),
+          item('b', 'B', [item('b1', 'B1')]),
+          item('c', 'C', [item('c1', 'C1')]),
+          item('root-command', '/ask top level'),
+        ],
+      }],
     },
   })
 }
 
-describe('skill context strategies', () => {
+describe('agent branch and reference context', () => {
   let editor: Editor | null = null
   afterEach(() => editor?.destroy())
 
-  it('selects a parent branch while excluding the invocation command', () => {
+  it('includes the complete parent branch but excludes the invocation subtree', () => {
     editor = makeEditor()
-    const result = resolveSkillContext(editor.state.doc, 'command', contextStrategyForPreset('parent-branch'))
+    const result = resolveAgentContext(editor.state.doc, 'command')
 
-    expect(result.anchorNodeId).toBe('a')
-    expect(result.nodeIds).toEqual(['a', 'a1', 'a1a', 'a2'])
-    expect(result.lines).toEqual(['- A', '  - A1', '    - A1a', '  - A2'])
+    expect(result.localRootNodeId).toBe('a')
+    expect(result.localNodeIds).toEqual(['a', 'a1', 'a2', 'a2a'])
+    expect(result.localNodeIds).not.toContain('old-output')
+    expect(result.serialized).toContain('Local branch:\n- A\n  - A1\n  - A2\n    - A2a')
   })
 
-  it('selects the complete previous sibling branch', () => {
-    editor = makeEditor()
-    const result = resolveSkillContext(editor.state.doc, 'root-command', contextStrategyForPreset('previous-branch'))
+  it('includes the full ancestor path without adding unrelated ancestor subtrees', () => {
+    editor = makeEditor([
+      item('grandparent', 'Grandparent', [
+        item('unrelated', 'Unrelated branch'),
+        item('parent', 'Parent', [
+          item('note', 'Sibling note'),
+          item('command', '/research'),
+        ]),
+      ]),
+    ])
 
-    expect(result.nodeIds).toEqual(['b', 'b1'])
+    const result = resolveAgentContext(editor.state.doc, 'command')
+
+    expect(result.localRootNodeId).toBe('grandparent')
+    expect(result.localNodeIds).toEqual(['grandparent', 'parent', 'note'])
+    expect(result.localNodeIds).not.toContain('unrelated')
+    expect(result.serialized).toBe(
+      'Local branch:\n- Grandparent\n  - Parent\n    - Sibling note',
+    )
   })
 
-  it('can include sibling texts without their descendants', () => {
+  it('adds referenced branches in first-appearance order and deduplicates repeats', () => {
     editor = makeEditor()
-    const result = resolveSkillContext(editor.state.doc, 'a1', contextStrategyForPreset('current-level'))
+    const result = resolveAgentContext(editor.state.doc, 'command')
 
-    expect(result.nodeIds).toEqual(['a1', 'a2', 'command'])
-    expect(result.nodeIds).not.toContain('a1a')
+    expect(result.referencedGroups.map((group) => group.targetId)).toEqual(['b', 'c'])
+    expect(result.referencedNodeIds).toEqual(['b', 'b1', 'c', 'c1'])
+    expect(result.serialized).toContain(
+      'Referenced nodes:\n[B]\n- B\n  - B1\n\n[C]\n- C\n  - C1',
+    )
   })
 
-  it('selects complete current and sibling branches for neighboring branches', () => {
-    editor = makeEditor()
-    const result = resolveSkillContext(editor.state.doc, 'a', contextStrategyForPreset('neighboring-branches'))
+  it('does not duplicate a referenced node already present in the local branch', () => {
+    editor = makeEditor([
+      item('a', 'A', [
+        item('a1', 'A1'),
+        item('command', [{ text: '/ask ' }, { text: 'A1', targetId: 'a1' }]),
+      ]),
+    ])
 
-    expect(result.nodeIds).toEqual(['a', 'a1', 'a1a', 'a2', 'command', 'b', 'b1', 'root-command'])
+    const result = resolveAgentContext(editor.state.doc, 'command')
+    expect(result.localNodeIds).toEqual(['a', 'a1'])
+    expect(result.referencedGroups).toEqual([])
   })
 
-  it('applies depth and AI-node filters', () => {
-    editor = makeEditor()
-    const branch = contextStrategyForPreset('current-branch')
-    branch.selectors = [{ kind: 'self' }, { kind: 'descendants', maxDepth: 1 }]
-    expect(resolveSkillContext(editor.state.doc, 'a', branch).nodeIds).not.toContain('a1a')
+  it('uses stable target identity when the displayed link label is stale', () => {
+    editor = makeEditor([
+      item('command', [{ text: '/ask ' }, { text: 'Old name', targetId: 'renamed' }]),
+      item('renamed', 'New name'),
+    ])
 
-    const previous = contextStrategyForPreset('previous-branch')
-    previous.filters.includeAiNodes = false
-    expect(resolveSkillContext(editor.state.doc, 'root-command', previous).nodeIds).toEqual(['b'])
+    const result = resolveAgentContext(editor.state.doc, 'command')
+    expect(result.referencedGroups[0]?.label).toBe('New name')
+    expect(result.serialized).toContain('[New name]\n- New name')
   })
 
-  it('blocks an oversized context when configured to do so', () => {
-    editor = makeEditor()
-    const strategy = contextStrategyForPreset('current-branch')
-    strategy.budget = { maxNodes: 2, maxCharacters: 10_000, overflow: 'block' }
+  it('blocks a missing structured reference explicitly', () => {
+    editor = makeEditor([
+      item('command', [{ text: '/ask ' }, { text: 'Deleted topic', targetId: 'deleted' }]),
+    ])
 
-    expect(() => resolveSkillContext(editor!.state.doc, 'a', strategy)).toThrow(/exceeds/)
+    expect(() => resolveAgentContext(editor!.state.doc, 'command')).toThrow(
+      'Referenced node “Deleted topic” no longer exists.',
+    )
+  })
+
+  it('allows a top-level command with no automatic context', () => {
+    editor = makeEditor()
+    const result = resolveAgentContext(editor.state.doc, 'root-command')
+
+    expect(result.localRootNodeId).toBeNull()
+    expect(result.localNodeIds).toEqual([])
+    expect(result.serialized).toBe('')
+  })
+
+  it('blocks oversized context instead of truncating it', () => {
+    editor = makeEditor([
+      item('large', 'x'.repeat(AGENT_CONTEXT_MAX_CHARACTERS), [item('command', '/ask')]),
+    ])
+
+    expect(() => resolveAgentContext(editor!.state.doc, 'command')).toThrow(/safety limit/)
   })
 })

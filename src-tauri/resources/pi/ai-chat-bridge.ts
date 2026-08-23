@@ -4,6 +4,7 @@ import { generateCodexSubscriptionImage } from './codex-image-generation'
 
 const MAX_PAYLOAD_BYTES = 512_000
 const MAX_TOOL_OUTPUT = 30_000
+const MAX_CONTEXT_CHARACTERS = 40_000
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_RESPONSE_CHARS = 7_100_000
 const IMAGE_MODEL = 'gpt-image-2'
@@ -108,6 +109,10 @@ function decodePayload(encoded: string): RunPayload {
   if (!Array.isArray(value.context) || value.context.some((item) => typeof item !== 'string')) {
     throw new Error('Agent invocation has invalid outline context.')
   }
+  const contextCharacters = value.context.reduce((total, item) => total + item.length, 0)
+  if (value.context.length > 500 || contextCharacters > MAX_CONTEXT_CHARACTERS) {
+    throw new Error('Agent invocation outline context exceeds the safety limit.')
+  }
   const customTools = Array.isArray(value.customTools)
     ? value.customTools.map(validateCustomTool).filter((tool): tool is CustomToolConfig => Boolean(tool)).slice(0, 25)
     : []
@@ -116,7 +121,7 @@ function decodePayload(encoded: string): RunPayload {
   return {
     instructions: value.instructions.slice(0, 20_000),
     prompt: value.prompt.slice(0, 20_000),
-    context: value.context.slice(0, 500).map((item) => item.slice(0, 20_000)),
+    context: value.context,
     enabledToolIds: asStrings(value.enabledToolIds, 50),
     customTools,
     outlineSnapshot,
@@ -125,7 +130,7 @@ function decodePayload(encoded: string): RunPayload {
 
 function taskMessage(payload: RunPayload): string {
   const context = payload.context.length
-    ? `Selected outline context (hierarchy preserved by indentation):\n${payload.context.map((item) => /^\s*-\s/.test(item) ? item : `- ${item}`).join('\n')}\n\n`
+    ? `Selected outline context (hierarchy preserved by indentation):\n${payload.context.join('\n')}\n\n`
     : ''
   return `${context}Task: ${payload.prompt}`
 }

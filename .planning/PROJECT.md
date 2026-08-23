@@ -41,8 +41,8 @@ The tree is the universal data structure — every note, conversation, and piece
 ## Context
 
 - Inspired by Workflowy's outliner UX and Pi agent's tree-based work organization
-- TipTap remains the source of truth. A slash command starts a no-session Pi run and resolves its bounded automatic context strategy from the live outline.
-- Persisted skills are slash-command workflows assigned to persisted agent profiles; skills define command-relative context selectors while agents define instructions, model overrides, and tool allowlists.
+- TipTap remains the source of truth. A slash command starts a no-session Pi run using its full ancestor path and complete parent branch, excluding the command subtree and unrelated higher-level sibling branches, plus explicitly linked branches from stable internal references.
+- Persisted skills are slash-command workflows assigned to persisted agent profiles. Context selection is an application rule determined by command placement and visible references; agents define instructions, model overrides, and tool allowlists.
 - Slash commands (e.g., `/research concurrent companies for LambdaWorks`) are the primary agent interaction model, triggered from any node
 
 ## Constraints
@@ -64,7 +64,7 @@ The tree is the universal data structure — every note, conversation, and piece
 | User-provided API keys | No billing/auth infrastructure needed for v1; users paste own key | — Kept |
 | Pi RPC subprocess as agent runtime | The old sidecar failed because agent work also crossed custom Rust IPC, SQLite, and a second session model. The re-platformed app can connect React directly to standard Pi RPC while keeping TipTap as the source of truth | — Adopted in ADR-0008; built-in tools/resources disabled and one app bridge extension explicitly loaded |
 | ~~Custom Rust backend (SQLite + tauri-specta IPC)~~ | IPC type-drift, debounce-vs-IPC undo races. Only justified by a future shared server that v1 doesn't have | — **REVERSED**: logic moves to TypeScript; storage = single JSON file via plugin-fs |
-| ~~1:1 tree mapping with Pi sessions~~ | Coupled the data model to Pi's session abstraction | — **REVERSED**: tree is plain data; skill context is selected from TipTap at call time |
+| ~~1:1 tree mapping with Pi sessions~~ | Coupled the data model to Pi's session abstraction | — **REVERSED**: tree is plain data; agent context is the command's ancestor path and parent branch plus explicit stable-ID references resolved from TipTap at call time |
 | Single-document editor | One ProseMirror doc with bullet nodes (Workflowy model). ProseMirror's native history fixes undo in one layer instead of Rust history + Zustand wrapper + disabled TipTap history | — New |
 
 ---

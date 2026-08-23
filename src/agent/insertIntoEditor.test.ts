@@ -10,6 +10,7 @@ import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
 import { BulletNote } from '../editor/bulletNote'
+import { InternalLink } from '../editor/internalLinks'
 import {
   GeneratedImage,
   GeneratedImageItem,
@@ -17,6 +18,8 @@ import {
 } from '../editor/generatedImage'
 import {
   insertAiChild,
+  removeCurrentSlashCommand,
+  runSkillIntoEditor,
   setCurrentBulletText,
   siblingContext,
   writeAiOutline,
@@ -33,6 +36,7 @@ function makeEditor(text: string): Editor {
       GeneratedImage,
       BulletAttributes,
       BulletNote,
+      InternalLink,
       OutlinerKeymap,
     ],
     content: {
@@ -80,6 +84,67 @@ describe('agent output insertion', () => {
 
     expect(bulletTexts(editor)).toEqual(['/research '])
     expect(editor.state.selection.$from.parentOffset).toBe('/research '.length)
+  })
+
+  it('removes the command prefix without discarding a structured reference', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [{
+          type: 'listItem',
+          attrs: { nodeId: 'command' },
+          content: [{
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '/ask ' },
+              { type: 'text', text: 'Linked topic', marks: [{ type: 'internalLink', attrs: { targetId: 'topic' } }] },
+            ],
+          }],
+        }, {
+          type: 'listItem',
+          attrs: { nodeId: 'topic' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Topic' }] }],
+        }],
+      }],
+    })
+    editor.commands.setTextSelection(3)
+
+    removeCurrentSlashCommand(editor, 'ask')
+
+    const paragraph = editor.state.doc.firstChild?.firstChild?.firstChild
+    expect(paragraph?.textContent).toBe('Linked topic')
+    expect(paragraph?.firstChild?.marks[0]?.attrs.targetId).toBe('topic')
+  })
+
+  it('does not insert a placeholder when context preflight fails', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [{
+          type: 'listItem',
+          attrs: { nodeId: 'command' },
+          content: [{
+            type: 'paragraph',
+            content: [{
+              type: 'text', text: 'Missing topic',
+              marks: [{ type: 'internalLink', attrs: { targetId: 'deleted' } }],
+            }],
+          }],
+        }],
+      }],
+    })
+    editor.commands.setTextSelection(3)
+
+    expect(() => runSkillIntoEditor(
+      editor,
+      { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
+      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general' },
+      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
+      'question',
+    )).toThrow(/no longer exists/)
+    expect(bulletTexts(editor)).toEqual(['Missing topic'])
   })
 
   it('collects direct sibling text in document order', () => {

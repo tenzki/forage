@@ -169,6 +169,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ])
       const customTools = validCustomTools(storedTools)
       const agents = validAgents(storedAgents, toolOptions(customTools))
+      const skills = validSkills(storedSkills, agents)
+      if (Array.isArray(storedSkills)) await store.set(SKILLS_FIELD, skills)
       await store.delete(LEGACY_ANTHROPIC_FIELD)
       await store.save()
       set({
@@ -179,7 +181,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         enabledToolIds: Array.isArray(enabledTools) ? enabledTools : DEFAULT_ENABLED_TOOLS,
         customTools,
         agents,
-        skills: validSkills(storedSkills, agents),
+        skills,
         isLoaded: true,
         error: null,
       })

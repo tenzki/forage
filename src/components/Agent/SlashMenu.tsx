@@ -5,13 +5,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import type { SkillDefinition } from '../../agent/definitions'
-import { resolveSkillContext } from '../../agent/context'
+import { resolveAgentContext } from '../../agent/context'
 import {
   currentListItemId,
   runSkillIntoEditor,
   setCurrentBulletText,
 } from '../../agent/insertIntoEditor'
 import { focusOrCreateBulletNote } from '../../editor/bulletNote'
+import { activeInternalLinkAtSelection } from '../../editor/internalLinks'
 import {
   OUTLINE_COMMANDS,
   type OutlineCommandDefinition,
@@ -98,6 +99,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
   const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
+  const [contextError, setContextError] = useState<string | null>(null)
   const completedCommandRef = useRef<CommandChoice | null>(null)
   const choices = commandChoices(skills)
   const matches = menu
@@ -134,6 +136,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
       const state = readSlashState(editor)
       const invocationNodeId = currentListItemId(editor)
       if (!editor.isFocused || !state || !invocationNodeId) {
+        setContextError(null)
         clearSkillContext(editor)
         return
       }
@@ -143,21 +146,23 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         ? completedCommandRef.current
         : candidates[active] ?? candidates[0]
       if (!command?.skill) {
+        setContextError(null)
         clearSkillContext(editor)
         return
       }
       try {
-        showSkillContext(editor, resolveSkillContext(
-          editor.state.doc,
-          invocationNodeId,
-          command.skill.contextStrategy,
-        ))
+        showSkillContext(editor, resolveAgentContext(editor.state.doc, invocationNodeId))
+        setContextError(null)
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
+        setContextError(detail)
         showSkillContextError(editor, invocationNodeId, detail)
       }
     }
-    const blur = () => clearSkillContext(editor)
+    const blur = () => {
+      setContextError(null)
+      clearSkillContext(editor)
+    }
     refresh()
     editor.on('selectionUpdate', refresh)
     editor.on('update', refresh)
@@ -183,9 +188,11 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         event.preventDefault()
         setActive((index) => (index - 1 + matches.length) % matches.length)
       } else if (event.key === 'Tab' && !event.shiftKey) {
+        if (activeInternalLinkAtSelection(editor.state)) return
         event.preventDefault()
         complete(command)
       } else if (event.key === 'Enter') {
+        if (activeInternalLinkAtSelection(editor.state)) return
         event.preventDefault()
         const hasPrompt = menu.query === command.label && menu.prompt.trim().length > 0
         if (command.outlineCommand || hasPrompt || event.metaKey || event.ctrlKey) run(command)
@@ -203,6 +210,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     if (!editor || !completedCommand) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+      if (activeInternalLinkAtSelection(editor.state)) return
       const state = readSlashState(editor)
       if (state?.query !== completedCommand.label) return
       event.preventDefault()
@@ -230,10 +238,10 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     const prompt = (context || (command.skill ? command.label : '')).trim()
     completedCommandRef.current = null
     setCompletedCommand(null)
-    clearSkillContext(editor)
-    setCurrentBulletText(editor, prompt)
-    setMenu(null)
     if (command.outlineCommand) {
+      clearSkillContext(editor)
+      setCurrentBulletText(editor, prompt)
+      setMenu(null)
       runOutlineCommand(editor, command.outlineCommand)
       return
     }
@@ -241,27 +249,40 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     if (!skill) return
     const agent = agents.find((candidate) => candidate.id === skill.agentId)
     if (!agent) return
-    runSkillIntoEditor(
-      editor,
-      {
-        mode: authMode,
-        apiKey: openAiApiKey,
-        oauthCredential,
-        modelId,
-        onCredentialRefresh: setOAuthCredential,
-      },
-      skill,
-      agent,
-      prompt,
-      enabledToolIds,
-      customTools,
-    )
+    try {
+      runSkillIntoEditor(
+        editor,
+        {
+          mode: authMode,
+          apiKey: openAiApiKey,
+          oauthCredential,
+          modelId,
+          onCredentialRefresh: setOAuthCredential,
+        },
+        skill,
+        agent,
+        prompt,
+        enabledToolIds,
+        customTools,
+      )
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      const invocationNodeId = currentListItemId(editor)
+      if (invocationNodeId) showSkillContextError(editor, invocationNodeId, detail)
+      setContextError(detail)
+      if (state) setMenu(state)
+      return
+    }
+    clearSkillContext(editor)
+    setContextError(null)
+    setMenu(null)
   }
 
   if (!menu || matches.length === 0) return null
 
   return (
     <ul className="slash-menu" style={{ top: menu.top, left: menu.left }}>
+      {contextError && <li className="slash-context-error" role="alert">{contextError}</li>}
       {matches.map((command, index) => (
         <li
           key={`${command.outlineCommand ? 'outline' : 'skill'}:${command.id}`}
