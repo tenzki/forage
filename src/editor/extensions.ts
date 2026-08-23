@@ -1,7 +1,7 @@
 // Editor extensions for the single-document outliner.
 //
-// Two small extensions on top of StarterKit (which already gives us bulletList,
-// listItem, paragraph, marks, and native undo/redo history):
+// Two small extensions on top of StarterKit (listItem, paragraph, marks, and
+// native undo/redo history) plus the custom outline bullet list:
 //
 //   - BulletAttributes: adds stable `nodeId` + `nodeType` attrs to every
 //     listItem, and auto-assigns a nodeId to any new listItem. This lets the

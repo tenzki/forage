@@ -1,10 +1,10 @@
 # ADR-0005: Access OpenAI Codex Directly from the Desktop Frontend
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-14
 - **Deciders:** AI Chat project team
 - **Supersedes:** None (replaces undocumented direct-Anthropic and Node-sidecar approaches)
-- **Superseded by:** None
+- **Superseded by:** ADR-0008
 
 ## Context
 

@@ -1,14 +1,14 @@
 # Roadmap: AI Chat — Tree-Based Note-Taking with AI Agent
 
-> **RE-PLATFORM 2026-06-08.** Original 6-phase roadmap (below, kept for history) built on Tauri+Rust+Pi-sidecar. That stack cost too much per feature at its 6 layer-seams (see `.planning/debug/`). New plan: keep Tauri shell, drop custom Rust + Pi sidecar, single-doc TipTap editor, Anthropic SDK from frontend, JSON file in iCloud Drive folder. Collapsed to 3 phases (A/B/C). Phases 1-6 detail below is superseded.
+> **RE-PLATFORM 2026-06-08; AGENT RUNTIME UPDATE 2026-08-17.** The custom Rust/SQLite/session stack remains abandoned. The editor stays a single TipTap document persisted as JSON, but agent work now runs in a Pi RPC subprocess connected directly from React through the official shell plugin (ADR-0008). Phases 1-6 detail below is superseded.
 
 ## Active Roadmap (3 phases)
 
 - [ ] **Phase A — Outliner (Tauri + single-doc TipTap)**: React + Vite + Zustand. One TipTap document with a custom bullet node. Keyboard nav (Tab/Shift-Tab/Enter/Alt-Arrow/Delete), drag-reorder, zoom/hoist, search, native ProseMirror undo. Persist whole tree as one JSON file via `@tauri-apps/plugin-fs` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`. Covers TREE-*, EDIT-*, INFR-02/03/04. ~5-7 days.
-- [ ] **Phase B — Agent (Anthropic SDK from frontend)**: `@anthropic-ai/sdk` direct, streaming. Slash command opens cmdk menu with hardcoded skills (`/research`, `/brainstorm`, `/ask`). Streams child nodes under trigger node; inline mode for AGNT-03. AI content visually styled. Covers AGNT-01/02/03/05, EDIT-04. ~3-4 days.
+- [ ] **Phase B — Agent (Pi RPC subprocess)**: Pi RPC streams agent and tool events through a bundled bridge extension. Slash commands invoke persisted, configurable agent and skill definitions; each skill resolves a bounded automatic context strategy with an in-editor focus preview, and `emit_outline` returns structured child nodes under the trigger. The bridge provides bounded web tools and approved custom HTTP GET tools under global and per-agent allowlists. Subscription image generation delegates to Codex app-server. Production Pi/Codex runtime bundling and trusted third-party Pi packages remain follow-up work. Covers AGNT-01/02/03/04/05, EDIT-04.
 - [ ] **Phase C — Polish & Distribute**: Settings panel for paste-in API key via `@tauri-apps/plugin-store` (INFR-01). Error states, empty states, macOS code-sign + notarize → shareable .dmg. ~3 days.
 
-**Deferred to v2:** AGNT-04 (custom skill config UI).
+**Deferred to v2:** Trusted third-party Pi package installation and extension discovery.
 
 ---
 

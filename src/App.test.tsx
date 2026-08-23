@@ -37,6 +37,10 @@ vi.mock('@tauri-apps/plugin-store', () => ({
 async function renderApp() {
   const view = render(<App />)
   await waitFor(() => expect(view.container.querySelector('.ProseMirror')).not.toBeNull())
+  // Let the independent outline/settings startup effects settle before callers
+  // capture editor identity; either effect may schedule one final render.
+  await new Promise((resolve) => window.setTimeout(resolve, 0))
+  await waitFor(() => expect(view.container.querySelector('.ProseMirror')).not.toBeNull())
   return view
 }
 
@@ -169,6 +173,10 @@ describe('App view switching', () => {
 
     await user.keyboard('Workflowy alternatives')
     expect(container.querySelector('.slash-menu')).toBeNull()
+    await waitFor(() => expect(container.querySelector('li.skill-context-included')).not.toBeNull())
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(container.querySelector('li.skill-context-included')).toBeNull()
   })
 
   it('opens tag-filtered search when a hashtag is clicked', async () => {
@@ -205,6 +213,36 @@ describe('App view switching', () => {
     expect(await screen.findByText('github_issues')).not.toBeNull()
     const enabled = screen.getByRole('checkbox', { name: 'Enable github_issues' }) as HTMLInputElement
     expect(enabled.checked).toBe(true)
+  })
+
+  it('can configure a custom agent and slash-command skill', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: /Add agent/ }))
+    await user.type(screen.getByLabelText('Agent name'), 'Editor')
+    await user.type(screen.getByLabelText('Agent description'), 'Edits prose')
+    await user.type(screen.getByLabelText('Agent instructions'), 'Improve writing while preserving meaning.')
+    await user.click(screen.getByRole('button', { name: 'Save agent' }))
+    expect(await screen.findByText('Editor')).not.toBeNull()
+
+    await user.click(screen.getByRole('button', { name: /Add skill/ }))
+    await user.type(screen.getByLabelText('Slash command'), 'polish')
+    await user.type(screen.getByLabelText('Skill description'), 'Polish this branch')
+    await user.selectOptions(screen.getByLabelText('Skill agent'), 'Editor')
+    await user.type(screen.getByLabelText('Skill instructions'), 'Rewrite the requested text clearly.')
+    await user.selectOptions(screen.getByLabelText('Context strategy preset'), 'parent-branch')
+    expect((screen.getByLabelText('Context root') as HTMLSelectElement).value).toBe('parent')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(await screen.findByText('/polish')).not.toBeNull()
+    expect(screen.getByText(/Editor · Parent branch/)).not.toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Back to outline' }))
+    const editor = document.querySelector('.ProseMirror') as HTMLElement
+    await user.click(editor)
+    await user.keyboard('/pol')
+    expect(document.querySelector('.slash-menu')?.textContent).toContain('/polish')
   })
 
   it('preserves edits made before opening Settings', async () => {

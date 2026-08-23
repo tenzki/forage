@@ -21,28 +21,29 @@ Anything touching `@tauri-apps/plugin-fs` or `plugin-store` (persistence, settin
 
 ## Architecture
 
-Tauri v2 desktop shell around a TypeScript/React frontend. **All app logic lives in TypeScript.** `src-tauri/src/lib.rs` is ~12 lines that register two official plugins (fs, store) and nothing else — no custom Rust commands, no IPC layer, no database.
+Tauri v2 desktop shell around a TypeScript/React frontend. **All app logic lives in TypeScript.** `src-tauri/src/lib.rs` only registers official plugins (fs, store, http, opener, shell) — no custom Rust commands, no custom IPC layer, no database.
 
 Four things carry the design:
 
-**One TipTap document is the entire outline.** `src/editor/OutlinerEditor.tsx` mounts a single editor; bullets are ProseMirror `listItem`s and nesting is real document nesting. Undo/redo is ProseMirror's native history. This replaced an earlier per-node-editor + SQLite + Rust-undo-table design that had unfixable undo bugs — do not reintroduce per-node editors or an external undo stack.
+**One TipTap document is the entire outline.** `src/editor/OutlinerEditor.tsx` mounts a single editor; text bullets are ProseMirror `listItem`s, generated images are image-only `generatedImageItem`s, and nesting is real document nesting. Undo/redo is ProseMirror's native history. This replaced an earlier per-node-editor + SQLite + Rust-undo-table design that had unfixable undo bugs — do not reintroduce per-node editors or an external undo stack.
 
 **Bullet identity comes from a ProseMirror plugin, not from the store.** `src/editor/extensions.ts` `BulletAttributes` adds `nodeId`/`nodeType` global attributes to `listItem` and assigns a UUID to any listItem lacking one (or holding a duplicate) via `appendTransaction`, so ids land in the same history step as the edit that created them. `nodeType: 'ai'` marks agent-written bullets (styled via `data-node-type` in `src/style.css`).
 
 **Persistence is one JSON file in iCloud Drive.** `src/persistence/outlineFile.ts` writes `{version: 1, doc}` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`; macOS handles sync. `App.tsx` owns the debounced saver (600ms) and flushes on `beforeunload`. **The fs scope in `src-tauri/capabilities/default.json` must allow any path you read/write** — writes outside it fail at runtime, not compile time.
 
-**LLM calls go straight from the webview to Anthropic.** `src/agent/client.ts` uses `@anthropic-ai/sdk` with `dangerouslyAllowBrowser: true` and the user's own key (stored by `plugin-store` via `src/store/settingsStore.ts`, file `settings.json`). No sidecar, no proxy, no server.
+**Agent work runs in a Pi RPC subprocess.** `src/agent/piRpcClient.ts` launches `pi --mode rpc` through the official shell plugin with automatic resources and built-in tools disabled. `src-tauri/resources/pi/ai-chat-bridge.ts` is the only explicitly loaded extension; it applies app agent instructions and exposes structured `emit_outline` output. Codex credentials from `plugin-store` are passed through the child environment, never process arguments. Subscription image generation delegates to an isolated Codex app-server child. Development currently requires `pi` and `codex` on `PATH`; bundling pinned runtimes is still required for distribution.
 
 ### Agent flow
 
 `SlashMenu` (`src/components/Agent/SlashMenu.tsx`) opens only when the current bullet's text *starts* with `/` — this is deliberate (no false positives on mid-sentence slashes). Picking a skill replaces the `/skill …` text with the prompt, then `runSkillIntoEditor` (`src/agent/insertIntoEditor.ts`):
 
-1. collects ancestor listItem texts as context (outer→inner),
+1. resolves the skill's command-relative automatic context strategy from the live TipTap tree,
 2. inserts an empty child bullet with `nodeType: 'ai'`,
-3. streams deltas into it, each write with `tr.setMeta('addToHistory', false)` so a whole generation collapses into one undo step,
-4. writes `[cancelled]` / `[error: …]` into the same bullet on abort/failure.
+3. sends the skill instructions, prompt, and indentation-preserving selected context through Pi RPC using `/ai-chat-run`,
+4. applies `emit_outline` tool results as nested bullets (or streamed text as a fallback); generated images become separate `generatedImageItem` outline nodes rather than content appended to text `listItem`s, with each write using `tr.setMeta('addToHistory', false)`,
+5. writes `[cancelled]` / `[error: …]` into the same bullet on abort/failure.
 
-Skills are a hardcoded array of `{label, description, systemPrompt}` in `src/agent/skills.ts` (a custom-skill config UI is explicitly deferred to v2).
+Agents and slash-command skills are typed definitions in `src/agent/definitions.ts`, persisted by `src/store/settingsStore.ts`, and configurable in Settings. An agent controls instructions, model override, and a tool allowlist; a skill controls its slash label, workflow instructions, assigned agent, and bounded automatic context strategy. `src/agent/context.ts` resolves self/ancestor/descendant/sibling selectors, and `src/editor/contextPreview.ts` highlights the resulting nodes while the command is focused. The bridge exposes only globally enabled tools that the selected agent also allows. In subscription mode, `generate_image` starts an isolated ephemeral Codex app-server with externally managed ChatGPT tokens, external tools disabled, and read-only sandboxing, so GPT Image 2 usage counts against Codex limits. In API-key mode it calls the billed OpenAI Images API directly. Development therefore requires both `pi` and `codex` on `PATH`.
 
 ### Stale files — ignore, don't build on
 

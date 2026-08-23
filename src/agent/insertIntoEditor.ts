@@ -1,5 +1,5 @@
-// Bridges the Codex stream to the single TipTap document: build branch
-// context from ancestors, insert an AI-styled child bullet under the current
+// Bridges the Pi stream to the single TipTap document: resolve the skill's
+// bounded context strategy, insert an AI-styled child bullet under the current
 // one, and stream text into it.
 //
 // Two rules shape this file:
@@ -14,9 +14,13 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { setAgentActivity } from '../editor/outlinerUi'
 import { newNodeId } from '../types/tree'
-import { generate, type CodexAuthConfig } from './client'
+import type { CodexAuthConfig } from './client'
+import type { AgentDefinition } from './definitions'
+import { resolveSkillContext } from './context'
+import { generateWithPi, type PiOutlineNode } from './piGeneration'
 import type { Skill } from './skills'
 import type { CustomHttpToolConfig } from './tools'
+import { buildOutlineSnapshot } from './outlineSnapshot'
 
 function contextText(item: ProseMirrorNode): string {
   const title = item.firstChild?.textContent?.trim() ?? ''
@@ -34,8 +38,8 @@ export function ancestorContext(editor: Editor): string[] {
   for (let d = 1; d <= $from.depth; d++) {
     const node = $from.node(d)
     if (node.type.name === 'listItem') {
-      const t = contextText(node)
-      if (t) texts.push(t)
+      const text = contextText(node)
+      if (text) texts.push(text)
     }
   }
   return texts
@@ -68,6 +72,11 @@ function currentListItem(editor: Editor) {
     }
   }
   return null
+}
+
+export function currentListItemId(editor: Editor): string | null {
+  const nodeId = currentListItem(editor)?.node.attrs.nodeId
+  return typeof nodeId === 'string' ? nodeId : null
 }
 
 /** Replace the text of the bullet the cursor is in (used to set the prompt note). */
@@ -177,12 +186,54 @@ export function writeAiText(
       schema.nodes.paragraph.create(null, line ? schema.text(line) : null),
     ),
   )
+  replaceAiList(editor, list, items)
+}
 
+/** Replace the generated placeholder with validated nested outline nodes. */
+export function writeAiOutline(
+  editor: Editor,
+  rootNodeId: string,
+  nodes: PiOutlineNode[],
+): void {
+  const list = findAiList(editor, rootNodeId)
+  if (!list || !nodes.length) return
+  const existingIds: string[] = []
+  list.node.forEach((child) => existingIds.push(child.attrs.nodeId))
+  let existingIndex = 0
+  const items = nodes.flatMap((node) => {
+    const nodeId = 'image' in node ? newNodeId() : existingIds[existingIndex++] ?? newNodeId()
+    return createAiOutlineItem(editor, node, nodeId)
+  })
+  replaceAiList(editor, list, items)
+}
+
+function createAiOutlineItem(editor: Editor, node: PiOutlineNode, nodeId: string): ProseMirrorNode[] {
+  const { schema } = editor
+  if ('image' in node) {
+    if (!schema.nodes.generatedImageItem || !schema.nodes.generatedImage) return []
+    const image = schema.nodes.generatedImage.create(node.image)
+    return [schema.nodes.generatedImageItem.create(null, image)]
+  }
+  const content: ProseMirrorNode[] = [
+    schema.nodes.paragraph.create(null, schema.text(node.text)),
+  ]
+  if (node.children?.length) {
+    const children = node.children.flatMap((child) => createAiOutlineItem(editor, child, newNodeId()))
+    if (children.length) content.push(schema.nodes.bulletList.create(null, children))
+  }
+  return [schema.nodes.listItem.create({ nodeId, nodeType: 'ai' }, content)]
+}
+
+function replaceAiList(
+  editor: Editor,
+  list: { pos: number; node: ProseMirrorNode },
+  items: ProseMirrorNode[],
+): void {
   const tr = editor.state.tr
   tr.replaceWith(
     list.pos,
     list.pos + list.node.nodeSize,
-    schema.nodes.bulletList.create(list.node.attrs, items),
+    editor.schema.nodes.bulletList.create(list.node.attrs, items),
   )
   tr.setMeta('addToHistory', false)
   editor.view.dispatch(tr)
@@ -201,23 +252,35 @@ export function runSkillIntoEditor(
   editor: Editor,
   auth: CodexAuthConfig,
   skill: Skill,
+  agent: AgentDefinition,
   prompt: string,
   enabledToolIds: string[] = [],
   customTools: CustomHttpToolConfig[] = [],
 ): Generation {
   const controller = new AbortController()
   const cancel = () => controller.abort()
-  const context = ancestorContext(editor)
-  const siblings = siblingContext(editor)
+  const invocationNodeId = currentListItemId(editor)
+  let context: string[] = []
+  let contextError: unknown = null
+  try {
+    if (!invocationNodeId) throw new Error('Could not find the skill invocation bullet.')
+    context = resolveSkillContext(editor.state.doc, invocationNodeId, skill.contextStrategy).lines
+  } catch (error) {
+    contextError = error
+  }
   const nodeId = insertAiChild(editor)
+
+  // Build a searchable snapshot of the outline for the search_outline tool.
+  const outlineSnapshot = JSON.stringify(buildOutlineSnapshot(editor.state.doc))
 
   const promise = (async () => {
     if (!nodeId) throw new Error('Could not find a bullet to generate under.')
     try {
+      if (contextError) throw contextError
       setAgentActivity(editor, nodeId, ['Thinking…'], cancel)
-      await generate(
+      await generateWithPi(
         auth,
-        { skill, prompt, context, siblings, enabledToolIds, customTools },
+        { skill, agent, prompt, context, enabledToolIds, customTools, outlineSnapshot },
         {
           signal: controller.signal,
           onDelta: (textSoFar) => {
@@ -225,6 +288,10 @@ export function runSkillIntoEditor(
             writeAiText(editor, nodeId, textSoFar)
           },
           onToolActivity: (notes) => setAgentActivity(editor, nodeId, notes, cancel),
+          onOutline: (nodes) => {
+            setAgentActivity(editor, nodeId, [], cancel)
+            writeAiOutline(editor, nodeId, nodes)
+          },
         },
       )
       setAgentActivity(editor, nodeId, null)

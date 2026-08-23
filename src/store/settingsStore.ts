@@ -2,9 +2,22 @@ import { create } from 'zustand'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import type { CodexOAuthCredential } from '../agent/codexAuth'
 import {
+  copyDefaultAgents,
+  copyDefaultSkills,
+  DEFAULT_AGENT_ID,
+  validateAgentDraft,
+  validateSkillDraft,
+  type AgentDefinition,
+  type AgentDraft,
+  type SkillDefinition,
+  type SkillDraft,
+} from '../agent/definitions'
+import {
+  BUILTIN_TOOL_OPTIONS,
   validateCustomToolDraft,
   type CustomHttpToolConfig,
   type CustomHttpToolDraft,
+  type ToolOption,
 } from '../agent/tools'
 
 const STORE_FILE = 'settings.json'
@@ -14,8 +27,11 @@ const OAUTH_FIELD = 'codexOAuthCredential'
 const MODEL_FIELD = 'codexModelId'
 const ENABLED_TOOLS_FIELD = 'enabledTools'
 const CUSTOM_TOOLS_FIELD = 'customHttpTools'
+const AGENTS_FIELD = 'agentDefinitions'
+const SKILLS_FIELD = 'skillDefinitions'
 const LEGACY_ANTHROPIC_FIELD = 'anthropicApiKey'
 
+// Image generation consumes additional Codex/API limits and remains opt-in globally.
 const DEFAULT_ENABLED_TOOLS = ['web_search', 'web_fetch']
 
 export type CodexAuthMode = 'subscription' | 'api_key'
@@ -38,6 +54,8 @@ interface SettingsState {
   modelId: string
   enabledToolIds: string[]
   customTools: CustomHttpToolConfig[]
+  agents: AgentDefinition[]
+  skills: SkillDefinition[]
   isLoaded: boolean
   error: string | null
   load: () => Promise<void>
@@ -48,10 +66,19 @@ interface SettingsState {
   setToolEnabled: (toolId: string, enabled: boolean) => Promise<void>
   addCustomTool: (draft: CustomHttpToolDraft) => Promise<void>
   removeCustomTool: (toolId: string) => Promise<void>
+  saveAgent: (draft: AgentDraft) => Promise<void>
+  removeAgent: (agentId: string) => Promise<void>
+  saveSkill: (draft: SkillDraft) => Promise<void>
+  removeSkill: (skillId: string) => Promise<void>
+  resetAgentConfiguration: () => Promise<void>
 }
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function toolOptions(customTools: CustomHttpToolConfig[]): ToolOption[] {
+  return [...BUILTIN_TOOL_OPTIONS, ...customTools.map(({ id, name, description }) => ({ id, name, description }))]
 }
 
 function validCustomTools(value: unknown): CustomHttpToolConfig[] {
@@ -77,6 +104,44 @@ function validCustomTools(value: unknown): CustomHttpToolConfig[] {
   })
 }
 
+function validAgents(value: unknown, tools: ToolOption[]): AgentDefinition[] {
+  if (!Array.isArray(value)) return copyDefaultAgents()
+  const agents = value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return []
+    try {
+      return [validateAgentDraft(candidate as AgentDraft, tools)]
+    } catch (error) {
+      console.warn('[settings] ignored invalid agent:', error)
+      return []
+    }
+  })
+  return agents.length ? agents : copyDefaultAgents()
+}
+
+function validSkills(value: unknown, agents: AgentDefinition[]): SkillDefinition[] {
+  if (!Array.isArray(value)) {
+    const defaultAgentId = agents.some((agent) => agent.id === DEFAULT_AGENT_ID)
+      ? DEFAULT_AGENT_ID
+      : agents[0]?.id
+    return defaultAgentId
+      ? copyDefaultSkills().map((skill) => ({ ...skill, agentId: defaultAgentId }))
+      : []
+  }
+  const labels = new Set<string>()
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return []
+    try {
+      const skill = validateSkillDraft(candidate as SkillDraft, agents)
+      if (labels.has(skill.label)) return []
+      labels.add(skill.label)
+      return [skill]
+    } catch (error) {
+      console.warn('[settings] ignored invalid skill:', error)
+      return []
+    }
+  })
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   authMode: 'subscription',
   openAiApiKey: '',
@@ -84,20 +149,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   modelId: 'gpt-5.5',
   enabledToolIds: DEFAULT_ENABLED_TOOLS,
   customTools: [],
+  agents: copyDefaultAgents(),
+  skills: copyDefaultSkills(),
   isLoaded: false,
   error: null,
 
   load: async () => {
     try {
       const store = await getStore()
-      const [authMode, openAiApiKey, oauthCredential, modelId, enabledTools, customTools] = await Promise.all([
+      const [authMode, openAiApiKey, oauthCredential, modelId, enabledTools, storedTools, storedAgents, storedSkills] = await Promise.all([
         store.get<CodexAuthMode>(AUTH_MODE_FIELD),
         store.get<string>(API_KEY_FIELD),
         store.get<CodexOAuthCredential>(OAUTH_FIELD),
         store.get<string>(MODEL_FIELD),
         store.get<string[]>(ENABLED_TOOLS_FIELD),
         store.get<CustomHttpToolConfig[]>(CUSTOM_TOOLS_FIELD),
+        store.get<AgentDefinition[]>(AGENTS_FIELD),
+        store.get<SkillDefinition[]>(SKILLS_FIELD),
       ])
+      const customTools = validCustomTools(storedTools)
+      const agents = validAgents(storedAgents, toolOptions(customTools))
       await store.delete(LEGACY_ANTHROPIC_FIELD)
       await store.save()
       set({
@@ -106,7 +177,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         oauthCredential: oauthCredential ?? null,
         modelId: modelId || 'gpt-5.5',
         enabledToolIds: Array.isArray(enabledTools) ? enabledTools : DEFAULT_ENABLED_TOOLS,
-        customTools: validCustomTools(customTools),
+        customTools,
+        agents,
+        skills: validSkills(storedSkills, agents),
         isLoaded: true,
         error: null,
       })
@@ -199,16 +272,100 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   removeCustomTool: async (toolId) => {
     const previousTools = get().customTools
     const previousEnabled = get().enabledToolIds
+    const previousAgents = get().agents
     const customTools = previousTools.filter((tool) => tool.id !== toolId)
     const enabledToolIds = previousEnabled.filter((id) => id !== toolId)
-    set({ customTools, enabledToolIds, error: null })
+    const agents = previousAgents.map((agent) => ({
+      ...agent,
+      toolIds: agent.toolIds.filter((id) => id !== toolId),
+    }))
+    set({ customTools, enabledToolIds, agents, error: null })
     try {
       const store = await getStore()
       await store.set(CUSTOM_TOOLS_FIELD, customTools)
       await store.set(ENABLED_TOOLS_FIELD, enabledToolIds)
+      await store.set(AGENTS_FIELD, agents)
       await store.save()
     } catch (error) {
-      set({ customTools: previousTools, enabledToolIds: previousEnabled, error: message(error) })
+      set({ customTools: previousTools, enabledToolIds: previousEnabled, agents: previousAgents, error: message(error) })
+      throw error
+    }
+  },
+
+  saveAgent: async (draft) => {
+    const previous = get().agents
+    const agent = validateAgentDraft(draft, toolOptions(get().customTools))
+    const agents = previous.some((item) => item.id === agent.id)
+      ? previous.map((item) => item.id === agent.id ? agent : item)
+      : [...previous, agent]
+    set({ agents, error: null })
+    try {
+      await saveField(AGENTS_FIELD, agents)
+    } catch (error) {
+      set({ agents: previous, error: message(error) })
+      throw error
+    }
+  },
+
+  removeAgent: async (agentId) => {
+    if (get().skills.some((skill) => skill.agentId === agentId)) {
+      throw new Error('Remove or reassign this agent’s skills first.')
+    }
+    const previous = get().agents
+    const agents = previous.filter((agent) => agent.id !== agentId)
+    if (!agents.length) throw new Error('At least one agent is required.')
+    set({ agents, error: null })
+    try {
+      await saveField(AGENTS_FIELD, agents)
+    } catch (error) {
+      set({ agents: previous, error: message(error) })
+      throw error
+    }
+  },
+
+  saveSkill: async (draft) => {
+    const previous = get().skills
+    const skill = validateSkillDraft(draft, get().agents)
+    if (previous.some((item) => item.label === skill.label && item.id !== skill.id)) {
+      throw new Error(`/${skill.label} already exists.`)
+    }
+    const skills = previous.some((item) => item.id === skill.id)
+      ? previous.map((item) => item.id === skill.id ? skill : item)
+      : [...previous, skill]
+    set({ skills, error: null })
+    try {
+      await saveField(SKILLS_FIELD, skills)
+    } catch (error) {
+      set({ skills: previous, error: message(error) })
+      throw error
+    }
+  },
+
+  removeSkill: async (skillId) => {
+    const previous = get().skills
+    const skills = previous.filter((skill) => skill.id !== skillId)
+    set({ skills, error: null })
+    try {
+      await saveField(SKILLS_FIELD, skills)
+    } catch (error) {
+      set({ skills: previous, error: message(error) })
+      throw error
+    }
+  },
+
+  resetAgentConfiguration: async () => {
+    const previousAgents = get().agents
+    const previousSkills = get().skills
+    const agents = copyDefaultAgents()
+    const skills = copyDefaultSkills()
+    set({ agents, skills, error: null })
+    try {
+      const store = await getStore()
+      await store.set(AGENTS_FIELD, agents)
+      await store.set(SKILLS_FIELD, skills)
+      await store.save()
+    } catch (error) {
+      set({ agents: previousAgents, skills: previousSkills, error: message(error) })
       throw error
     }
   },

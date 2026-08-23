@@ -15,6 +15,7 @@ import {
   validCodexCredential,
   type CodexOAuthCredential,
 } from './codexAuth'
+import type { AgentDefinition } from './definitions'
 import type { Skill } from './skills'
 import {
   resolveTools,
@@ -37,6 +38,7 @@ export interface GenerateOptions {
 
 export interface GenerateInput {
   skill: Skill
+  agent?: AgentDefinition
   prompt: string
   context: string[]
   siblings?: string[]
@@ -87,7 +89,7 @@ function resolveModel(mode: CodexAuthMode, modelId: string): Model<Api> {
   return model
 }
 
-async function resolveAccessToken(
+export async function resolveAccessToken(
   auth: CodexAuthConfig,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -106,8 +108,8 @@ async function resolveAccessToken(
 }
 
 function userMessage({ skill, prompt, context, siblings = [] }: GenerateInput): Context {
-  const ancestorBlock = context.length
-    ? `Outline context (outer to inner):\n${context.map((item) => `- ${item}`).join('\n')}\n\n`
+  const contextBlock = context.length
+    ? `Selected outline context (hierarchy preserved by indentation):\n${context.map((item) => /^\s*-\s/.test(item) ? item : `- ${item}`).join('\n')}\n\n`
     : ''
   const siblingBlock = siblings.length
     ? `Direct sibling bullets (same parent):\n${siblings.map((item) => `- ${item}`).join('\n')}\n\n`
@@ -116,7 +118,7 @@ function userMessage({ skill, prompt, context, siblings = [] }: GenerateInput): 
     systemPrompt: skill.systemPrompt,
     messages: [{
       role: 'user',
-      content: `${ancestorBlock}${siblingBlock}Task: ${prompt}`,
+      content: `${contextBlock}${siblingBlock}Task: ${prompt}`,
       timestamp: Date.now(),
     }],
   }

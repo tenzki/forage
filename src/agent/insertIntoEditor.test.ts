@@ -11,16 +11,30 @@ import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
 import { BulletNote } from '../editor/bulletNote'
 import {
+  GeneratedImage,
+  GeneratedImageItem,
+  OutlineBulletList,
+} from '../editor/generatedImage'
+import {
   insertAiChild,
   setCurrentBulletText,
   siblingContext,
+  writeAiOutline,
   writeAiText,
 } from './insertIntoEditor'
 
 function makeEditor(text: string): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap],
+    extensions: [
+      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      OutlineBulletList,
+      GeneratedImageItem,
+      GeneratedImage,
+      BulletAttributes,
+      BulletNote,
+      OutlinerKeymap,
+    ],
     content: {
       type: 'doc',
       content: [
@@ -148,16 +162,54 @@ describe('agent output insertion', () => {
     ])
   })
 
+  it('writes structured nested output as nested AI bullets', () => {
+    const nodeId = insertAiChild(editor)!
+
+    writeAiOutline(editor, nodeId, [
+      { text: 'Finding', children: [{ text: 'Supporting detail' }] },
+      { text: 'Second finding' },
+    ])
+
+    expect(bulletTexts(editor)).toEqual([
+      'Research topic',
+      'Finding',
+      'Supporting detail',
+      'Second finding',
+    ])
+  })
+
+  it('writes generated images as separate image-only nodes without adding an undo step', () => {
+    const nodeId = insertAiChild(editor)!
+    const src = `data:image/webp;base64,${btoa('RIFF\u0004\u0000\u0000\u0000WEBP')}`
+
+    writeAiOutline(editor, nodeId, [
+      { text: 'Visual' },
+      { image: { src, alt: 'A generated visual' } },
+    ])
+
+    const image = editor.view.dom.querySelector<HTMLImageElement>('img[data-ai-generated-image]')
+    const imageItem = image?.closest('li')
+    expect(image?.alt).toBe('A generated visual')
+    expect(imageItem?.getAttribute('data-node-type')).toBe('image')
+    expect(imageItem?.querySelector('p')).toBeNull()
+    expect(bulletTexts(editor)).toEqual(['Research topic', 'Visual'])
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['Research topic'])
+  })
+
   it('marks every generated bullet as AI-written', () => {
     const nodeId = insertAiChild(editor)!
 
-    writeAiText(editor, nodeId, 'One\nTwo')
+    writeAiOutline(editor, nodeId, [
+      { text: 'One', children: [{ text: 'Nested' }] },
+      { text: 'Two' },
+    ])
 
     const types: string[] = []
     editor.state.doc.descendants((node) => {
       if (node.type.name === 'listItem') types.push(node.attrs.nodeType)
     })
-    expect(types).toEqual(['user', 'ai', 'ai'])
+    expect(types).toEqual(['user', 'ai', 'ai', 'ai'])
   })
 
   it('keeps the whole generation out of the undo history', () => {

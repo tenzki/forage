@@ -8,6 +8,8 @@ import StarterKit from '@tiptap/starter-kit'
 import { useEffect } from 'react'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { BulletNote } from './bulletNote'
+import { SkillContextPreview } from './contextPreview'
+import { GeneratedImage, GeneratedImageItem, OutlineBulletList } from './generatedImage'
 import { InternalLink } from './internalLinks'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
@@ -31,13 +33,17 @@ export function OutlinerEditor({
 }: OutlinerEditorProps) {
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ trailingNode: false }), // the document itself is always one bullet list
+      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      OutlineBulletList,
+      GeneratedImageItem,
+      GeneratedImage,
       BulletAttributes,
       BulletNote,
       InternalLink,
       OutlinerKeymap,
       TagDecorations,
       SlashCommandDecorations,
+      SkillContextPreview,
       OutlinerUi,
     ],
     content: normalizeOutlinerDoc(initialContent ?? EMPTY_DOC) as object,

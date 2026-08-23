@@ -5,8 +5,10 @@ import {
   resolveTools,
   validateCustomToolDraft,
   validatePublicWebUrl,
+  BUILTIN_TOOL_OPTIONS,
   WEB_FETCH_TOOL_ID,
   WEB_SEARCH_TOOL_ID,
+  SEARCH_OUTLINE_TOOL_ID,
   type CustomHttpToolConfig,
 } from './tools'
 
@@ -64,6 +66,11 @@ describe('web search tool', () => {
   it('rejects local and credential-bearing webpage URLs', () => {
     expect(() => validatePublicWebUrl('http://127.0.0.1/admin')).toThrow('Private')
     expect(() => validatePublicWebUrl('https://user:pass@example.com')).toThrow('credentials')
+  })
+
+  it('exposes the search_outline tool option', () => {
+    expect(BUILTIN_TOOL_OPTIONS.find((t) => t.id === SEARCH_OUTLINE_TOOL_ID)).toBeDefined()
+    expect(BUILTIN_TOOL_OPTIONS.find((t) => t.id === SEARCH_OUTLINE_TOOL_ID)!.name).toBe('Search existing notes')
   })
 
   it('builds executable custom tools only for approved origins', async () => {

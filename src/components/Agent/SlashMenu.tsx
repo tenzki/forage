@@ -1,49 +1,36 @@
 // Slash-command menu. When the current bullet's text starts with "/", show
-// matching skills near the caret. Selecting one completes "/skill " so the
-// user can add context; Enter then runs it. Esc dismisses.
-//
-// No false positives on mid-sentence slashes: we only trigger when the bullet
-// text *starts* with "/" (AGNT-01).
+// matching skills and local outline commands near the caret. Selecting a skill
+// completes "/skill " so the user can add a prompt; Enter then runs it.
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
-import { SKILLS, type Skill } from '../../agent/skills'
+import type { SkillDefinition } from '../../agent/definitions'
+import { resolveSkillContext } from '../../agent/context'
+import {
+  currentListItemId,
+  runSkillIntoEditor,
+  setCurrentBulletText,
+} from '../../agent/insertIntoEditor'
 import { focusOrCreateBulletNote } from '../../editor/bulletNote'
 import {
   OUTLINE_COMMANDS,
   type OutlineCommandDefinition,
 } from '../../editor/commandDefinitions'
+import { clearSkillContext, showSkillContext, showSkillContextError } from '../../editor/contextPreview'
 import {
   currentBulletId,
   setBulletKind,
   setTodoCompleted,
 } from '../../editor/outlineModel'
-import {
-  runSkillIntoEditor,
-  setCurrentBulletText,
-} from '../../agent/insertIntoEditor'
 import { useSettingsStore } from '../../store/settingsStore'
 
 interface CommandChoice {
   id: string
   label: string
   description: string
-  skill?: Skill
+  skill?: SkillDefinition
   outlineCommand?: OutlineCommandDefinition
 }
-
-const COMMAND_CHOICES: CommandChoice[] = [
-  ...OUTLINE_COMMANDS.map((outlineCommand) => ({
-    ...outlineCommand,
-    outlineCommand,
-  })),
-  ...SKILLS.map((skill) => ({
-    id: skill.id,
-    label: skill.label,
-    description: skill.description,
-    skill,
-  })),
-]
 
 interface MenuState {
   query: string
@@ -52,54 +39,71 @@ interface MenuState {
   left: number
 }
 
+function commandChoices(skills: SkillDefinition[]): CommandChoice[] {
+  return [
+    ...OUTLINE_COMMANDS.map((outlineCommand) => ({
+      ...outlineCommand,
+      outlineCommand,
+    })),
+    ...skills.map((skill) => ({
+      id: skill.id,
+      label: skill.label,
+      description: skill.description,
+      skill,
+    })),
+  ]
+}
+
 function runOutlineCommand(editor: Editor, command: OutlineCommandDefinition): void {
   const nodeId = currentBulletId(editor)
   if (!nodeId) return
   if (command.id === 'note') {
     focusOrCreateBulletNote(editor, nodeId)
-    return
-  }
-  if (command.id === 'bullet') {
+  } else if (command.id === 'bullet') {
     setBulletKind(editor, nodeId, 'bullet')
-    return
+  } else {
+    setTodoCompleted(editor, nodeId, command.id === 'done')
   }
-  setTodoCompleted(editor, nodeId, command.id === 'done')
 }
 
 function readSlashState(editor: Editor): MenuState | null {
   const { $from, empty } = editor.state.selection
   if (!empty) return null
-  // current listItem's paragraph text
   let text = ''
-  for (let d = $from.depth; d > 0; d--) {
-    if ($from.node(d).type.name === 'listItem') {
-      text = $from.node(d).firstChild?.textContent ?? ''
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    if ($from.node(depth).type.name === 'listItem') {
+      text = $from.node(depth).firstChild?.textContent ?? ''
       break
     }
   }
   if (!text.startsWith('/')) return null
   const body = text.slice(1)
-  const spaceIdx = body.indexOf(' ')
-  const query = spaceIdx === -1 ? body : body.slice(0, spaceIdx)
-  const prompt = spaceIdx === -1 ? '' : body.slice(spaceIdx + 1)
+  const spaceIndex = body.indexOf(' ')
+  const query = spaceIndex === -1 ? body : body.slice(0, spaceIndex)
+  const prompt = spaceIndex === -1 ? '' : body.slice(spaceIndex + 1)
   const coords = editor.view.coordsAtPos($from.pos)
   return { query, prompt, top: coords.bottom + 4, left: coords.left }
 }
 
 export function SlashMenu({ editor }: { editor: Editor | null }) {
-  const authMode = useSettingsStore((s) => s.authMode)
-  const openAiApiKey = useSettingsStore((s) => s.openAiApiKey)
-  const oauthCredential = useSettingsStore((s) => s.oauthCredential)
-  const modelId = useSettingsStore((s) => s.modelId)
-  const enabledToolIds = useSettingsStore((s) => s.enabledToolIds)
-  const customTools = useSettingsStore((s) => s.customTools)
-  const setOAuthCredential = useSettingsStore((s) => s.setOAuthCredential)
+  const authMode = useSettingsStore((state) => state.authMode)
+  const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
+  const oauthCredential = useSettingsStore((state) => state.oauthCredential)
+  const modelId = useSettingsStore((state) => state.modelId)
+  const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
+  const customTools = useSettingsStore((state) => state.customTools)
+  const agents = useSettingsStore((state) => state.agents)
+  const skills = useSettingsStore((state) => state.skills)
+  const setOAuthCredential = useSettingsStore((state) => state.setOAuthCredential)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
   const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
   const completedCommandRef = useRef<CommandChoice | null>(null)
+  const choices = commandChoices(skills)
+  const matches = menu
+    ? choices.filter((command) => command.label.startsWith(menu.query))
+    : []
 
-  // Track editor changes to open/close the menu.
   useEffect(() => {
     if (!editor) return
     const update = () => {
@@ -124,31 +128,70 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     }
   }, [editor])
 
-  const matches: CommandChoice[] = menu
-    ? COMMAND_CHOICES.filter((command) => command.label.startsWith(menu.query))
-    : []
+  useEffect(() => {
+    if (!editor) return
+    const refresh = () => {
+      const state = readSlashState(editor)
+      const invocationNodeId = currentListItemId(editor)
+      if (!editor.isFocused || !state || !invocationNodeId) {
+        clearSkillContext(editor)
+        return
+      }
+      const candidates = commandChoices(skills)
+        .filter((command) => command.label.startsWith(state.query))
+      const command = completedCommandRef.current?.label === state.query
+        ? completedCommandRef.current
+        : candidates[active] ?? candidates[0]
+      if (!command?.skill) {
+        clearSkillContext(editor)
+        return
+      }
+      try {
+        showSkillContext(editor, resolveSkillContext(
+          editor.state.doc,
+          invocationNodeId,
+          command.skill.contextStrategy,
+        ))
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        showSkillContextError(editor, invocationNodeId, detail)
+      }
+    }
+    const blur = () => clearSkillContext(editor)
+    refresh()
+    editor.on('selectionUpdate', refresh)
+    editor.on('update', refresh)
+    editor.on('focus', refresh)
+    editor.on('blur', blur)
+    return () => {
+      editor.off('selectionUpdate', refresh)
+      editor.off('update', refresh)
+      editor.off('focus', refresh)
+      editor.off('blur', blur)
+      clearSkillContext(editor)
+    }
+  }, [editor, skills, menu, completedCommand, active])
 
-  // Keyboard handling while menu is open (capture beats the editor's handlers).
   useEffect(() => {
     if (!editor || !menu || matches.length === 0) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setActive((i) => (i + 1) % matches.length)
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setActive((i) => (i - 1 + matches.length) % matches.length)
-      } else if (e.key === 'Tab' && !e.shiftKey) {
-        e.preventDefault()
-        complete(matches[active])
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        const skill = matches[active]
-        const hasContext = menu.query === skill.label && menu.prompt.trim().length > 0
-        if (skill.outlineCommand || hasContext || e.metaKey || e.ctrlKey) run(skill)
-        else complete(skill)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
+    const onKey = (event: KeyboardEvent) => {
+      const command = matches[active] ?? matches[0]
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setActive((index) => (index + 1) % matches.length)
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setActive((index) => (index - 1 + matches.length) % matches.length)
+      } else if (event.key === 'Tab' && !event.shiftKey) {
+        event.preventDefault()
+        complete(command)
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        const hasPrompt = menu.query === command.label && menu.prompt.trim().length > 0
+        if (command.outlineCommand || hasPrompt || event.metaKey || event.ctrlKey) run(command)
+        else complete(command)
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
         setMenu(null)
       }
     }
@@ -169,10 +212,10 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   }, [editor, completedCommand])
 
-  function complete(command: CommandChoice) {
+  function complete(command: CommandChoice): void {
     if (!editor) return
-    const context = menu?.prompt.trimStart() ?? ''
-    const text = `/${command.label}${context ? ` ${context}` : ' '}`
+    const prompt = menu?.prompt.trimStart() ?? ''
+    const text = `/${command.label}${prompt ? ` ${prompt}` : ' '}`
     completedCommandRef.current = command
     setCompletedCommand(command)
     setCurrentBulletText(editor, text, true)
@@ -180,13 +223,14 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     editor.view.focus()
   }
 
-  function run(command: CommandChoice) {
+  function run(command: CommandChoice): void {
     if (!editor) return
     const state = readSlashState(editor)
     const context = state?.query === command.label ? state.prompt : menu?.prompt
     const prompt = (context || (command.skill ? command.label : '')).trim()
     completedCommandRef.current = null
     setCompletedCommand(null)
+    clearSkillContext(editor)
     setCurrentBulletText(editor, prompt)
     setMenu(null)
     if (command.outlineCommand) {
@@ -195,6 +239,8 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     }
     const skill = command.skill
     if (!skill) return
+    const agent = agents.find((candidate) => candidate.id === skill.agentId)
+    if (!agent) return
     runSkillIntoEditor(
       editor,
       {
@@ -205,6 +251,7 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         onCredentialRefresh: setOAuthCredential,
       },
       skill,
+      agent,
       prompt,
       enabledToolIds,
       customTools,
@@ -215,19 +262,19 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
 
   return (
     <ul className="slash-menu" style={{ top: menu.top, left: menu.left }}>
-      {matches.map((command, i) => (
+      {matches.map((command, index) => (
         <li
-          key={command.id}
-          className={i === active ? 'slash-item active' : 'slash-item'}
-          onMouseDown={(e) => {
-            e.preventDefault()
+          key={`${command.outlineCommand ? 'outline' : 'skill'}:${command.id}`}
+          className={index === active ? 'slash-item active' : 'slash-item'}
+          onMouseDown={(event) => {
+            event.preventDefault()
             complete(command)
           }}
         >
           <span className="slash-label">/{command.label}</span>
           <span className="slash-desc">
             {menu.query === command.label && menu.prompt.trim()
-              ? 'Press Enter to run with this context'
+              ? 'Press Enter to run with this prompt'
               : `${command.description} · Enter or Tab to select`}
           </span>
         </li>

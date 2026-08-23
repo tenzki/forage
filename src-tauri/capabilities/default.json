@@ -18,6 +18,42 @@
       ]
     },
     "opener:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "pi-agent",
+          "cmd": "pi",
+          "sidecar": false,
+          "args": [
+            "--mode", "rpc",
+            "--no-session",
+            "--no-builtin-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-context-files",
+            "--extension", { "validator": "^.+ai-chat-bridge\\.ts$" },
+            "--provider", { "validator": "^(openai|openai-codex)$" },
+            "--model", { "validator": "^[A-Za-z0-9._:/-]{1,128}$" }
+          ]
+        },
+        {
+          "name": "pi-version",
+          "cmd": "pi",
+          "sidecar": false,
+          "args": ["--version"]
+        },
+        {
+          "name": "codex-version",
+          "cmd": "codex",
+          "sidecar": false,
+          "args": ["--version"]
+        }
+      ]
+    },
+    "shell:allow-stdin-write",
+    "shell:allow-kill",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
     "fs:allow-mkdir",

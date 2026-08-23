@@ -1,7 +1,7 @@
 // Single-document outliner model.
 //
-// Source of truth is one ProseMirror/TipTap document: a bulletList whose
-// listItems can nest arbitrarily. Each listItem carries stable attributes so
+// Source of truth is one ProseMirror/TipTap document: a bulletList whose text
+// listItems can nest arbitrarily and may contain image-only peers. Each text listItem carries stable attributes so
 // the agent, zoom, and search can reference a bullet without positional ids.
 //
 // We persist the raw ProseMirror JSON (see src/persistence). No SQLite, no IPC.
@@ -48,7 +48,7 @@ export type OutlineShortcut =
 /** Current persisted envelope written to the iCloud Drive file. */
 export interface OutlineDoc {
   version: 4
-  /** Raw ProseMirror doc JSON (a `doc` node containing one `bulletList`). */
+  /** Raw ProseMirror doc JSON (text listItems and image-only items inside bulletLists). */
   doc: JsonValue
   trash: TrashEntry[]
   shortcuts: OutlineShortcut[]
