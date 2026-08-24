@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
@@ -85,6 +85,27 @@ describe('outliner chrome', () => {
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Bojan Babic')
 
     expect(screen.getByRole('button', { name: 'Open Bojan Babić' })).toBeTruthy()
+  })
+
+  it('navigates backward and forward with toolbar buttons and shortcuts', async () => {
+    const user = userEvent.setup()
+    setZoom(editor, 'alpha')
+    setZoom(editor, 'bravo')
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    const back = screen.getByRole('button', { name: 'Go back' })
+    const forward = screen.getByRole('button', { name: 'Go forward' })
+    expect(back.getAttribute('aria-keyshortcuts')).toBe('Meta+[ Control+[')
+    await user.click(back)
+    expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
+
+    await user.click(forward)
+    expect(getOutlinerUiState(editor).zoomId).toBe('bravo')
+
+    fireEvent.keyDown(window, { key: '[', metaKey: true })
+    expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
+    fireEvent.keyDown(window, { key: ']', metaKey: true })
+    expect(getOutlinerUiState(editor).zoomId).toBe('bravo')
   })
 
   it('returns home from the command menu', async () => {

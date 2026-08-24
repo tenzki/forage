@@ -983,6 +983,36 @@ body.is-dragging-shortcut * {
   color: #6549c7;
 }
 
+.outline-history-navigation {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+.outline-history-navigation button {
+  display: grid;
+  width: 26px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  place-items: center;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+}
+
+.outline-history-navigation button:hover:not(:disabled) {
+  background: #f0edff;
+  color: #6549c7;
+}
+
+.outline-history-navigation button:disabled {
+  color: #ccc;
+  cursor: default;
+}
+
 .outline-breadcrumbs {
   display: flex;
   min-width: 0;

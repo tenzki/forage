@@ -37,8 +37,10 @@ interface AgentActivity {
   onCancel?: () => void
 }
 
-interface OutlinerUiState {
+export interface OutlinerUiState {
   zoomId: string | null
+  backStack: Array<string | null>
+  forwardStack: Array<string | null>
   query: string
   hideCompleted: boolean
   agentActivity: Record<string, AgentActivity>
@@ -49,10 +51,14 @@ const zoomMeta = 'zoom'
 const queryMeta = 'query'
 const activityMeta = 'agentActivity'
 const hideCompletedMeta = 'hideCompleted'
+const navigateBackMeta = 'navigateBack'
+const navigateForwardMeta = 'navigateForward'
 
 export function getOutlinerUiState(editor: Editor): OutlinerUiState {
   return uiKey.getState(editor.state) ?? {
     zoomId: null,
+    backStack: [],
+    forwardStack: [],
     query: '',
     hideCompleted: false,
     agentActivity: {},
@@ -61,6 +67,18 @@ export function getOutlinerUiState(editor: Editor): OutlinerUiState {
 
 export function setZoom(editor: Editor, nodeId: string | null): void {
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: zoomMeta, nodeId }))
+}
+
+export function navigateBack(editor: Editor): boolean {
+  if (!getOutlinerUiState(editor).backStack.length) return false
+  editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: navigateBackMeta }))
+  return true
+}
+
+export function navigateForward(editor: Editor): boolean {
+  if (!getOutlinerUiState(editor).forwardStack.length) return false
+  editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: navigateForwardMeta }))
+  return true
 }
 
 export function setSearchQuery(editor: Editor, query: string): void {
@@ -504,12 +522,44 @@ export const OutlinerUi = Extension.create({
       new Plugin<OutlinerUiState>({
         key: uiKey,
         state: {
-          init: () => ({ zoomId: null, query: '', hideCompleted: false, agentActivity: {} }),
+          init: () => ({
+            zoomId: null,
+            backStack: [],
+            forwardStack: [],
+            query: '',
+            hideCompleted: false,
+            agentActivity: {},
+          }),
           apply: (transaction, previous) => {
             const meta = transaction.getMeta(uiKey) as
               | { type: string; nodeId?: string | null; query?: string; hideCompleted?: boolean; activity?: AgentActivity | null }
               | undefined
-            if (meta?.type === zoomMeta) return { ...previous, zoomId: meta.nodeId ?? null }
+            if (meta?.type === zoomMeta) {
+              const zoomId = meta.nodeId ?? null
+              if (zoomId === previous.zoomId) return previous
+              return {
+                ...previous,
+                zoomId,
+                backStack: [...previous.backStack, previous.zoomId],
+                forwardStack: [],
+              }
+            }
+            if (meta?.type === navigateBackMeta && previous.backStack.length) {
+              return {
+                ...previous,
+                zoomId: previous.backStack[previous.backStack.length - 1] ?? null,
+                backStack: previous.backStack.slice(0, -1),
+                forwardStack: [...previous.forwardStack, previous.zoomId],
+              }
+            }
+            if (meta?.type === navigateForwardMeta && previous.forwardStack.length) {
+              return {
+                ...previous,
+                zoomId: previous.forwardStack[previous.forwardStack.length - 1] ?? null,
+                backStack: [...previous.backStack, previous.zoomId],
+                forwardStack: previous.forwardStack.slice(0, -1),
+              }
+            }
             if (meta?.type === queryMeta) return { ...previous, query: meta.query ?? '' }
             if (meta?.type === hideCompletedMeta) {
               return { ...previous, hideCompleted: Boolean(meta.hideCompleted) }
@@ -523,8 +573,18 @@ export const OutlinerUi = Extension.create({
               }
               return { ...previous, agentActivity }
             }
-            if (previous.zoomId && !collectBullets(transaction.doc).some((e) => e.id === previous.zoomId)) {
-              return { ...previous, zoomId: null }
+            if (!transaction.docChanged) return previous
+            const nodeIds = new Set(collectBullets(transaction.doc).map((entry) => entry.id))
+            const validTarget = (nodeId: string | null) => nodeId === null || nodeIds.has(nodeId)
+            const backStack = previous.backStack.filter(validTarget)
+            const forwardStack = previous.forwardStack.filter(validTarget)
+            const zoomId = validTarget(previous.zoomId) ? previous.zoomId : null
+            if (
+              zoomId !== previous.zoomId
+              || backStack.length !== previous.backStack.length
+              || forwardStack.length !== previous.forwardStack.length
+            ) {
+              return { ...previous, zoomId, backStack, forwardStack }
             }
             return previous
           },

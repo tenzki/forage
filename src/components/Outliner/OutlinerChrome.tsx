@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  ArrowLeft,
+  ArrowRight,
   BookmarkPlus,
   Eye,
   EyeOff,
@@ -22,6 +24,8 @@ import {
 } from '../../editor/outlineModel'
 import {
   getOutlinerUiState,
+  navigateBack,
+  navigateForward,
   OUTLINER_NODE_MENU_EVENT,
   OUTLINER_OPEN_SEARCH_EVENT,
   setHideCompleted,
@@ -72,7 +76,11 @@ function Toolbar({
   zoomId,
   sidebarCollapsed,
   hideCompleted,
+  canNavigateBack,
+  canNavigateForward,
   onToggleSidebar,
+  onNavigateBack,
+  onNavigateForward,
   onToggleCompleted,
   onOpenSearch,
 }: {
@@ -80,7 +88,11 @@ function Toolbar({
   zoomId: string | null
   sidebarCollapsed: boolean
   hideCompleted: boolean
+  canNavigateBack: boolean
+  canNavigateForward: boolean
   onToggleSidebar: () => void
+  onNavigateBack: () => void
+  onNavigateForward: () => void
   onToggleCompleted: () => void
   onOpenSearch: () => void
 }) {
@@ -96,6 +108,26 @@ function Toolbar({
             ? <PanelLeftOpen size={17} aria-hidden="true" />
             : <PanelLeftClose size={17} aria-hidden="true" />}
         </button>
+        <div className="outline-history-navigation" aria-label="Navigation history">
+          <button
+            aria-label="Go back"
+            title="Back (⌘[ / Ctrl+[)"
+            aria-keyshortcuts="Meta+[ Control+["
+            disabled={!canNavigateBack}
+            onClick={onNavigateBack}
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Go forward"
+            title="Forward (⌘] / Ctrl+])"
+            aria-keyshortcuts="Meta+] Control+]"
+            disabled={!canNavigateForward}
+            onClick={onNavigateForward}
+          >
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        </div>
         <Breadcrumbs editor={editor} zoomId={zoomId} />
       </div>
       <div className="outline-toolbar-actions">
@@ -411,6 +443,8 @@ export function OutlinerChrome({
   const editorUi = useEditorUi(editor)
   const zoomId = editorUi?.zoomId ?? null
   const hideCompleted = editorUi?.hideCompleted ?? false
+  const canNavigateBack = Boolean(editorUi?.backStack.length)
+  const canNavigateForward = Boolean(editorUi?.forwardStack.length)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQueryText] = useState('')
   const [nodeMenu, setNodeMenu] = useNodeMenu()
@@ -441,14 +475,21 @@ export function OutlinerChrome({
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (event.key.toLocaleLowerCase() === 'k') {
         event.preventDefault()
         openSearch()
+      } else if (editor && event.key === '[') {
+        event.preventDefault()
+        navigateBack(editor)
+      } else if (editor && event.key === ']') {
+        event.preventDefault()
+        navigateForward(editor)
       }
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
-  }, [])
+  }, [editor])
 
   useEffect(() => {
     const openSavedSearch = (event: Event) => {
@@ -489,7 +530,11 @@ export function OutlinerChrome({
         zoomId={zoomId}
         sidebarCollapsed={sidebarCollapsed}
         hideCompleted={hideCompleted}
+        canNavigateBack={canNavigateBack}
+        canNavigateForward={canNavigateForward}
         onToggleSidebar={onToggleSidebar}
+        onNavigateBack={() => navigateBack(editor)}
+        onNavigateForward={() => navigateForward(editor)}
         onToggleCompleted={() => setHideCompleted(editor, !hideCompleted)}
         onOpenSearch={() => openSearch()}
       />
