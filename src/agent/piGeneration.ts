@@ -1,6 +1,6 @@
 import { resolveAccessToken, type CodexAuthConfig, type GenerateInput, type GenerateOptions } from './client'
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
-import { PiRpcClient, type PiRpcEvent } from './piRpcClient'
+import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
 
 export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
@@ -66,14 +66,14 @@ export async function generateWithPi(
     })
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
     const settled = client.waitForSettled()
-    await client.prompt(`/ai-chat-run ${encodePayload({
+    await client.prompt(encodePayload({
       instructions: [input.agent?.systemPrompt, input.skill.systemPrompt].filter(Boolean).join('\n\n'),
       prompt: input.prompt,
       context: input.context,
       enabledToolIds,
       customTools,
       outlineSnapshot: input.outlineSnapshot,
-    })}`)
+    }))
     await settled
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
     if (!outline && !text) throw new Error(`Pi returned no outline. ${client.getStderr()}`)

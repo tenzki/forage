@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+npm install              # installs webview + sidecar deps (postinstall hook)
 npm run dev              # Vite dev server on :1420 (browser — Tauri APIs unavailable)
 npm run tauri dev        # Real app: launches the Tauri window (starts Vite itself)
 npm run build            # tsc typecheck + vite build → dist/
@@ -14,6 +15,10 @@ npx vitest run src/path/to/file.test.ts        # single test file
 npx vitest run -t "test name"                  # single test by name
 npx tsc --noEmit         # typecheck only
 ```
+
+Prerequisites: Node.js 18+, Codex 0.148.0+ (subscription image generation only).
+The sidecar runs via `tsx` with its own npm dependencies in `src-tauri/resources/pi/sidecar/`;
+`npm install` at root handles both the webview and sidecar in one step.
 
 There is no linter. `tsconfig.json` is strict and has `noUnusedLocals`/`noUnusedParameters`, so `tsc` is the gate.
 
@@ -31,7 +36,9 @@ Four things carry the design:
 
 **Persistence is one JSON file in iCloud Drive.** `src/persistence/outlineFile.ts` writes `{version: 1, doc}` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`; macOS handles sync. `App.tsx` owns the debounced saver (600ms) and flushes on `beforeunload`. **The fs scope in `src-tauri/capabilities/default.json` must allow any path you read/write** — writes outside it fail at runtime, not compile time.
 
-**Agent work runs in a Pi RPC subprocess.** `src/agent/piRpcClient.ts` launches `pi --mode rpc` through the official shell plugin with automatic resources and built-in tools disabled. `src-tauri/resources/pi/ai-chat-bridge.ts` is the only explicitly loaded extension; it applies app agent instructions and exposes structured `emit_outline` output. Codex credentials from `plugin-store` are passed through the child environment, never process arguments. Subscription image generation delegates to an isolated Codex app-server child. Development currently requires `pi` and `codex` on `PATH`; bundling pinned runtimes is still required for distribution.
+**Agent work runs in a Node.js SDK sidecar.** `src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `src-tauri/resources/pi/sidecar/tools.ts` registers all tools (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, `search_outline`, custom HTTP); `src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Codex credentials from `plugin-store` are passed through the child environment, never process arguments. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
+
+This replaced the earlier `pi --mode rpc` + bridge extension design (`piRpcClient.ts`, `ai-chat-bridge.ts` — still on disk, only referenced by tests). The SDK sidecar removes the `pi` CLI dependency; the only runtime requirement is Node.js 18+.
 
 ### Agent flow
 
@@ -40,11 +47,11 @@ Four things carry the design:
 1. resolves the full ancestor path plus the invocation's complete parent branch, excluding the invocation subtree and unrelated higher-level sibling branches, then adds explicitly linked branches in reference appearance order,
 2. blocks missing references or context over the fixed 100-node/40,000-character safety budget before inserting output,
 3. inserts an empty child bullet with `nodeType: 'ai'` and removes only the slash prefix, preserving structured links in the prompt,
-4. sends the skill instructions, prompt, and indentation-preserving context sections through Pi RPC using `/ai-chat-run`,
+4. sends the skill instructions, prompt, and indentation-preserving context sections through the SDK sidecar over JSONL IPC,
 5. applies `emit_outline` tool results as nested bullets (or streamed text as a fallback); generated images become separate `generatedImageItem` outline nodes rather than content appended to text `listItem`s, with each write using `tr.setMeta('addToHistory', false)`,
 6. writes `[cancelled]` / `[error: …]` into the same bullet on abort/failure.
 
-Agents and slash-command skills are typed definitions in `src/agent/definitions.ts`, persisted by `src/store/settingsStore.ts`, and configurable in Settings. An agent controls instructions, model override, and a tool allowlist; a skill controls its slash label, workflow instructions, and assigned agent. Context selection is not skill-configurable: command placement supplies the ancestor path and local parent branch, while structured stable-ID links are the only external-context mechanism. `src/agent/context.ts` resolves and bounds both sections, while `src/editor/contextPreview.ts` highlights local, referenced, excluded invocation, and error states ephemerally. The bridge exposes only globally enabled tools that the selected agent also allows. In subscription mode, `generate_image` starts an isolated ephemeral Codex app-server with externally managed ChatGPT tokens, external tools disabled, and read-only sandboxing, so GPT Image 2 usage counts against Codex limits. In API-key mode it calls the billed OpenAI Images API directly. Development therefore requires both `pi` and `codex` on `PATH`.
+Agents and slash-command skills are typed definitions in `src/agent/definitions.ts`, persisted by `src/store/settingsStore.ts`, and configurable in Settings. An agent controls instructions, model override, and a tool allowlist; a skill controls its slash label, workflow instructions, and assigned agent. Context selection is not skill-configurable: command placement supplies the ancestor path and local parent branch, while structured stable-ID links are the only external-context mechanism. `src/agent/context.ts` resolves and bounds both sections, while `src/editor/contextPreview.ts` highlights local, referenced, excluded invocation, and error states ephemerally. The sidecar exposes only globally enabled tools that the selected agent also allows. In subscription mode, `generate_image` starts an isolated ephemeral Codex app-server with externally managed ChatGPT tokens, external tools disabled, and read-only sandboxing, so GPT Image 2 usage counts against Codex limits. In API-key mode it calls the billed OpenAI Images API directly. Development therefore requires Node.js 18+ and `codex` on `PATH` (for subscription image generation only).
 
 ### Stale files — ignore, don't build on
 

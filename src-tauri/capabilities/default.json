@@ -22,25 +22,17 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "pi-agent",
-          "cmd": "pi",
+          "name": "node-sidecar",
+          "cmd": "node",
           "sidecar": false,
           "args": [
-            "--mode", "rpc",
-            "--no-session",
-            "--no-builtin-tools",
-            "--no-extensions",
-            "--no-skills",
-            "--no-prompt-templates",
-            "--no-context-files",
-            "--extension", { "validator": "^.+ai-chat-bridge\\.ts$" },
-            "--provider", { "validator": "^(openai|openai-codex)$" },
-            "--model", { "validator": "^[A-Za-z0-9._:/-]{1,128}$" }
+            { "validator": "^.+tsx$" },
+            { "validator": "^.+sidecar/index\\.ts$" }
           ]
         },
         {
-          "name": "pi-version",
-          "cmd": "pi",
+          "name": "node-version",
+          "cmd": "node",
           "sidecar": false,
           "args": ["--version"]
         },
@@ -62,7 +54,9 @@
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/Library/Mobile Documents/com~apple~CloudDocs/AIChat" },
-        { "path": "$HOME/Library/Mobile Documents/com~apple~CloudDocs/AIChat/**" }
+        { "path": "$HOME/Library/Mobile Documents/com~apple~CloudDocs/AIChat/**" },
+        { "path": "$HOME/.pi/**" },
+        { "path": "$RESOURCE/**" }
       ]
     }
   ]
