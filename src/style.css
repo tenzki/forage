@@ -2183,6 +2183,42 @@ kbd {
   background: #fff;
   cursor: pointer;
 }
+.agent-error-popup {
+  position: fixed;
+  z-index: 120;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  width: min(420px, calc(100vw - 40px));
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 16px;
+  border: 1px solid #e4b8b8;
+  border-radius: 10px;
+  background: #fff7f7;
+  box-shadow: 0 14px 40px rgba(70, 20, 20, 0.2);
+  color: #922;
+  font-size: 13px;
+}
+.agent-error-popup > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-error-popup span {
+  overflow-wrap: anywhere;
+}
+.agent-error-popup button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #6a4ce0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
 .action-error,
 .persistence-error {
   display: flex;

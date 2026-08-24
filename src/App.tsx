@@ -36,6 +36,7 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
+  const [agentError, setAgentError] = useState<string | null>(null)
   const loadSettings = useSettingsStore((state) => state.load)
   const saver = useRef<DebouncedSaver | null>(null)
 
@@ -133,6 +134,15 @@ export default function App() {
           <button onClick={() => setSaveError(null)}>Dismiss</button>
         </div>
       )}
+      {agentError && (
+        <div className="agent-error-popup" role="alert">
+          <div>
+            <strong>Agent error</strong>
+            <span>{agentError}</span>
+          </div>
+          <button type="button" onClick={() => setAgentError(null)}>Dismiss</button>
+        </div>
+      )}
 
       <main className="outliner-main">
         <OutlinerSidebar
@@ -162,7 +172,7 @@ export default function App() {
             <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
             {editor && <BacklinksPanel editor={editor} />}
             <FormattingBubbleMenu editor={editor} />
-            <SlashMenu editor={editor} />
+            <SlashMenu editor={editor} onError={setAgentError} />
             <TagMenu editor={editor} />
             <InternalLinkMenu editor={editor} />
           </div>

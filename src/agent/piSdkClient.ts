@@ -75,9 +75,10 @@ export class PiRpcClient {
       resolveResource('resources/pi/sidecar/index.ts'),
     ])
 
-    // Use tsx bundled with the sidecar to run TypeScript directly.
-    const tsxBin = (await resolveResource('resources/pi/sidecar/node_modules/.bin/tsx'))
-    const args = [tsxBin, indexPath]
+    // Invoke tsx's real entry point. Tauri dereferences the .bin/tsx symlink
+    // when copying resources, which breaks its relative module imports.
+    const tsxCli = await resolveResource('resources/pi/sidecar/node_modules/tsx/dist/cli.mjs')
+    const args = [tsxCli, indexPath]
     const env = {
       PI_CODING_AGENT_DIR: `${agentDir.replace(/\/$/, '')}/pi-agent`,
       PI_SKIP_VERSION_CHECK: '1',

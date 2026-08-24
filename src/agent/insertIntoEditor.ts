@@ -167,6 +167,15 @@ function findAiList(
   return found
 }
 
+/** Remove failed generated output without adding cleanup to the undo history. */
+function removeAiList(editor: Editor, rootNodeId: string): void {
+  const list = findAiList(editor, rootNodeId)
+  if (!list) return
+  const transaction = editor.state.tr.delete(list.pos, list.pos + list.node.nodeSize)
+  transaction.setMeta('addToHistory', false)
+  editor.view.dispatch(transaction)
+}
+
 /** Split streamed text into the lines that should become bullets. */
 function toLines(text: string): string[] {
   // Models often separate ideas with blank lines. Empty list items create
@@ -271,6 +280,7 @@ export function runSkillIntoEditor(
   prompt: string,
   enabledToolIds: string[] = [],
   customTools: CustomHttpToolConfig[] = [],
+  onError?: (message: string) => void,
 ): Generation {
   const controller = new AbortController()
   const cancel = () => controller.abort()
@@ -310,8 +320,10 @@ export function runSkillIntoEditor(
       if (controller.signal.aborted) {
         writeAiText(editor, nodeId, '[cancelled]')
       } else {
-        const msg = e instanceof Error ? e.message : String(e)
-        writeAiText(editor, nodeId, `[error: ${msg}]`)
+        const message = e instanceof Error ? e.message : String(e)
+        removeAiList(editor, nodeId)
+        if (onError) onError(message)
+        else throw e
       }
     }
   })()

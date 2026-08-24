@@ -47,6 +47,14 @@ export function OutlinerEditor({
       OutlinerUi,
     ],
     content: normalizeOutlinerDoc(initialContent ?? EMPTY_DOC) as object,
+    editorProps: {
+      attributes: {
+        autocomplete: 'off',
+        autocapitalize: 'off',
+        autocorrect: 'off',
+        spellcheck: 'false',
+      },
+    },
     onUpdate: ({ editor }) => {
       onDocChange(editor.getJSON() as JsonValue)
     },

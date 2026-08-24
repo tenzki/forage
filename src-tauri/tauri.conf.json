@@ -28,7 +28,8 @@
     "icon": ["icons/icon.png"],
     "resources": [
       "resources/pi/ai-chat-bridge.ts",
-      "resources/pi/codex-image-generation.ts"
+      "resources/pi/codex-image-generation.ts",
+      "resources/pi/sidecar"
     ]
   }
 }

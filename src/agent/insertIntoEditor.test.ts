@@ -5,7 +5,7 @@
 //     line (a single text node collapses the newlines in HTML)
 //   - starting a generation must not steal the caret from the user
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
@@ -16,6 +16,7 @@ import {
   GeneratedImageItem,
   OutlineBulletList,
 } from '../editor/generatedImage'
+import { generateWithPi } from './piGeneration'
 import {
   insertAiChild,
   removeCurrentSlashCommand,
@@ -25,6 +26,11 @@ import {
   writeAiOutline,
   writeAiText,
 } from './insertIntoEditor'
+
+vi.mock('./piGeneration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./piGeneration')>()
+  return { ...actual, generateWithPi: vi.fn() }
+})
 
 function makeEditor(text: string): Editor {
   return new Editor({
@@ -70,6 +76,7 @@ describe('agent output insertion', () => {
   let editor: Editor
 
   beforeEach(() => {
+    vi.mocked(generateWithPi).mockReset()
     editor = makeEditor('Research topic')
     // Put the caret inside the user bullet's text.
     editor.commands.setTextSelection(3)
@@ -145,6 +152,29 @@ describe('agent output insertion', () => {
       'question',
     )).toThrow(/no longer exists/)
     expect(bulletTexts(editor)).toEqual(['Missing topic'])
+  })
+
+  it('reports generation errors outside the outline and removes failed output', async () => {
+    vi.mocked(generateWithPi).mockImplementation(async (_auth, _input, options) => {
+      options.onDelta('Partial response')
+      throw new Error('Service unavailable')
+    })
+    const onError = vi.fn()
+
+    const generation = runSkillIntoEditor(
+      editor,
+      { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
+      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general' },
+      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
+      'question',
+      [],
+      [],
+      onError,
+    )
+    await generation.promise
+
+    expect(onError).toHaveBeenCalledWith('Service unavailable')
+    expect(bulletTexts(editor)).toEqual(['Research topic'])
   })
 
   it('collects direct sibling text in document order', () => {

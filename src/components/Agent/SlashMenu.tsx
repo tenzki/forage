@@ -86,7 +86,13 @@ function readSlashState(editor: Editor): MenuState | null {
   return { query, prompt, top: coords.bottom + 4, left: coords.left }
 }
 
-export function SlashMenu({ editor }: { editor: Editor | null }) {
+export function SlashMenu({
+  editor,
+  onError,
+}: {
+  editor: Editor | null
+  onError: (message: string | null) => void
+}) {
   const authMode = useSettingsStore((state) => state.authMode)
   const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
   const oauthCredential = useSettingsStore((state) => state.oauthCredential)
@@ -248,7 +254,11 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
     const skill = command.skill
     if (!skill) return
     const agent = agents.find((candidate) => candidate.id === skill.agentId)
-    if (!agent) return
+    if (!agent) {
+      onError(`The agent assigned to /${skill.label} no longer exists.`)
+      return
+    }
+    onError(null)
     try {
       runSkillIntoEditor(
         editor,
@@ -264,9 +274,11 @@ export function SlashMenu({ editor }: { editor: Editor | null }) {
         prompt,
         enabledToolIds,
         customTools,
+        onError,
       )
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
+      onError(detail)
       const invocationNodeId = currentListItemId(editor)
       if (invocationNodeId) showSkillContextError(editor, invocationNodeId, detail)
       setContextError(detail)
