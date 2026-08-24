@@ -9,8 +9,9 @@ import {
   collectBullets,
   setBulletKind,
   toggleBulletCompleted,
+  updateBulletText,
 } from '../../editor/outlineModel'
-import { OutlinerUi } from '../../editor/outlinerUi'
+import { getOutlinerUiState, OutlinerUi, setZoom } from '../../editor/outlinerUi'
 import { OutlinerChrome } from './OutlinerChrome'
 
 function makeEditor(): Editor {
@@ -21,11 +22,18 @@ function makeEditor(): Editor {
       type: 'doc',
       content: [{
         type: 'bulletList',
-        content: [{
-          type: 'listItem',
-          attrs: { nodeId: 'alpha', nodeType: 'user', collapsed: false },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Alpha note' }] }],
-        }],
+        content: [
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'alpha', nodeType: 'user', collapsed: false },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Alpha note' }] }],
+          },
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'bravo', nodeType: 'user', collapsed: false },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Bravo note' }] }],
+          },
+        ],
       }],
     },
   })
@@ -44,17 +52,76 @@ describe('outliner chrome', () => {
     editor.destroy()
   })
 
-  it('edits a matching bullet directly from search results', async () => {
+  it('opens a matching bullet instead of editing it in the search popup', async () => {
     const user = userEvent.setup()
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
     await user.click(screen.getByRole('button', { name: /Search/ }))
-    await user.type(screen.getByLabelText('Search bullets'), 'Alpha')
-    const result = screen.getByLabelText('Edit Alpha note')
-    await user.clear(result)
-    await user.type(result, 'Renamed note')
-    await user.tab()
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'Alpha')
 
-    expect(collectBullets(editor.state.doc)[0].text).toBe('Renamed note')
+    expect(screen.queryByRole('textbox', { name: /Edit Alpha/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Open Alpha note' }))
+
+    expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
+    expect(screen.queryByRole('dialog', { name: 'Search outline' })).toBeNull()
+  })
+
+  it('searches the whole document while focused on a node', async () => {
+    const user = userEvent.setup()
+    setZoom(editor, 'alpha')
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'Bravo')
+
+    expect(screen.getByRole('button', { name: 'Open Bravo note' })).toBeTruthy()
+  })
+
+  it('finds bullets without requiring diacritic characters', async () => {
+    const user = userEvent.setup()
+    updateBulletText(editor, 'alpha', 'Bojan Babić')
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'Bojan Babic')
+
+    expect(screen.getByRole('button', { name: 'Open Bojan Babić' })).toBeTruthy()
+  })
+
+  it('returns home from the command menu', async () => {
+    const user = userEvent.setup()
+    setZoom(editor, 'alpha')
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'home')
+    await user.keyboard('{Enter}')
+
+    expect(getOutlinerUiState(editor).zoomId).toBeNull()
+  })
+
+  it('opens Settings and Trash from the command menu', async () => {
+    const user = userEvent.setup()
+    const onOpenSettings = vi.fn()
+    const onOpenTrash = vi.fn()
+    render(
+      <OutlinerChrome
+        editor={editor}
+        trash={[]}
+        onTrashChange={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onOpenTrash={onOpenTrash}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'settings')
+    await user.keyboard('{Enter}')
+    expect(onOpenSettings).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'trash')
+    await user.keyboard('{Enter}')
+    expect(onOpenTrash).toHaveBeenCalledOnce()
   })
 
   it('converts a bullet to a todo from its action menu', async () => {
@@ -83,7 +150,7 @@ describe('outliner chrome', () => {
     expect(editor.state.selection.$from.parent.type.name).toBe('bulletNote')
     act(() => { editor.commands.insertContent('Supporting context') })
     await user.click(screen.getByRole('button', { name: /Search/ }))
-    await user.type(screen.getByLabelText('Search bullets'), 'Supporting')
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'Supporting')
 
     expect(screen.getByText(/Note: Supporting context/)).toBeTruthy()
   })
@@ -97,9 +164,9 @@ describe('outliner chrome', () => {
     await user.click(screen.getByRole('button', { name: 'Hide completed' }))
     expect(editor.view.dom.querySelector('[data-node-id="alpha"]')?.classList.contains('is-completed-hidden')).toBe(true)
     await user.click(screen.getByRole('button', { name: /Search/ }))
-    await user.type(screen.getByLabelText('Search bullets'), 'is:complete')
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'is:complete')
 
-    expect(screen.getByLabelText('Edit Alpha note')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Alpha note' })).toBeTruthy()
   })
 
   it('saves a named search to sidebar shortcuts', async () => {
@@ -115,7 +182,7 @@ describe('outliner chrome', () => {
     )
 
     await user.click(screen.getByRole('button', { name: /Search/ }))
-    await user.type(screen.getByLabelText('Search bullets'), 'Alpha')
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'Alpha')
     await user.click(screen.getByRole('button', { name: 'Save search' }))
     await user.type(screen.getByLabelText('Saved search name'), 'Alpha items')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))

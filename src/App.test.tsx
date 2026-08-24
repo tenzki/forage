@@ -206,9 +206,9 @@ describe('App view switching', () => {
     const tag = container.querySelector('.outline-tag') as HTMLElement
     await user.click(tag)
 
-    const search = await screen.findByRole('combobox', { name: 'Search bullets' }) as HTMLInputElement
+    const search = await screen.findByRole('combobox', { name: 'Search commands and bullets' }) as HTMLInputElement
     expect(search.value).toBe('#research')
-    expect(screen.getByDisplayValue('Tagged note #research')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Tagged note #research' })).toBeTruthy()
   })
 
   it('shows tools and can add an approved custom HTTP tool', async () => {

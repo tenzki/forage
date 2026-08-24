@@ -251,18 +251,55 @@ export function toggleCurrentBulletCompleted(editor: Editor): boolean {
 
 const COMPLETION_FILTERS = new Set(['is:todo', 'is:complete', 'is:completed', 'is:open'])
 
+export function normalizeSearchText(value: string): string {
+  return value.normalize('NFKD').replace(/\p{Mark}/gu, '').toLocaleLowerCase()
+}
+
+function inboundReferenceCounts(entries: BulletEntry[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const source of entries) {
+    const targets = new Set<string>()
+    source.node.descendants((node) => {
+      if (node.type.name === 'listItem') return false
+      if (!node.isText) return
+      for (const mark of node.marks) {
+        const targetId = mark.type.name === 'internalLink' ? mark.attrs.targetId : null
+        if (typeof targetId === 'string' && targetId) targets.add(targetId)
+      }
+    })
+    for (const targetId of targets) counts.set(targetId, (counts.get(targetId) ?? 0) + 1)
+  }
+  return counts
+}
+
+function searchProminence(entry: BulletEntry, referenceCounts: Map<string, number>): number {
+  const referenceWeight = 4
+  return (referenceCounts.get(entry.id) ?? 0) * referenceWeight - entry.ancestorIds.length
+}
+
 export function searchBullets(entries: BulletEntry[], query: string): BulletEntry[] {
   const tokens = query.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean)
   const filters = new Set(tokens.filter((token) => COMPLETION_FILTERS.has(token)))
-  const terms = tokens.filter((token) => !COMPLETION_FILTERS.has(token))
-  return entries.filter((entry) => {
-    if (filters.has('is:todo') && entry.bulletKind !== 'todo') return false
-    if ((filters.has('is:complete') || filters.has('is:completed'))
-      && (entry.bulletKind !== 'todo' || !entry.completed)) return false
-    if (filters.has('is:open') && (entry.bulletKind !== 'todo' || entry.completed)) return false
-    const searchableText = `${entry.text}\n${entry.noteText}`.toLocaleLowerCase()
-    return terms.every((term) => searchableText.includes(term))
-  })
+  const terms = tokens
+    .filter((token) => !COMPLETION_FILTERS.has(token))
+    .map(normalizeSearchText)
+  const referenceCounts = inboundReferenceCounts(entries)
+  return entries
+    .map((entry, documentIndex) => ({ entry, documentIndex }))
+    .filter(({ entry }) => {
+      if (filters.has('is:todo') && entry.bulletKind !== 'todo') return false
+      if ((filters.has('is:complete') || filters.has('is:completed'))
+        && (entry.bulletKind !== 'todo' || !entry.completed)) return false
+      if (filters.has('is:open') && (entry.bulletKind !== 'todo' || entry.completed)) return false
+      const searchableText = normalizeSearchText(`${entry.text}\n${entry.noteText}`)
+      return terms.every((term) => searchableText.includes(term))
+    })
+    .sort((left, right) => (
+      searchProminence(right.entry, referenceCounts)
+      - searchProminence(left.entry, referenceCounts)
+      || left.documentIndex - right.documentIndex
+    ))
+    .map(({ entry }) => entry)
 }
 
 export function searchText(query: string): string {

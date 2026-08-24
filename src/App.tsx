@@ -156,6 +156,8 @@ export default function App() {
               onShortcutsChange={setShortcuts}
               sidebarCollapsed={sidebarCollapsed}
               onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              onOpenSettings={() => { setViewError(null); setView('settings') }}
+              onOpenTrash={() => { setViewError(null); setView('trash') }}
             />
             <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
             {editor && <BacklinksPanel editor={editor} />}

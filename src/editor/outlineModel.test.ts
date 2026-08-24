@@ -3,6 +3,7 @@ import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { BulletNote, focusOrCreateBulletNote, hasBulletNote } from './bulletNote'
+import { InternalLink } from './internalLinks'
 import {
   collectBullets,
   duplicateBullet,
@@ -39,10 +40,27 @@ function item(id: string, text: string, children: object[] = []) {
   }
 }
 
+function linkedItem(id: string, text: string, targetId: string) {
+  return {
+    type: 'listItem',
+    attrs: {
+      nodeId: id,
+      nodeType: 'user',
+      collapsed: false,
+      bulletKind: 'bullet',
+      completed: false,
+    },
+    content: [{
+      type: 'paragraph',
+      content: [{ type: 'text', text, marks: [{ type: 'internalLink', attrs: { targetId } }] }],
+    }],
+  }
+}
+
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
+    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, InternalLink, OutlinerKeymap, OutlinerUi],
     content: {
       type: 'doc',
       content: [
@@ -84,6 +102,27 @@ describe('Workflowy-style outline interactions', () => {
   it('tracks stable hierarchy paths for breadcrumbs and search scope', () => {
     const child = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha-child')
     expect(child?.ancestorIds).toEqual(['alpha'])
+  })
+
+  it('ranks shallower and more-referenced search results higher', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          item('shallow', 'Topic shallow'),
+          item('container', 'Container', [
+            item('popular', 'Topic popular'),
+            item('deep', 'Topic deep'),
+          ]),
+          linkedItem('source-one', 'First reference', 'popular'),
+          linkedItem('source-two', 'Second reference', 'popular'),
+        ],
+      }],
+    })
+
+    expect(searchBullets(collectBullets(editor.state.doc), 'Topic').map((entry) => entry.id))
+      .toEqual(['popular', 'shallow', 'deep'])
   })
 
   it('indents and outdents with Tab and Shift+Tab', () => {

@@ -1107,14 +1107,6 @@ kbd {
   border-bottom: 1px solid #f1f1f1;
 }
 
-.search-scope {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #777;
-  font-size: 12px;
-}
-
 .search-status-filters {
   display: flex;
   margin-left: auto;
@@ -1187,18 +1179,62 @@ kbd {
   font-size: 11px;
 }
 
+.search-commands {
+  padding: 6px;
+  border-bottom: 1px solid #f1f1f1;
+  list-style: none;
+}
+.search-commands li {
+  border-radius: 7px;
+}
+.search-commands li:hover,
+.search-commands li.active {
+  background: #f1eeff;
+}
+.search-commands button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: #29243b;
+  cursor: pointer;
+  text-align: left;
+}
+.search-commands button > span:not(.search-command-open) {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.search-commands strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.search-commands small {
+  overflow: hidden;
+  color: #999;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-command-open {
+  color: #6a4ce0;
+  font-size: 12px;
+}
+
 .search-results {
   max-height: 430px;
   padding: 6px;
   overflow-y: auto;
   list-style: none;
 }
+.search-commands + .search-results {
+  max-height: 320px;
+}
 
 .search-result {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  padding: 8px 10px;
   border-radius: 7px;
   color: #222;
 }
@@ -1208,32 +1244,26 @@ kbd {
   background: #f1eeff;
 }
 
-.search-result input {
+.search-result-button {
+  display: flex;
+  width: 100%;
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
   background: transparent;
   color: inherit;
-  font: inherit;
-}
-.search-result input:focus {
-  border-color: #bfb3ee;
-  background: #fff;
-  outline: none;
-}
-.search-result button {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
-  padding: 4px 8px;
-  border: 1px solid #ddd8f5;
-  border-radius: 5px;
-  background: #fff;
-  color: #6a4ce0;
   cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.search-result-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .search-result small {
-  grid-column: 1;
   overflow: hidden;
   color: #999;
   text-overflow: ellipsis;

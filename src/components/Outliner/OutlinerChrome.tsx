@@ -1,13 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { BookmarkPlus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  BookmarkPlus,
+  Eye,
+  EyeOff,
+  Home,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 import type { Editor } from '@tiptap/react'
 import {
   breadcrumbFor,
   collectBullets,
+  normalizeSearchText,
   searchBullets,
   searchText,
   selectBullet,
-  updateBulletText,
   type BulletEntry,
 } from '../../editor/outlineModel'
 import {
@@ -112,67 +122,55 @@ function resultPath(entry: BulletEntry, entries: BulletEntry[]): string {
 }
 
 function SearchResultRow({
-  editor,
   entry,
   path,
   active,
   onChoose,
 }: {
-  editor: Editor
   entry: BulletEntry
   path: string
   active: boolean
   onChoose: () => void
 }) {
-  const [draft, setDraft] = useState(entry.text)
-
-  function save() {
-    if (draft !== entry.text) updateBulletText(editor, entry.id, draft)
-  }
-
   return (
     <li className={active ? 'search-result active' : 'search-result'}>
-      <input
-        aria-label={`Edit ${displayText(entry)}`}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={save}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur()
-          if (event.key === 'Escape') setDraft(entry.text)
-        }}
-      />
-      <small>
-        {entry.noteText ? `${path || 'Home'} · Note: ${entry.noteText}` : (path || 'Home')}
-      </small>
-      <button onMouseDown={(event) => event.preventDefault()} onClick={onChoose}>Open</button>
+      <button
+        className="search-result-button"
+        aria-label={`Open ${displayText(entry)}`}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onChoose}
+      >
+        <span className="search-result-title">{displayText(entry)}</span>
+        <small>
+          {entry.noteText ? `${path || 'Home'} · Note: ${entry.noteText}` : (path || 'Home')}
+        </small>
+      </button>
     </li>
   )
 }
 
 function SearchResults({
-  editor,
   entries,
   allEntries,
   query,
   active,
+  hasCommands,
   onChoose,
 }: {
-  editor: Editor
   entries: BulletEntry[]
   allEntries: BulletEntry[]
   query: string
   active: number
+  hasCommands: boolean
   onChoose: (entry: BulletEntry) => void
 }) {
-  if (!query.trim()) return <p className="search-empty">Type to search your outline.</p>
-  if (!entries.length) return <p className="search-empty">No matching bullets.</p>
+  if (!query.trim() || (!entries.length && hasCommands)) return null
+  if (!entries.length) return <p className="search-empty">No matching commands or bullets.</p>
   return (
     <ul className="search-results" aria-label="Matching bullets">
       {entries.map((entry, index) => (
         <SearchResultRow
           key={entry.id}
-          editor={editor}
           entry={entry}
           path={resultPath(entry, allEntries)}
           active={index === active}
@@ -223,30 +221,73 @@ function SaveSearchControl({
   )
 }
 
+interface SearchCommand {
+  id: 'home' | 'settings' | 'trash'
+  label: string
+  description: string
+  run: () => void
+}
+
+function SearchCommands({
+  commands,
+  active,
+  onChoose,
+}: {
+  commands: SearchCommand[]
+  active: number
+  onChoose: (command: SearchCommand) => void
+}) {
+  if (!commands.length) return null
+  return (
+    <ul className="search-commands" aria-label="Commands">
+      {commands.map((command, index) => (
+        <li key={command.id} className={index === active ? 'active' : ''}>
+          <button onMouseDown={(event) => event.preventDefault()} onClick={() => onChoose(command)}>
+            {command.id === 'home' && <Home size={17} aria-hidden="true" />}
+            {command.id === 'settings' && <Settings size={17} aria-hidden="true" />}
+            {command.id === 'trash' && <Trash2 size={17} aria-hidden="true" />}
+            <span><strong>{command.label}</strong><small>{command.description}</small></span>
+            <span className="search-command-open">Open</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function OutlineSearch({
   editor,
-  zoomId,
   initialQuery,
   onSaveSearch,
+  onOpenHome,
+  onOpenSettings,
+  onOpenTrash,
   onClose,
 }: {
   editor: Editor
-  zoomId: string | null
   initialQuery: string
   onSaveSearch: (query: string, label: string, scopeId: string | null) => void
+  onOpenHome: () => void
+  onOpenSettings: () => void
+  onOpenTrash: () => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState(initialQuery)
-  const [allOutline, setAllOutline] = useState(!zoomId)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const allEntries = collectBullets(editor.state.doc)
-  const results = useMemo(() => {
-    const scoped = allOutline || !zoomId
-      ? allEntries
-      : allEntries.filter((entry) => entry.id === zoomId || entry.ancestorIds.includes(zoomId))
-    return query.trim() ? searchBullets(scoped, query) : []
-  }, [allEntries, allOutline, query, zoomId])
+  const results = query.trim() ? searchBullets(allEntries, query) : []
+  const commands: SearchCommand[] = [
+    { id: 'home', label: 'Home', description: 'Return to the full outline', run: onOpenHome },
+    { id: 'settings', label: 'Settings', description: 'Configure connections, agents, and tools', run: onOpenSettings },
+    { id: 'trash', label: 'Trash', description: 'Review and restore deleted items', run: onOpenTrash },
+  ]
+  const commandTerms = normalizeSearchText(searchText(query)).trim().split(/\s+/u).filter(Boolean)
+  const matchingCommands = commands.filter((command) => {
+    const text = normalizeSearchText(`${command.label} ${command.description}`)
+    return commandTerms.every((term) => text.includes(term))
+  })
+  const resultCount = matchingCommands.length + results.length
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -260,14 +301,25 @@ function OutlineSearch({
     onClose()
   }
 
+  function chooseCommand(command: SearchCommand) {
+    onClose()
+    command.run()
+  }
+
   function handleKeyDown(event: React.KeyboardEvent) {
     if (event.key === 'Escape') onClose()
-    else if (event.key === 'ArrowDown' && results.length) {
-      event.preventDefault(); setActive((index) => (index + 1) % results.length)
-    } else if (event.key === 'ArrowUp' && results.length) {
-      event.preventDefault(); setActive((index) => (index - 1 + results.length) % results.length)
-    } else if (event.key === 'Enter' && results[active]) {
-      event.preventDefault(); choose(results[active])
+    else if (event.key === 'ArrowDown' && resultCount) {
+      event.preventDefault(); setActive((index) => (index + 1) % resultCount)
+    } else if (event.key === 'ArrowUp' && resultCount) {
+      event.preventDefault(); setActive((index) => (index - 1 + resultCount) % resultCount)
+    } else if (event.key === 'Enter') {
+      const command = matchingCommands[active]
+      const entry = results[active - matchingCommands.length]
+      if (command || entry) {
+        event.preventDefault()
+        if (command) chooseCommand(command)
+        else choose(entry)
+      }
     }
   }
 
@@ -282,16 +334,10 @@ function OutlineSearch({
       <section className="outline-search" role="dialog" aria-modal="true" aria-label="Search outline" onMouseDown={(event) => event.stopPropagation()}>
         <div className="search-input-row">
           <span aria-hidden="true">⌕</span>
-          <input ref={inputRef} value={query} onChange={(event) => changeQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search bullets…" aria-label="Search bullets" role="combobox" aria-expanded="true" />
+          <input ref={inputRef} value={query} onChange={(event) => changeQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search commands or bullets…" aria-label="Search commands and bullets" role="combobox" aria-expanded="true" />
           <kbd>esc</kbd>
         </div>
         <div className="search-options">
-          {zoomId && (
-            <label className="search-scope">
-              <input type="checkbox" checked={allOutline} onChange={(event) => setAllOutline(event.target.checked)} />
-              Search all outline
-            </label>
-          )}
           <div className="search-status-filters" aria-label="Todo filters">
             <button onClick={() => changeQuery('is:todo')}>Todos</button>
             <button onClick={() => changeQuery('is:open')}>Open</button>
@@ -299,10 +345,18 @@ function OutlineSearch({
           </div>
           <SaveSearchControl
             query={query}
-            onSave={(label) => onSaveSearch(query.trim(), label, allOutline ? null : zoomId)}
+            onSave={(label) => onSaveSearch(query.trim(), label, null)}
           />
         </div>
-        <SearchResults editor={editor} entries={results} allEntries={allEntries} query={query} active={active} onChoose={choose} />
+        <SearchCommands commands={matchingCommands} active={active} onChoose={chooseCommand} />
+        <SearchResults
+          entries={results}
+          allEntries={allEntries}
+          query={query}
+          active={active - matchingCommands.length}
+          hasCommands={matchingCommands.length > 0}
+          onChoose={choose}
+        />
       </section>
     </div>
   )
@@ -341,6 +395,8 @@ export function OutlinerChrome({
   onShortcutsChange = () => undefined,
   sidebarCollapsed = false,
   onToggleSidebar = () => undefined,
+  onOpenSettings = () => undefined,
+  onOpenTrash = () => undefined,
 }: {
   editor: Editor | null
   trash: TrashEntry[]
@@ -349,6 +405,8 @@ export function OutlinerChrome({
   onShortcutsChange?: (shortcuts: OutlineShortcut[]) => void
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
+  onOpenSettings?: () => void
+  onOpenTrash?: () => void
 }) {
   const editorUi = useEditorUi(editor)
   const zoomId = editorUi?.zoomId ?? null
@@ -395,9 +453,7 @@ export function OutlinerChrome({
   useEffect(() => {
     const openSavedSearch = (event: Event) => {
       if (!editor) return
-      const { query, scopeId } = (event as CustomEvent<SearchRequest>).detail
-      const validScope = scopeId && collectBullets(editor.state.doc).some((entry) => entry.id === scopeId)
-      setZoom(editor, validScope ? scopeId : null)
+      const { query } = (event as CustomEvent<SearchRequest>).detail
       openSearch(query)
     }
     window.addEventListener(OUTLINER_OPEN_SEARCH_EVENT, openSavedSearch)
@@ -441,9 +497,14 @@ export function OutlinerChrome({
       {searchOpen && (
         <OutlineSearch
           editor={editor}
-          zoomId={zoomId}
           initialQuery={searchQuery}
           onSaveSearch={saveSearch}
+          onOpenHome={() => {
+            setZoom(editor, null)
+            editor.commands.focus()
+          }}
+          onOpenSettings={onOpenSettings}
+          onOpenTrash={onOpenTrash}
           onClose={() => setSearchOpen(false)}
         />
       )}
