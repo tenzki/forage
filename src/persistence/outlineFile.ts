@@ -17,7 +17,7 @@ import type {
   TrashEntry,
 } from '../types/tree'
 
-const ICLOUD_REL = 'Library/Mobile Documents/com~apple~CloudDocs/AIChat'
+const ICLOUD_REL = 'Library/Mobile Documents/com~apple~CloudDocs/Forage'
 const FILE_NAME = 'tree.json'
 
 async function dirPath(): Promise<string> {

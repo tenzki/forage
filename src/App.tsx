@@ -17,6 +17,7 @@ import {
   createDebouncedSaver,
   type DebouncedSaver,
 } from './persistence/outlineFile'
+import { migrateLegacyIdentity } from './persistence/legacyMigration'
 import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 
@@ -115,8 +116,11 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    void readOutline()
-    void loadSettings()
+    void migrateLegacyIdentity()
+      .then(() => {
+        void readOutline()
+        void loadSettings()
+      })
   }, [loadSettings, readOutline])
 
   useEffect(() => {

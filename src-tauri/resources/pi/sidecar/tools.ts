@@ -88,7 +88,7 @@ async function request(url: string, signal?: AbortSignal) {
   return undiciFetch(url, {
     signal: combined,
     redirect: 'error',
-    headers: { 'User-Agent': 'AI Chat Pi sidecar', Accept: 'text/plain, application/json, text/html' },
+    headers: { 'User-Agent': 'Forage Pi sidecar', Accept: 'text/plain, application/json, text/html' },
   })
 }
 

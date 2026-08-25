@@ -1,13 +1,13 @@
 [package]
-name = "ai-chat"
+name = "forage"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Forage — an AI-assisted outliner"
 authors = []
 edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "ai_chat_lib"
+name = "forage_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

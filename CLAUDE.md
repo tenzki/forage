@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> The project was renamed **ai-chat → Forage** (bundle id `com.forage.app`). Historical references to `ai-chat` in `.planning/` and older ADRs are intentional. See ADR-0010.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Commands
@@ -34,7 +36,7 @@ Four things carry the design:
 
 **Bullet identity comes from a ProseMirror plugin, not from the store.** `src/editor/extensions.ts` `BulletAttributes` adds `nodeId`/`nodeType` global attributes to `listItem` and assigns a UUID to any listItem lacking one (or holding a duplicate) via `appendTransaction`, so ids land in the same history step as the edit that created them. `nodeType: 'ai'` marks agent-written bullets (styled via `data-node-type` in `src/style.css`).
 
-**Persistence is one JSON file in iCloud Drive.** `src/persistence/outlineFile.ts` writes `{version: 1, doc}` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`; macOS handles sync. `App.tsx` owns the debounced saver (600ms) and flushes on `beforeunload`. **The fs scope in `src-tauri/capabilities/default.json` must allow any path you read/write** — writes outside it fail at runtime, not compile time.
+**Persistence is one JSON file in iCloud Drive.** `src/persistence/outlineFile.ts` writes the outline to `~/Library/Mobile Documents/com~apple~CloudDocs/Forage/tree.json`; macOS handles sync. `src/persistence/legacyMigration.ts` performs a one-time migration from the pre-rename `ai-chat` locations (the `AIChat` iCloud folder and `com.ai-chat.app/settings.json`); see ADR-0010. `App.tsx` owns the debounced saver (600ms) and flushes on `beforeunload`. **The fs scope in `src-tauri/capabilities/default.json` must allow any path you read/write** — writes outside it fail at runtime, not compile time.
 
 **Agent work runs in a Node.js SDK sidecar.** `src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `src-tauri/resources/pi/sidecar/tools.ts` registers all tools (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, `search_outline`, custom HTTP); `src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Codex credentials from `plugin-store` are passed through the child environment, never process arguments. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
 

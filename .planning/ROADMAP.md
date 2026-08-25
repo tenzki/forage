@@ -1,10 +1,12 @@
-# Roadmap: AI Chat — Tree-Based Note-Taking with AI Agent
+# Roadmap: Forage — Tree-Based Note-Taking with AI Agent
+
+> **RENAMED 2026:** the project was renamed from AI Chat to **Forage** (bundle id `com.forage.app`). Data migrated one-time from the legacy `AIChat` iCloud folder and `com.ai-chat.app` settings; see `docs/ADRs/ADR-0010-rename-to-forage.md`.
 
 > **RE-PLATFORM 2026-06-08; AGENT RUNTIME UPDATE 2026-08-17.** The custom Rust/SQLite/session stack remains abandoned. The editor stays a single TipTap document persisted as JSON, but agent work now runs in a Pi RPC subprocess connected directly from React through the official shell plugin (ADR-0008). Phases 1-6 detail below is superseded.
 
 ## Active Roadmap (3 phases)
 
-- [ ] **Phase A — Outliner (Tauri + single-doc TipTap)**: React + Vite + Zustand. One TipTap document with a custom bullet node. Keyboard nav (Tab/Shift-Tab/Enter/Alt-Arrow/Delete), drag-reorder, zoom/hoist, search, native ProseMirror undo. Persist whole tree as one JSON file via `@tauri-apps/plugin-fs` to `~/Library/Mobile Documents/com~apple~CloudDocs/AIChat/tree.json`. Covers TREE-*, EDIT-*, INFR-02/03/04. ~5-7 days.
+- [ ] **Phase A — Outliner (Tauri + single-doc TipTap)**: React + Vite + Zustand. One TipTap document with a custom bullet node. Keyboard nav (Tab/Shift-Tab/Enter/Alt-Arrow/Delete), drag-reorder, zoom/hoist, search, native ProseMirror undo. Persist whole tree as one JSON file via `@tauri-apps/plugin-fs` to `~/Library/Mobile Documents/com~apple~CloudDocs/Forage/tree.json` (originally `AIChat`; migrated, see ADR-0010). Covers TREE-*, EDIT-*, INFR-02/03/04. ~5-7 days.
 - [ ] **Phase B — Agent (Pi RPC subprocess)**: Pi RPC streams agent and tool events through a bundled bridge extension. Slash commands invoke persisted, configurable agent and skill definitions; context is always the command's full ancestor path and complete parent branch (excluding its subtree and unrelated ancestor siblings) plus explicit stable-ID references, with distinct in-editor previews and a fixed blocking safety budget. `emit_outline` returns structured child nodes under the trigger. The bridge provides bounded web tools and approved custom HTTP GET tools under global and per-agent allowlists. Subscription image generation delegates to Codex app-server. Production Pi/Codex runtime bundling and trusted third-party Pi packages remain follow-up work. Covers AGNT-01/02/03/04/05, EDIT-04.
 - [ ] **Phase C — Polish & Distribute**: Settings panel for paste-in API key via `@tauri-apps/plugin-store` (INFR-01). Error states, empty states, macOS code-sign + notarize → shareable .dmg. ~3 days.
 

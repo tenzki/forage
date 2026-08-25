@@ -128,7 +128,7 @@ class CodexRpcClient {
   private rejectServerRequest(message: RpcMessage): void {
     this.write({
       id: message.id,
-      error: { message: `AI Chat does not permit the Codex request ${message.method}.` },
+      error: { message: `Forage does not permit the Codex request ${message.method}.` },
     })
   }
 
@@ -178,7 +178,7 @@ function codexArguments(): string[] {
 }
 
 async function createIsolatedRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'ai-chat-codex-image-'))
+  const root = await mkdtemp(join(tmpdir(), 'forage-codex-image-'))
   await Promise.all([
     mkdir(join(root, 'home'), { recursive: true }),
     mkdir(join(root, 'tmp'), { recursive: true }),
@@ -245,7 +245,7 @@ function waitForImage(client: CodexRpcClient, signal?: AbortSignal): Promise<Ima
 
 async function runImageTurn(client: CodexRpcClient, root: string, request: CodexImageRequest): Promise<ImageGenerationItem> {
   await client.request('initialize', {
-    clientInfo: { name: 'ai_chat', title: 'AI Chat', version: '0.1.0' },
+    clientInfo: { name: 'forage', title: 'Forage', version: '0.1.0' },
     capabilities: { experimentalApi: true, requestAttestation: false },
   })
   client.notify('initialized', {})
@@ -259,7 +259,7 @@ async function runImageTurn(client: CodexRpcClient, root: string, request: Codex
     approvalPolicy: 'never',
     sandbox: 'read-only',
     ephemeral: true,
-    serviceName: 'ai_chat_image_generation',
+    serviceName: 'forage_image_generation',
     developerInstructions: 'Call the built-in image generation tool exactly once. Never call shell, file, web, app, connector, or multi-agent tools.',
   })
   const waiting = waitForImage(client, request.signal)

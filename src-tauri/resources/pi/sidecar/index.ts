@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AI Chat SDK Sidecar — embeds the Pi SDK directly instead of shelling out
+ * Forage SDK Sidecar — embeds the Pi SDK directly instead of shelling out
  * to `pi --mode rpc`.  Communicates with the Tauri webview via JSONL over
  * stdin/stdout using the same event vocabulary the frontend already expects.
  *

@@ -16,10 +16,13 @@ const fsMocks = vi.hoisted(() => ({
   mkdir: vi.fn(async () => undefined),
   readTextFile: vi.fn(async () => ''),
   writeTextFile: vi.fn(async () => undefined),
+  rename: vi.fn(async () => undefined),
+  copyFile: vi.fn(async () => undefined),
 }))
 
 vi.mock('@tauri-apps/api/path', () => ({
   homeDir: async () => '/home/test',
+  appDataDir: async () => '/home/test/appdata',
   join: async (...parts: string[]) => parts.join('/'),
 }))
 

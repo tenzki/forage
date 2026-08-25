@@ -132,7 +132,7 @@ async function webSearch(arguments_: Record<string, unknown>, signal?: AbortSign
   const { query, count } = searchArguments(arguments_)
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
   const response = await fetchWithTimeout(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (AI Chat web search)' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Forage web search)' },
   }, signal)
   if (!response.ok) throw new Error(`Web search failed with HTTP ${response.status}.`)
   const results = parseDuckDuckGoResults(await response.text(), count)

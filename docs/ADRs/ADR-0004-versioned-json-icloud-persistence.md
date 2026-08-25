@@ -6,6 +6,8 @@
 - **Supersedes:** None (replaces an undocumented SQLite persistence design)
 - **Superseded by:** None
 
+> **Note:** the persistence folder moved from `AIChat` to `Forage` during the project rename; the one-time migration is documented in ADR-0010. The envelope design itself is unchanged.
+
 ## Context
 
 The product is local-first and must make a personal outline available across the user's Macs without operating a synchronization service. Because ADR-0002 establishes one ProseMirror document as the source of truth, relational per-node storage would require translating and synchronizing a second representation.
