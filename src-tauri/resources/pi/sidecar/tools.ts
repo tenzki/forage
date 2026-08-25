@@ -1,5 +1,6 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { fetch as undiciFetch } from 'undici'
 import { generateCodexSubscriptionImage } from './codex-image-generation'
 
 // ── bounds ──────────────────────────────────────────────────────────────────
@@ -81,10 +82,10 @@ function publicUrl(value: string): URL {
   return url
 }
 
-async function request(url: string, signal?: AbortSignal): Promise<Response> {
+async function request(url: string, signal?: AbortSignal) {
   const timeout = AbortSignal.timeout(20_000)
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
-  return fetch(url, {
+  return undiciFetch(url, {
     signal: combined,
     redirect: 'error',
     headers: { 'User-Agent': 'AI Chat Pi sidecar', Accept: 'text/plain, application/json, text/html' },
@@ -153,7 +154,7 @@ function apiError(text: string, status: number): Error {
 
 async function generateApiImage(prompt: string, size: string, quality: string, signal?: AbortSignal): Promise<StoredImage> {
   const timeout = AbortSignal.timeout(120_000)
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
+  const response = await undiciFetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     redirect: 'error',
