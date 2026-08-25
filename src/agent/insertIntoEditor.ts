@@ -21,6 +21,7 @@ import { generateWithPi, type PiOutlineNode } from './piGeneration'
 import type { Skill } from './skills'
 import type { CustomHttpToolConfig } from './tools'
 import { buildOutlineSnapshot } from './outlineSnapshot'
+import type { ActivityReporter } from './activity'
 
 function contextText(item: ProseMirrorNode): string {
   const title = item.firstChild?.textContent?.trim() ?? ''
@@ -268,6 +269,11 @@ export interface Generation {
   cancel: () => void
 }
 
+export function skillActivityLabel(skillLabel: string, prompt: string): string {
+  const trimmedPrompt = prompt.trim()
+  return `Run /${skillLabel}${trimmedPrompt ? ` ${trimmedPrompt}` : ''}`
+}
+
 /**
  * Run a skill, streaming its output into new AI bullets under the cursor.
  * Returns a handle whose cancel() aborts the in-flight request.
@@ -281,6 +287,7 @@ export function runSkillIntoEditor(
   enabledToolIds: string[] = [],
   customTools: CustomHttpToolConfig[] = [],
   onError?: (message: string) => void,
+  onActivity?: ActivityReporter,
 ): Generation {
   const controller = new AbortController()
   const cancel = () => controller.abort()
@@ -294,6 +301,15 @@ export function runSkillIntoEditor(
   removeCurrentSlashCommand(editor, skill.label)
   const nodeId = insertAiChild(editor)
   if (!nodeId) throw new Error('Could not find a bullet to generate under.')
+  const activityId = `skill-${nodeId}`
+  const startedAt = Date.now()
+  onActivity?.({
+    id: activityId,
+    phase: 'start',
+    kind: 'skill',
+    label: skillActivityLabel(skill.label, prompt),
+    detail: prompt || 'No additional prompt',
+  })
 
   const promise = (async () => {
     try {
@@ -312,15 +328,21 @@ export function runSkillIntoEditor(
             setAgentActivity(editor, nodeId, [], cancel)
             writeAiOutline(editor, nodeId, nodes)
           },
+          onActivity: onActivity
+            ? (event) => onActivity({ ...event, callId: activityId })
+            : undefined,
         },
       )
       setAgentActivity(editor, nodeId, null)
+      onActivity?.({ id: activityId, phase: 'complete', kind: 'skill', label: skillActivityLabel(skill.label, prompt), durationMs: Date.now() - startedAt })
     } catch (e) {
       setAgentActivity(editor, nodeId, null)
       if (controller.signal.aborted) {
+        onActivity?.({ id: activityId, phase: 'cancelled', kind: 'skill', label: skillActivityLabel(skill.label, prompt), durationMs: Date.now() - startedAt })
         writeAiText(editor, nodeId, '[cancelled]')
       } else {
         const message = e instanceof Error ? e.message : String(e)
+        onActivity?.({ id: activityId, phase: 'error', kind: 'skill', label: skillActivityLabel(skill.label, prompt), detail: message, durationMs: Date.now() - startedAt })
         removeAiList(editor, nodeId)
         if (onError) onError(message)
         else throw e

@@ -233,6 +233,25 @@ describe('outliner chrome', () => {
     expect(onToggleSidebar).toHaveBeenCalledOnce()
   })
 
+  it('places the activity sidebar toggle immediately after Search', async () => {
+    const user = userEvent.setup()
+    const onToggleActivitySidebar = vi.fn()
+    render(
+      <OutlinerChrome
+        editor={editor}
+        trash={[]}
+        onTrashChange={vi.fn()}
+        onToggleActivitySidebar={onToggleActivitySidebar}
+      />,
+    )
+
+    const activityToggle = screen.getByRole('button', { name: 'Collapse activity sidebar' })
+    const searchButton = screen.getByRole('button', { name: /Search/ })
+    expect(searchButton.nextElementSibling).toBe(activityToggle)
+    await user.click(activityToggle)
+    expect(onToggleActivitySidebar).toHaveBeenCalledOnce()
+  })
+
   it('adds a node to sidebar shortcuts from its action menu', async () => {
     const user = userEvent.setup()
     const onShortcutsChange = vi.fn()

@@ -52,6 +52,30 @@ describe('App view switching', () => {
     fsMocks.writeTextFile.mockResolvedValue(undefined)
   })
 
+  it('shows the live agent activity sidebar and records local commands', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    expect(screen.getByRole('complementary', { name: 'Agent activity' })).toBeTruthy()
+
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+    await user.click(editor)
+    await user.keyboard('/todo{Enter}')
+
+    expect(screen.getAllByText('/todo')).toHaveLength(2)
+    expect(screen.getByRole('list', { name: 'Execution timeline for /todo' })).toBeTruthy()
+  })
+
+  it('fully hides the activity sidebar from the header toggle', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    const sidebar = screen.getByRole('complementary', { name: 'Agent activity' }) as HTMLElement
+
+    await user.click(screen.getByRole('button', { name: 'Collapse activity sidebar' }))
+
+    expect(sidebar.hidden).toBe(true)
+    expect(screen.getByRole('button', { name: 'Expand activity sidebar' })).toBeTruthy()
+  })
+
   it('shows a recoverable error instead of silently replacing an unreadable outline', async () => {
     const user = userEvent.setup()
     fsMocks.exists.mockResolvedValue(true)

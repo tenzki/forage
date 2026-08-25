@@ -24,6 +24,7 @@ import {
   setTodoCompleted,
 } from '../../editor/outlineModel'
 import { useSettingsStore } from '../../store/settingsStore'
+import type { ActivityReporter } from '../../agent/activity'
 
 interface CommandChoice {
   id: string
@@ -89,9 +90,11 @@ function readSlashState(editor: Editor): MenuState | null {
 export function SlashMenu({
   editor,
   onError,
+  onActivity,
 }: {
   editor: Editor | null
   onError: (message: string | null) => void
+  onActivity?: ActivityReporter
 }) {
   const authMode = useSettingsStore((state) => state.authMode)
   const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
@@ -245,10 +248,13 @@ export function SlashMenu({
     completedCommandRef.current = null
     setCompletedCommand(null)
     if (command.outlineCommand) {
+      const activityId = `command-${Date.now()}`
+      onActivity?.({ id: activityId, phase: 'start', kind: 'command', label: `/${command.outlineCommand.label}` })
       clearSkillContext(editor)
       setCurrentBulletText(editor, prompt)
       setMenu(null)
       runOutlineCommand(editor, command.outlineCommand)
+      onActivity?.({ id: activityId, phase: 'complete', kind: 'command', label: `/${command.outlineCommand.label}` })
       return
     }
     const skill = command.skill
@@ -275,6 +281,7 @@ export function SlashMenu({
         enabledToolIds,
         customTools,
         onError,
+        onActivity,
       )
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)

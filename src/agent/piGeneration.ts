@@ -1,6 +1,7 @@
-import { resolveAccessToken, type CodexAuthConfig, type GenerateInput, type GenerateOptions } from './client'
+import { resolveCodexAuth, type CodexAuthConfig, type GenerateInput, type GenerateOptions } from './client'
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
 import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
+import { safeToolDetail, type ActivityReporter } from './activity'
 
 export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
@@ -8,6 +9,7 @@ export type PiOutlineNode =
 
 export interface PiGenerateOptions extends GenerateOptions {
   onOutline?: (nodes: PiOutlineNode[]) => void
+  onActivity?: ActivityReporter
 }
 
 interface RunPayload {
@@ -25,7 +27,7 @@ export async function generateWithPi(
   input: GenerateInput & { outlineSnapshot?: string },
   options: PiGenerateOptions,
 ): Promise<string> {
-  const apiKey = await resolveAccessToken(auth, options.signal)
+  const resolvedAuth = await resolveCodexAuth(auth, options.signal)
   const client = new PiRpcClient()
   const allowedTools = new Set(input.agent?.toolIds ?? [])
   const enabledToolIds = (input.enabledToolIds ?? []).filter((id) => allowedTools.has(id))
@@ -35,23 +37,68 @@ export async function generateWithPi(
     .map(({ name, description, urlTemplate }) => ({ name, description, urlTemplate }))
   let text = ''
   let outline: PiOutlineNode[] | null = null
-  let activity: string[] = []
+  const toolDetails = new Map<string, string>()
+  const startedAt = Date.now()
+  let outputStarted = false
+  const thinkingId = `thinking-${startedAt}`
+  const outputId = `output-${startedAt}`
+
+  options.onActivity?.({ id: thinkingId, phase: 'start', kind: 'thinking', label: 'Thinking' })
+
+  const beginOutput = () => {
+    if (outputStarted) return
+    outputStarted = true
+    options.onActivity?.({ id: thinkingId, phase: 'complete', kind: 'thinking', label: 'Thinking', durationMs: Date.now() - startedAt })
+    options.onActivity?.({ id: outputId, phase: 'start', kind: 'output', label: 'Writing outline' })
+  }
 
   const unsubscribe = client.onEvent((event) => {
     const delta = textDelta(event)
     if (delta !== null) {
+      beginOutput()
       text += delta
       options.onDelta(text)
     }
     const toolName = toolStart(event)
     if (toolName) {
-      activity = [...activity, `calling ${toolName}`]
-      options.onToolActivity?.(activity)
+      const toolId = typeof event.toolCallId === 'string' ? `tool-${event.toolCallId}` : `tool-${Date.now()}-${toolName}`
+      const detail = safeToolDetail(toolName, event.args)
+      toolDetails.set(toolId, detail)
+      options.onActivity?.({
+        id: toolId,
+        phase: 'start',
+        kind: 'tool',
+        label: toolName,
+        detail,
+      })
+      options.onToolActivity?.([`${toolName}: ${detail}`])
+    }
+    if (event.type === 'tool_execution_end' && typeof event.toolName === 'string') {
+      const toolId = typeof event.toolCallId === 'string' ? `tool-${event.toolCallId}` : undefined
+      const startDetail = toolId ? toolDetails.get(toolId) : undefined
+      const outcome = event.isError ? 'Failed' : 'Completed'
+      if (toolId) toolDetails.delete(toolId)
+      options.onActivity?.({
+        id: toolId ?? `tool-${event.toolName}`,
+        phase: event.isError ? 'error' : 'complete',
+        kind: 'tool',
+        label: event.toolName,
+        detail: startDetail ? `${startDetail} · ${outcome}` : outcome,
+      })
     }
     const emitted = emittedOutline(event)
     if (emitted) {
+      beginOutput()
+      options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Outline ready', durationMs: Date.now() - startedAt })
       outline = emitted
       options.onOutline?.(emitted)
+    }
+    if (event.type === 'agent_settled' && !outline) {
+      beginOutput()
+      options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Response ready', durationMs: Date.now() - startedAt })
+    }
+    if (event.type === 'process_error') {
+      options.onActivity?.({ id: thinkingId, phase: 'error', kind: 'error', label: 'Agent error', detail: String(event.error ?? 'Unknown agent error') })
     }
   })
 
@@ -59,10 +106,11 @@ export async function generateWithPi(
   options.signal?.addEventListener('abort', abort, { once: true })
   try {
     await client.start({
-      provider: auth.mode === 'subscription' ? 'openai-codex' : 'openai',
+      provider: resolvedAuth.mode === 'subscription' ? 'openai-codex' : 'openai',
       modelId: input.agent?.modelId || auth.modelId,
-      apiKey,
-      accountId: auth.mode === 'subscription' ? auth.oauthCredential?.accountId ?? '' : '',
+      apiKey: resolvedAuth.accessToken,
+      accountId: resolvedAuth.mode === 'subscription' ? resolvedAuth.accountId : '',
+      ...(resolvedAuth.mode === 'subscription' ? { oauthExpires: resolvedAuth.expires } : {}),
     })
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
     const settled = client.waitForSettled()

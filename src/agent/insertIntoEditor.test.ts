@@ -21,6 +21,7 @@ import {
   insertAiChild,
   removeCurrentSlashCommand,
   runSkillIntoEditor,
+  skillActivityLabel,
   setCurrentBulletText,
   siblingContext,
   writeAiOutline,
@@ -73,6 +74,11 @@ function bulletTexts(editor: Editor): string[] {
 }
 
 describe('agent output insertion', () => {
+  it('includes the prompt in the activity call label', () => {
+    expect(skillActivityLabel('research', 'Compare Tauri and Electron')).toBe('Run /research Compare Tauri and Electron')
+    expect(skillActivityLabel('research', '   ')).toBe('Run /research')
+  })
+
   let editor: Editor
 
   beforeEach(() => {

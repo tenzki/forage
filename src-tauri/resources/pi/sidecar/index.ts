@@ -19,12 +19,10 @@
 import {
   createAgentSession,
   DefaultResourceLoader,
-  ModelRuntime,
   resolveCliModel,
   SessionManager,
   type AgentSession,
 } from '@earendil-works/pi-coding-agent'
-import { InMemoryCredentialStore } from '@earendil-works/pi-ai'
 
 import {
   createCustomHttpTool,
@@ -37,6 +35,7 @@ import {
   type CustomToolConfig,
   type OutlineSnapshotNode,
 } from './tools'
+import { createAuthenticatedModelRuntime } from './runtime-auth'
 
 // ── constants ───────────────────────────────────────────────────────────────
 
@@ -120,10 +119,10 @@ function errorMessage(error: unknown): string {
 
 async function main(): Promise<void> {
   const providerId = process.env.AI_CHAT_PROVIDER
-  const apiKey = process.env.AI_CHAT_API_KEY?.trim()
+  const accessToken = process.env.AI_CHAT_API_KEY?.trim()
   const modelId = process.env.AI_CHAT_MODEL_ID?.trim() || 'gpt-5.5'
 
-  if (!providerId || !apiKey) {
+  if (!providerId || !accessToken) {
     emit({ type: 'process_error', error: 'Missing AI_CHAT_PROVIDER or AI_CHAT_API_KEY environment variable.' })
     process.exit(1)
   }
@@ -134,13 +133,14 @@ async function main(): Promise<void> {
 
   // ── set up model runtime with in-memory credentials ──────────────────
 
-  const credentials = new InMemoryCredentialStore()
-  const modelRuntime = await ModelRuntime.create({
-    credentials,
-    allowModelNetwork: false,
-    modelRefreshTimeoutMs: 5_000,
-  })
-  await modelRuntime.setRuntimeApiKey(providerId, apiKey)
+  const modelRuntime = providerId === 'openai-codex'
+    ? await createAuthenticatedModelRuntime({
+      providerId,
+      accessToken,
+      accountId: process.env.AI_CHAT_ACCOUNT_ID?.trim() || '',
+      expires: Number(process.env.AI_CHAT_OAUTH_EXPIRES),
+    })
+    : await createAuthenticatedModelRuntime({ providerId, accessToken })
 
   const resolved = resolveCliModel({
     cliModel: `${providerId}/${modelId}`,

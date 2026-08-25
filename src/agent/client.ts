@@ -59,6 +59,10 @@ export interface CodexModelOption {
   name: string
 }
 
+export type ResolvedCodexAuth =
+  | { mode: 'api_key'; accessToken: string }
+  | { mode: 'subscription'; accessToken: string; accountId: string; expires: number }
+
 function providerFor(mode: CodexAuthMode): Provider {
   return mode === 'subscription' ? openaiCodexProvider() : openaiProvider()
 }
@@ -89,22 +93,34 @@ function resolveModel(mode: CodexAuthMode, modelId: string): Model<Api> {
   return model
 }
 
-export async function resolveAccessToken(
+export async function resolveCodexAuth(
   auth: CodexAuthConfig,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ResolvedCodexAuth> {
   if (auth.mode === 'api_key') {
     if (!auth.apiKey.trim()) {
       throw new Error('No OpenAI API key set. Open Settings and add your API key.')
     }
-    return auth.apiKey.trim()
+    return { mode: 'api_key', accessToken: auth.apiKey.trim() }
   }
   if (!auth.oauthCredential) {
     throw new Error('Not signed in to ChatGPT. Open Settings and connect your subscription.')
   }
   const credential = await validCodexCredential(auth.oauthCredential, signal)
   if (credential !== auth.oauthCredential) await auth.onCredentialRefresh?.(credential)
-  return credential.access
+  return {
+    mode: 'subscription',
+    accessToken: credential.access,
+    accountId: credential.accountId,
+    expires: credential.expires,
+  }
+}
+
+export async function resolveAccessToken(
+  auth: CodexAuthConfig,
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await resolveCodexAuth(auth, signal)).accessToken
 }
 
 function userMessage({ skill, prompt, context, siblings = [] }: GenerateInput): Context {

@@ -10,6 +10,8 @@ import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu
 import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
 import { TrashPanel } from './components/Outliner/TrashPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
+import { ActivitySidebar, type ActivityCall, type ActivityEntry } from './components/Agent/ActivitySidebar'
+import type { ActivityEvent } from './agent/activity'
 import {
   loadOutline,
   createDebouncedSaver,
@@ -37,8 +39,57 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
+  const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
+  const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
   const loadSettings = useSettingsStore((state) => state.load)
   const saver = useRef<DebouncedSaver | null>(null)
+
+  const handleActivity = useCallback((event: ActivityEvent) => {
+    setActivityCalls((current) => {
+      const status = event.status ?? (
+        event.phase === 'start' ? 'running' :
+          event.phase === 'error' ? 'error' :
+            event.phase === 'cancelled' ? 'cancelled' : 'complete'
+      )
+      const callId = event.callId ?? event.id
+      const existingCall = current.find((call) => call.id === callId)
+      const existingEvent = existingCall?.events.find((entry) => entry.id === event.id)
+      const nextEvent: ActivityEntry = {
+        id: event.id,
+        kind: event.kind,
+        label: event.label,
+        detail: event.detail,
+        status,
+        timestamp: existingEvent?.timestamp ?? Date.now(),
+        durationMs: event.durationMs,
+      }
+      if (!existingCall) {
+        return [...current, {
+          id: callId,
+          label: event.callId ? 'Agent execution' : event.label,
+          detail: event.callId ? undefined : event.detail,
+          status: event.callId ? 'running' : status,
+          timestamp: Date.now(),
+          durationMs: event.callId ? undefined : event.durationMs,
+          events: [nextEvent],
+        }].slice(-100)
+      }
+      const events = existingEvent
+        ? existingCall.events.map((entry) => entry.id === event.id ? { ...entry, ...nextEvent, detail: event.detail ?? entry.detail } : entry)
+        : [...existingCall.events, nextEvent]
+      const isCallEvent = event.id === callId
+      return current.map((call) => call.id === callId
+        ? {
+            ...call,
+            label: isCallEvent ? event.label : call.label,
+            detail: isCallEvent ? event.detail ?? call.detail : call.detail,
+            status: isCallEvent ? status : call.status,
+            durationMs: isCallEvent ? event.durationMs ?? call.durationMs : call.durationMs,
+            events,
+          }
+        : call)
+    })
+  }, [])
 
   if (!saver.current) {
     saver.current = createDebouncedSaver(
@@ -166,13 +217,15 @@ export default function App() {
               onShortcutsChange={setShortcuts}
               sidebarCollapsed={sidebarCollapsed}
               onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              activitySidebarCollapsed={activitySidebarCollapsed}
+              onToggleActivitySidebar={() => setActivitySidebarCollapsed((collapsed) => !collapsed)}
               onOpenSettings={() => { setViewError(null); setView('settings') }}
               onOpenTrash={() => { setViewError(null); setView('trash') }}
             />
             <OutlinerEditor initialContent={initialContent} onDocChange={handleDocChange} onReady={setEditor} />
             {editor && <BacklinksPanel editor={editor} />}
             <FormattingBubbleMenu editor={editor} />
-            <SlashMenu editor={editor} onError={setAgentError} />
+            <SlashMenu editor={editor} onError={setAgentError} onActivity={handleActivity} />
             <TagMenu editor={editor} />
             <InternalLinkMenu editor={editor} />
           </div>
@@ -188,6 +241,11 @@ export default function App() {
             />
           )}
         </section>
+        <ActivitySidebar
+          calls={activityCalls}
+          collapsed={activitySidebarCollapsed}
+          onClear={() => setActivityCalls([])}
+        />
       </main>
     </div>
   )

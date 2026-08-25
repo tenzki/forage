@@ -8,6 +8,8 @@ import {
   Home,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Search,
   Settings,
   Trash2,
@@ -83,6 +85,8 @@ function Toolbar({
   onNavigateForward,
   onToggleCompleted,
   onOpenSearch,
+  activitySidebarCollapsed,
+  onToggleActivitySidebar,
 }: {
   editor: Editor
   zoomId: string | null
@@ -95,6 +99,8 @@ function Toolbar({
   onNavigateForward: () => void
   onToggleCompleted: () => void
   onOpenSearch: () => void
+  activitySidebarCollapsed: boolean
+  onToggleActivitySidebar: () => void
 }) {
   return (
     <div className="outline-toolbar">
@@ -139,6 +145,15 @@ function Toolbar({
         </button>
         <button className="search-open" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
           <Search size={15} aria-hidden="true" /> Search <kbd>⌘K</kbd>
+        </button>
+        <button
+          className="outline-sidebar-toggle activity-toolbar-toggle"
+          aria-label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
+          onClick={onToggleActivitySidebar}
+        >
+          {activitySidebarCollapsed
+            ? <PanelRightOpen size={17} aria-hidden="true" />
+            : <PanelRightClose size={17} aria-hidden="true" />}
         </button>
       </div>
     </div>
@@ -427,6 +442,8 @@ export function OutlinerChrome({
   onShortcutsChange = () => undefined,
   sidebarCollapsed = false,
   onToggleSidebar = () => undefined,
+  activitySidebarCollapsed = false,
+  onToggleActivitySidebar = () => undefined,
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
 }: {
@@ -437,6 +454,8 @@ export function OutlinerChrome({
   onShortcutsChange?: (shortcuts: OutlineShortcut[]) => void
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
+  activitySidebarCollapsed?: boolean
+  onToggleActivitySidebar?: () => void
   onOpenSettings?: () => void
   onOpenTrash?: () => void
 }) {
@@ -533,6 +552,8 @@ export function OutlinerChrome({
         canNavigateBack={canNavigateBack}
         canNavigateForward={canNavigateForward}
         onToggleSidebar={onToggleSidebar}
+        activitySidebarCollapsed={activitySidebarCollapsed}
+        onToggleActivitySidebar={onToggleActivitySidebar}
         onNavigateBack={() => navigateBack(editor)}
         onNavigateForward={() => navigateForward(editor)}
         onToggleCompleted={() => setHideCompleted(editor, !hideCompleted)}

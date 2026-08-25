@@ -1,17 +1,10 @@
 import { appDataDir, resolveResource } from '@tauri-apps/api/path'
 import { Command, type Child } from '@tauri-apps/plugin-shell'
 
-const REQUEST_TIMEOUT_MS = 30_000
 const STDERR_LIMIT = 16_000
 const STDOUT_LINE_LIMIT = 8_000_000
 
 export type PiRpcEvent = Record<string, unknown> & { type: string }
-
-interface PendingRequest {
-  resolve: (response: PiRpcEvent) => void
-  reject: (error: Error) => void
-  timer: number
-}
 
 export interface PiProcessOptions {
   provider: 'openai' | 'openai-codex'
@@ -19,6 +12,8 @@ export interface PiProcessOptions {
   apiKey: string
   /** ChatGPT workspace/account id used only by Codex subscription tools. */
   accountId: string
+  /** Expiry of the short-lived ChatGPT OAuth access token. */
+  oauthExpires?: number
 }
 
 export interface PiRuntimeStatus {
@@ -61,14 +56,13 @@ export class PiRpcClient {
   private child: Child | null = null
   private command: Command<string> | null = null
   private listeners = new Set<(event: PiRpcEvent) => void>()
-  private pending = new Map<string, PendingRequest>()
-  private requestId = 0
   private stderr = ''
   private stdoutBuffer = ''
   private stopping = false
 
   async start(options: PiProcessOptions): Promise<void> {
     if (this.child) throw new Error('Pi subprocess is already running.')
+    this.stopping = false
     const agentDir = await appDataDir()
 
     const [indexPath] = await Promise.all([
@@ -87,13 +81,35 @@ export class PiRpcClient {
       AI_CHAT_API_KEY: options.apiKey,
       AI_CHAT_ACCOUNT_ID: options.accountId,
       AI_CHAT_MODEL_ID: options.modelId,
+      ...(options.provider === 'openai-codex' && options.oauthExpires !== undefined
+        ? { AI_CHAT_OAUTH_EXPIRES: String(options.oauthExpires) }
+        : {}),
     }
     this.command = Command.create('node-sidecar', args, { env })
     this.attachProcessListeners(this.command)
+
+    let unsubscribeStartup: () => void = () => undefined
+    const startup = new Promise<void>((resolve, reject) => {
+      unsubscribeStartup = this.onEvent((event) => {
+        if (event.type === 'ready') {
+          unsubscribeStartup()
+          resolve()
+        } else if (event.type === 'process_error') {
+          unsubscribeStartup()
+          reject(new Error(String(event.error || 'Pi SDK sidecar failed during startup.')))
+        }
+      })
+    })
     try {
       this.child = await this.command.spawn()
     } catch (error) {
+      unsubscribeStartup()
       throw new Error(`Could not start the Pi SDK sidecar. Install dependencies with 'cd sidecar && npm install'. ${message(error)}`)
+    }
+    try {
+      await startup
+    } finally {
+      unsubscribeStartup()
     }
   }
 
@@ -103,12 +119,12 @@ export class PiRpcClient {
   }
 
   async prompt(message: string): Promise<void> {
-    await this.send({ type: 'run', payload: message })
+    await this.write({ type: 'run', payload: message })
   }
 
   async abort(): Promise<void> {
     if (!this.child) return
-    await this.send({ type: 'abort' })
+    await this.write({ type: 'abort' })
   }
 
   waitForSettled(timeoutMs = 180_000): Promise<void> {
@@ -143,7 +159,6 @@ export class PiRpcClient {
         console.warn('[pi-sdk] failed to stop subprocess:', error)
       }
     }
-    this.rejectPending(new Error('Pi SDK subprocess stopped.'))
     this.listeners.clear()
   }
 
@@ -182,48 +197,22 @@ export class PiRpcClient {
   }
 
   private route(event: PiRpcEvent): void {
-    const id = typeof event.id === 'string' ? event.id : null
-    if (event.type === 'response' && id && this.pending.has(id)) {
-      const request = this.pending.get(id)!
-      this.pending.delete(id)
-      window.clearTimeout(request.timer)
-      if (event.success === false) request.reject(new Error(String(event.error || 'Pi SDK command failed.')))
-      else request.resolve(event)
-      return
-    }
     for (const listener of this.listeners) listener(event)
   }
 
-  private send(command: Record<string, unknown>): Promise<PiRpcEvent> {
-    if (!this.child) return Promise.reject(new Error('Pi SDK subprocess is not running.'))
-    const id = `ai-chat-${++this.requestId}`
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Pi SDK did not acknowledge ${String(command.type)}. ${this.stderr}`))
-      }, REQUEST_TIMEOUT_MS)
-      this.pending.set(id, { resolve, reject, timer })
-      void this.child!.write(`${JSON.stringify({ ...command, id })}\n`).catch((error) => {
-        window.clearTimeout(timer)
-        this.pending.delete(id)
-        reject(new Error(`Could not write to Pi SDK: ${message(error)}`))
-      })
+  private write(command: Record<string, unknown>): Promise<void> {
+    const child = this.child
+    if (!child) return Promise.reject(new Error('Pi SDK subprocess is not running.'))
+    return child.write(`${JSON.stringify(command)}\n`).catch((error) => {
+      throw new Error(`Could not write to Pi SDK: ${message(error)}`)
     })
   }
 
   private handleExit(error: Error): void {
     this.child = null
-    this.rejectPending(error)
     for (const listener of this.listeners) listener({ type: 'process_error', error: error.message })
   }
 
-  private rejectPending(error: Error): void {
-    for (const request of this.pending.values()) {
-      window.clearTimeout(request.timer)
-      request.reject(error)
-    }
-    this.pending.clear()
-  }
 }
 
 function message(error: unknown): string {
