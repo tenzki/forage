@@ -279,6 +279,34 @@ describe('agent output insertion', () => {
     ])
   })
 
+  it('formats Markdown and bare links in completed agent output', () => {
+    const nodeId = insertAiChild(editor)!
+
+    writeAiOutline(editor, nodeId, [{
+      text: 'Read [OpenAI](https://openai.com) and https://example.com/docs.',
+    }])
+
+    let generatedParagraph: Parameters<Parameters<typeof editor.state.doc.descendants>[0]>[0] | undefined
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeType === 'ai') {
+        generatedParagraph = node.firstChild ?? undefined
+        return false
+      }
+      return undefined
+    })
+    expect(generatedParagraph?.textContent).toBe('Read OpenAI and https://example.com/docs.')
+    const links: Array<{ text: string; href: string }> = []
+    generatedParagraph?.descendants((node) => {
+      if (!node.isText) return
+      const link = node.marks.find((mark) => mark.type.name === 'link')
+      if (link) links.push({ text: node.text ?? '', href: link.attrs.href })
+    })
+    expect(links).toEqual([
+      { text: 'OpenAI', href: 'https://openai.com' },
+      { text: 'https://example.com/docs', href: 'https://example.com/docs' },
+    ])
+  })
+
   it('writes generated images as separate image-only nodes without adding an undo step', () => {
     const nodeId = insertAiChild(editor)!
     const src = `data:image/webp;base64,${btoa('RIFF\u0004\u0000\u0000\u0000WEBP')}`

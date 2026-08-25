@@ -188,6 +188,107 @@ function toLines(text: string): string[] {
   return lines.length ? lines : ['']
 }
 
+interface ParsedLink {
+  end: number
+  href: string
+  label: string
+}
+
+function safeExternalHref(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? value : null
+  } catch {
+    return null
+  }
+}
+
+function markdownLinkAt(text: string, start: number): ParsedLink | null {
+  if (text[start] !== '[') return null
+  const labelEnd = text.indexOf('](', start + 1)
+  if (labelEnd <= start + 1) return null
+  const destinationStart = labelEnd + 2
+  let nestedParentheses = 0
+  for (let index = destinationStart; index < text.length; index += 1) {
+    const character = text[index]
+    if (/\s/u.test(character)) return null
+    if (character === '(') {
+      nestedParentheses += 1
+    } else if (character === ')' && nestedParentheses > 0) {
+      nestedParentheses -= 1
+    } else if (character === ')') {
+      const destination = text.slice(destinationStart, index)
+      const href = safeExternalHref(destination)
+      return href ? {
+        end: index + 1,
+        href,
+        label: text.slice(start + 1, labelEnd),
+      } : null
+    }
+  }
+  return null
+}
+
+function trimBareUrlEnd(value: string): number {
+  let end = value.length
+  while (end > 0) {
+    const character = value[end - 1]
+    if (/[.,!?;:]/u.test(character)) {
+      end -= 1
+      continue
+    }
+    const opening = character === ')' ? '(' : character === ']' ? '[' : character === '}' ? '{' : null
+    if (opening) {
+      const candidate = value.slice(0, end)
+      const openings = [...candidate].filter((part) => part === opening).length
+      const closings = [...candidate].filter((part) => part === character).length
+      if (closings > openings) {
+        end -= 1
+        continue
+      }
+    }
+    break
+  }
+  return end
+}
+
+function bareLinkAt(text: string, start: number): ParsedLink | null {
+  if (!/^https?:\/\//iu.test(text.slice(start))) return null
+  let rawEnd = start
+  while (rawEnd < text.length && !/[\s<>"']/u.test(text[rawEnd])) rawEnd += 1
+  const value = text.slice(start, rawEnd)
+  const linkLength = trimBareUrlEnd(value)
+  const href = safeExternalHref(value.slice(0, linkLength))
+  return href ? { end: start + linkLength, href, label: href } : null
+}
+
+function aiInlineContent(editor: Editor, text: string): ProseMirrorNode[] {
+  const { schema } = editor
+  const linkType = schema.marks.link
+  if (!text || !linkType) return text ? [schema.text(text)] : []
+  const nodes: ProseMirrorNode[] = []
+  let plainText = ''
+  const flushPlainText = () => {
+    if (!plainText) return
+    nodes.push(schema.text(plainText))
+    plainText = ''
+  }
+
+  for (let index = 0; index < text.length;) {
+    const link = markdownLinkAt(text, index) ?? bareLinkAt(text, index)
+    if (!link) {
+      plainText += text[index]
+      index += 1
+      continue
+    }
+    flushPlainText()
+    nodes.push(schema.text(link.label, [linkType.create({ href: link.href })]))
+    index = link.end
+  }
+  flushPlainText()
+  return nodes
+}
+
 /**
  * Materialise the agent's output so far as one AI bullet per line, replacing
  * whatever the previous delta wrote. Bullet ids are stable across deltas, and
@@ -208,7 +309,7 @@ export function writeAiText(
   const items = toLines(text).map((line, i) =>
     schema.nodes.listItem.create(
       { nodeId: existingIds[i] ?? newNodeId(), nodeType: 'ai' },
-      schema.nodes.paragraph.create(null, line ? schema.text(line) : null),
+      schema.nodes.paragraph.create(null, aiInlineContent(editor, line)),
     ),
   )
   replaceAiList(editor, list, items)
@@ -240,7 +341,7 @@ function createAiOutlineItem(editor: Editor, node: PiOutlineNode, nodeId: string
     return [schema.nodes.generatedImageItem.create(null, image)]
   }
   const content: ProseMirrorNode[] = [
-    schema.nodes.paragraph.create(null, schema.text(node.text)),
+    schema.nodes.paragraph.create(null, aiInlineContent(editor, node.text)),
   ]
   if (node.children?.length) {
     const children = node.children.flatMap((child) => createAiOutlineItem(editor, child, newNodeId()))
