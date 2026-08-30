@@ -1,0 +1,53 @@
+{
+  "initial": {
+    "doc": {
+      "type": "doc",
+      "content": [{
+        "type": "bulletList",
+        "content": [{
+          "type": "listItem",
+          "attrs": {
+            "nodeId": "inbox",
+            "nodeType": "user",
+            "collapsed": false,
+            "bulletKind": "bullet",
+            "completed": false
+          },
+          "content": [{
+            "type": "paragraph",
+            "content": [{ "type": "text", "text": "Inbox" }]
+          }]
+        }]
+      }]
+    },
+    "trash": [],
+    "shortcuts": [],
+    "schemaEpoch": 1
+  },
+  "events": [{
+    "id": "event-1",
+    "outlineId": "outline-1",
+    "actorId": "owner-1",
+    "deviceId": "device-1",
+    "type": "document.steps_applied",
+    "eventVersion": 1,
+    "documentVersion": 1,
+    "schemaEpoch": 1,
+    "baseRevision": 0,
+    "revision": 1,
+    "origin": "desktop",
+    "occurredAt": "2026-08-30T12:00:00.000Z",
+    "payload": {
+      "steps": [{
+        "stepType": "replace",
+        "from": 8,
+        "to": 8,
+        "slice": { "content": [{ "type": "text", "text": "!" }] }
+      }],
+      "inverseSteps": [{ "stepType": "replace", "from": 8, "to": 9 }],
+      "beforeHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "afterHash": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  }],
+  "expectedText": "Inbox!"
+}

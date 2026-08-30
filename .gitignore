@@ -1,6 +1,8 @@
 node_modules/
-dist/
+**/dist/
 .DS_Store
-src-tauri/target/
-src/lib/bindings.ts
+**/src-tauri/target/
+**/src/lib/bindings.ts
+.turbo/
+.local/
 .ant-colony/

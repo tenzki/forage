@@ -25,9 +25,11 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 ## Run it
 
 ```bash
-npm install          # installs webview + agent sidecar dependencies
-npm run tauri dev    # launches the real desktop app
+npm install    # installs all workspace and agent-sidecar dependencies
+npm run dev    # starts PostgreSQL, applies migrations, then runs the API and Tauri app
 ```
+
+On a fresh development database, run `npm run server:bootstrap` once before connecting the desktop to the server. It prints the outline ID and initial credentials exactly once. To work only on the local-first desktop app without PostgreSQL or the API, use `npm run dev:desktop`.
 
 
 ## Built on Pi
@@ -38,5 +40,5 @@ Agent execution runs on [Pi](https://pi.dev): Forage embeds the Pi SDK in an iso
 
 - **Editor:** one TipTap document; bullets are ProseMirror `listItem`s, agent output is marked and styled separately, images are dedicated nodes.
 - **Identity:** each bullet gets a stable UUID via a ProseMirror plugin, so links and references survive reordering.
-- **Persistence:** the whole tree is written as a single JSON file (debounced, flushed on quit).
+- **Persistence:** SQLite stores immutable events, verified checkpoints, sync state, and the durable pending outbox. In optional server mode, PostgreSQL is authoritative while SQLite remains the offline cache.
 - **Agent:** work runs in an isolated Node.js sidecar embedding the Pi SDK, communicating over JSONL. Tools are bounded (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, plus validated custom HTTP tools). Context sent to the agent is capped by a fixed safety budget.

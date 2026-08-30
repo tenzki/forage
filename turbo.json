@@ -1,0 +1,31 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "env": [
+        "DATABASE_URL",
+        "FORAGE_INSTANCE_ID",
+        "FORAGE_ASSET_DIR",
+        "FORAGE_HOST",
+        "FORAGE_PORT",
+        "LOG_LEVEL"
+      ]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@forage/server#build": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "test": {
+      "cache": false
+    },
+    "typecheck": {
+      "cache": false
+    }
+  }
+}

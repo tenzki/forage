@@ -1,0 +1,160 @@
+import { z } from 'zod'
+
+const boundedId = z.string().trim().min(1).max(128)
+const revision = z.number().int().nonnegative()
+const positiveVersion = z.number().int().positive()
+
+const shortcutSchema = z.object({
+  id: boundedId,
+  kind: z.enum(['node', 'tag', 'search']),
+  nodeId: boundedId.optional(),
+  tag: z.string().trim().min(1).max(128).optional(),
+  query: z.string().trim().min(1).max(500).optional(),
+  label: z.string().trim().min(1).max(200).optional(),
+  scopeId: boundedId.nullable().optional(),
+}).strict()
+
+const stepBatchSchema = z.object({
+  steps: z.array(z.record(z.string(), z.unknown())).min(1).max(1_000),
+  inverseSteps: z.array(z.record(z.string(), z.unknown())).min(1).max(1_000),
+  beforeHash: z.string().regex(/^[a-f0-9]{64}$/),
+  afterHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict().refine(
+  ({ steps, inverseSteps }) => steps.length === inverseSteps.length,
+  { message: 'steps and inverseSteps must have equal length' },
+)
+
+const eventPayloadSchemas = {
+  'document.steps_applied': stepBatchSchema,
+  'document.undo_applied': stepBatchSchema.extend({
+    targetEventIds: z.array(boundedId).min(1).max(1_000),
+  }),
+  'document.redo_applied': stepBatchSchema.extend({
+    targetEventIds: z.array(boundedId).min(1).max(1_000),
+  }),
+  'document.schema_migrated': z.object({
+    fromVersion: positiveVersion,
+    toVersion: positiveVersion,
+    checkpointHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
+  'trash.entry_added': z.object({ entry: z.record(z.string(), z.unknown()) }).strict(),
+  'trash.entry_restored': z.object({ entryId: boundedId }).strict(),
+  'trash.entry_purged': z.object({ entryId: boundedId }).strict(),
+  'shortcut.created': z.object({ shortcut: shortcutSchema }).strict(),
+  'shortcut.updated': z.object({ shortcut: shortcutSchema }).strict(),
+  'shortcut.deleted': z.object({ shortcutId: boundedId }).strict(),
+  'shortcuts.reordered': z.object({ shortcutIds: z.array(boundedId).max(1_000) }).strict(),
+  'note.created': z.object({
+    noteId: boundedId,
+    parentId: boundedId,
+    text: z.string().min(1).max(100_000),
+    source: z.record(z.string(), z.string().max(2_000)).optional(),
+    clientCreatedAt: z.iso.datetime().optional(),
+  }).strict(),
+  'asset.reference_added': z.object({
+    assetId: z.string().regex(/^[a-f0-9]{64}$/),
+    alt: z.string().trim().min(1).max(500),
+  }).strict(),
+} as const
+
+export type OutlineEventType = keyof typeof eventPayloadSchemas
+
+type JsonRecord = Record<string, unknown>
+
+interface StepBatchPayload {
+  steps: JsonRecord[]
+  inverseSteps: JsonRecord[]
+  beforeHash: string
+  afterHash: string
+}
+
+export interface EventPayloadByType {
+  'document.steps_applied': StepBatchPayload
+  'document.undo_applied': StepBatchPayload & { targetEventIds: string[] }
+  'document.redo_applied': StepBatchPayload & { targetEventIds: string[] }
+  'document.schema_migrated': { fromVersion: number; toVersion: number; checkpointHash: string }
+  'trash.entry_added': { entry: JsonRecord }
+  'trash.entry_restored': { entryId: string }
+  'trash.entry_purged': { entryId: string }
+  'shortcut.created': { shortcut: JsonRecord & { id: string; kind: 'node' | 'tag' | 'search' } }
+  'shortcut.updated': { shortcut: JsonRecord & { id: string; kind: 'node' | 'tag' | 'search' } }
+  'shortcut.deleted': { shortcutId: string }
+  'shortcuts.reordered': { shortcutIds: string[] }
+  'note.created': {
+    noteId: string
+    parentId: string
+    text: string
+    source?: Record<string, string>
+    clientCreatedAt?: string
+  }
+  'asset.reference_added': { assetId: string; alt: string }
+}
+
+interface EventEnvelopeBase {
+  id: string
+  outlineId: string
+  actorId: string
+  deviceId: string
+  eventVersion: number
+  documentVersion: number
+  schemaEpoch: number
+  baseRevision: number
+  revision?: number
+  origin: 'desktop' | 'notes_api' | 'server' | 'migration'
+  occurredAt: string
+  changeGroupId?: string
+}
+
+export type EventEnvelope = {
+  [Type in OutlineEventType]: EventEnvelopeBase & {
+    type: Type
+    payload: EventPayloadByType[Type]
+  }
+}[OutlineEventType]
+
+const eventBaseSchema = z.object({
+  id: boundedId,
+  outlineId: boundedId,
+  actorId: boundedId,
+  deviceId: boundedId,
+  eventVersion: positiveVersion,
+  documentVersion: positiveVersion,
+  schemaEpoch: positiveVersion,
+  baseRevision: revision,
+  revision: revision.optional(),
+  origin: z.enum(['desktop', 'notes_api', 'server', 'migration']),
+  occurredAt: z.iso.datetime({ offset: true }),
+  changeGroupId: boundedId.optional(),
+}).strict()
+
+const eventVariants = Object.entries(eventPayloadSchemas).map(([type, payload]) =>
+  eventBaseSchema.extend({ type: z.literal(type), payload }),
+) as unknown as [z.ZodType, ...z.ZodType[]]
+
+export const eventEnvelopeSchema = z.union(eventVariants) as z.ZodType<EventEnvelope>
+
+export function parseEventEnvelope(value: unknown): EventEnvelope {
+  return eventEnvelopeSchema.parse(value)
+}
+
+export const commandEnvelopeSchema = z.object({
+  id: boundedId,
+  outlineId: boundedId,
+  actorId: boundedId,
+  deviceId: boundedId,
+  type: z.string().trim().min(1).max(128),
+  commandVersion: positiveVersion,
+  documentVersion: positiveVersion,
+  schemaEpoch: positiveVersion,
+  baseRevision: revision,
+  origin: z.enum(['desktop', 'notes_api', 'server', 'migration']),
+  issuedAt: z.iso.datetime({ offset: true }),
+  idempotencyKey: z.string().trim().min(1).max(255).optional(),
+  payload: z.record(z.string(), z.unknown()),
+}).strict()
+
+export type CommandEnvelope = z.infer<typeof commandEnvelopeSchema>
+
+export function parseCommandEnvelope(value: unknown): CommandEnvelope {
+  return commandEnvelopeSchema.parse(value)
+}

@@ -1,0 +1,50 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://auth.openai.com/**" },
+        { "url": "https://chatgpt.com/**" },
+        { "url": "https://api.openai.com/**" },
+        { "url": "https://html.duckduckgo.com/**" },
+        { "url": "https://r.jina.ai/**" },
+        { "url": "https://api.github.com/**" },
+        { "url": "https://api.open-meteo.com/**" }
+      ]
+    },
+    "opener:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "node-sidecar",
+          "cmd": "node",
+          "sidecar": false,
+          "args": [
+            { "validator": "^.+node_modules/tsx/dist/cli\\.mjs$" },
+            { "validator": "^.+sidecar/index\\.ts$" }
+          ]
+        },
+        {
+          "name": "node-version",
+          "cmd": "node",
+          "sidecar": false,
+          "args": ["--version"]
+        },
+        {
+          "name": "codex-version",
+          "cmd": "codex",
+          "sidecar": false,
+          "args": ["--version"]
+        }
+      ]
+    },
+    "shell:allow-stdin-write",
+    "shell:allow-kill"
+  ]
+}

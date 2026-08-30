@@ -1,0 +1,30 @@
+{
+  "name": "@forage/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "npm run typecheck",
+    "db:migrate": "tsx src/migrate.ts",
+    "bootstrap": "tsx src/bootstrap.ts",
+    "tokens": "tsx src/tokens.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@forage/domain": "0.1.0",
+    "@forage/document": "0.1.0",
+    "@forage/protocol": "0.1.0",
+    "fastify": "^5.6.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.1"
+  }
+}

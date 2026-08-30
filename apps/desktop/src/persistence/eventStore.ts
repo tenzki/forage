@@ -1,0 +1,138 @@
+import { invoke } from '@tauri-apps/api/core'
+import {
+  parseEventEnvelope,
+  type EventEnvelope,
+  type OutlineState,
+} from '@forage/domain'
+
+export interface StoredEventRecord {
+  localSequence: number
+  id: string
+  outlineId: string
+  baseRevision: number
+  serverRevision: number | null
+  envelope: unknown
+  status: 'pending' | 'accepted'
+  supersededBy: string | null
+  createdAt: string
+}
+
+export interface StoredCheckpoint {
+  id: string
+  outlineId: string
+  documentVersion: number
+  schemaEpoch: number
+  localSequence: number
+  serverRevision: number
+  stateJson: string
+  integrityHash: string
+  createdAt: string
+}
+
+export interface ReplayInput {
+  checkpoint: StoredCheckpoint
+  state: OutlineState
+  events: EventEnvelope[]
+}
+
+export interface LocalIdentity {
+  outlineId: string
+  actorId: string
+  deviceId: string
+}
+
+export interface ServerConnectionInfo {
+  origin: string
+  instanceId: string
+  outlineId: string
+}
+
+export class NativeEventRepository {
+  async identity(): Promise<LocalIdentity> {
+    return invoke('event_store_identity')
+  }
+
+  async serverConnection(): Promise<ServerConnectionInfo | null> {
+    return invoke('server_connection_info')
+  }
+
+  async append(eventValue: unknown): Promise<number> {
+    const event = parseEventEnvelope(eventValue)
+    return invoke<number>('event_store_append', {
+      event: {
+        id: event.id,
+        outlineId: event.outlineId,
+        baseRevision: event.baseRevision,
+        serverRevision: event.revision ?? null,
+        envelope: event,
+        status: event.revision === undefined ? 'pending' : 'accepted',
+        supersededBy: null,
+        createdAt: event.occurredAt,
+      },
+    })
+  }
+
+  async eventsAfter(outlineId: string, localSequence: number): Promise<StoredEventRecord[]> {
+    return invoke('event_store_events_after', { outlineId, localSequence })
+  }
+
+  async loadReplayInput(outlineId: string): Promise<ReplayInput | null> {
+    const checkpoint = await invoke<StoredCheckpoint | null>('event_store_latest_checkpoint', {
+      outlineId,
+      documentVersion: 1,
+      schemaEpoch: 1,
+    })
+    if (!checkpoint) return null
+    const records = await this.eventsAfter(outlineId, checkpoint.localSequence)
+    let state: OutlineState
+    try {
+      state = JSON.parse(checkpoint.stateJson) as OutlineState
+    } catch {
+      throw new Error('The local outline checkpoint contains invalid JSON.')
+    }
+    return {
+      checkpoint,
+      state,
+      events: records
+        .filter((record) => !record.supersededBy)
+        .map((record) => parseEventEnvelope(record.envelope)),
+    }
+  }
+
+  async saveCheckpoint(checkpoint: StoredCheckpoint): Promise<void> {
+    await invoke('event_store_save_checkpoint', { checkpoint })
+  }
+
+  async pending(outlineId: string, limit = 100): Promise<StoredEventRecord[]> {
+    return invoke('event_store_pending', { outlineId, limit })
+  }
+
+  async acknowledge(outlineId: string, acknowledgements: Array<[string, number]>): Promise<void> {
+    await invoke('event_store_acknowledge', { outlineId, acknowledgements })
+  }
+
+  async supersede(eventId: string, replacementId: string): Promise<void> {
+    await invoke('event_store_supersede', { eventId, replacementId })
+  }
+
+  async storageMode(): Promise<'local' | 'server'> {
+    return invoke('event_store_storage_mode')
+  }
+
+  async syncState(outlineId: string): Promise<{
+    outlineId: string
+    lastAckedRevision: number
+    lastPulledRevision: number
+    serverInstanceId: string | null
+  }> {
+    return invoke('event_store_sync_state', { outlineId })
+  }
+
+  async recordPulled(outlineId: string, revision: number): Promise<void> {
+    await invoke('event_store_record_pulled', { outlineId, revision })
+  }
+
+  async setStorageMode(mode: 'local' | 'server'): Promise<void> {
+    await invoke('event_store_set_storage_mode', { mode })
+  }
+}
