@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-14
+- **Amended:** 2026-08-31
 - **Deciders:** AI Chat project team
 - **Supersedes:** None (replaces an undocumented per-node-editor model)
 - **Superseded by:** None
@@ -10,7 +11,7 @@
 
 The outline must support arbitrary nesting, keyboard restructuring, drag reordering, rich text, and coherent undo/redo. The earlier implementation split bullets across individual editors and mirrored structural state through Zustand and a Rust/SQLite undo system. A single user action could cross several histories and persistence boundaries, producing unreliable undo behavior.
 
-ProseMirror already models nested documents and supplies transaction-based history. TipTap exposes that model to React.
+ProseMirror already models nested documents and transaction mappings. TipTap exposes that model to React. Forage's event store now also requires undo and redo to survive persistence and synchronization, so the editor's ephemeral native history cannot be the user-facing authority.
 
 ## Decision Drivers
 
@@ -28,15 +29,15 @@ ProseMirror already models nested documents and supplies transaction-based histo
 
 ## Decision
 
-We will **represent the complete outline as one TipTap/ProseMirror document and use ProseMirror transactions and native history for editing** because **one transactional model keeps content, hierarchy, selection, and undo consistent**.
+We will **represent the complete outline as one TipTap/ProseMirror document and use ProseMirror transactions plus durable compensating events for editing and undo** because **one document model keeps content, hierarchy, selection, and undo consistent across sessions and synchronized devices**.
 
-The document is the source of truth for outline content and structure. Zustand may hold settings, but it must not become a second outline store. The editor remains mounted while the settings view is shown so its live document and history are preserved.
+The document is the source of truth for outline content and structure. Zustand may hold settings, but it must not become a second outline store. ProseMirror's native undo plugin is disabled; Mod-Z and redo dispatch inverse or forward steps recorded in the durable event log. The in-memory undo index is derived from those events and is cleared or rebuilt at migration, remote, and other unsafe mapping boundaries. The editor remains mounted while the settings view is shown so its live document and selection are preserved.
 
 ## Consequences
 
 ### Positive
 
-- Text and structural changes share one undo history.
+- Text and structural changes share one durable undo history.
 - Nesting is encoded directly in document structure.
 - Search, zoom, collapse, and reordering can inspect one document.
 - Persistence can serialize the editor document without model conversion.
@@ -46,7 +47,7 @@ The document is the source of truth for outline content and structure. Zustand m
 - Operations often require ProseMirror position and transaction knowledge.
 - Traversing the entire document may become expensive for very large outlines.
 - UI state implemented as decorations must stay compatible with document transactions.
-- Unmounting or recreating the editor discards in-memory history.
+- Selection and other ephemeral editor state are lost if the editor is recreated; durable undo can be rebuilt from stored local events.
 
 ### Risks and Mitigations
 
@@ -63,7 +64,7 @@ The document is the source of truth for outline content and structure. Zustand m
 
 **Advantages**
 
-- Native transactional history and selection mapping.
+- Native transactions and selection mapping, with durable event-backed undo.
 - Direct support for nested list structures and rich text.
 - No synchronization layer between bullet editors.
 
@@ -98,9 +99,9 @@ The document is the source of truth for outline content and structure. Zustand m
 
 ## Implementation Notes
 
-`src/editor/OutlinerEditor.tsx` mounts one editor with StarterKit and project extensions. Structural helpers in `src/editor/outlineModel.ts` must dispatch transactions against that editor. `src/App.tsx` keeps the editor mounted across view changes and serializes `editor.getJSON()` on updates.
+`src/editor/OutlinerEditor.tsx` mounts one editor with StarterKit's native undo/redo disabled and project extensions. Structural helpers in `src/editor/outlineModel.ts` must dispatch transactions against that editor. `src/App.tsx` keeps the editor mounted across view changes, captures transactions as events, and maintains the derived durable undo index.
 
-Do not reintroduce a per-node editor, an external outline source of truth, or a separate undo stack without superseding this ADR.
+Do not reintroduce a per-node editor, an external outline source of truth, or a competing undo authority without superseding this ADR. A transient history index derived from the durable event log is part of this decision, not a second source of truth.
 
 ## Validation
 
