@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  CalendarDays,
   Circle,
   GripVertical,
   Hash,
   Home,
+  Inbox,
+  ListTodo,
   Plus,
   Search as SearchIcon,
   Settings as SettingsIcon,
   Trash2,
   X,
 } from 'lucide-react'
+import { findSystemNode } from '@forage/document'
 import type { Editor } from '@tiptap/react'
-import { collectBullets, selectBullet, type BulletEntry } from '../../editor/outlineModel'
+import { collectBullets, focusFirstChildOrCreate, selectBullet, type BulletEntry } from '../../editor/outlineModel'
 import {
+  getOutlinerUiState,
   OUTLINER_OPEN_SEARCH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   setZoom,
@@ -20,17 +25,21 @@ import {
 } from '../../editor/outlinerUi'
 import { collectTags, OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut } from '../../types/tree'
+import { newNodeId } from '../../types/tree'
 
 interface OutlinerSidebarProps {
   editor: Editor | null
   shortcuts: OutlineShortcut[]
   collapsed?: boolean
   trashCount?: number
-  activeView?: 'outliner' | 'settings' | 'trash'
+  activeView?: 'outliner' | 'settings' | 'trash' | 'tasks'
   onChange: (shortcuts: OutlineShortcut[]) => void
   onOpenOutline?: () => void
+  onOpenInbox?: () => void
+  onOpenDailyNotes?: () => void
   onOpenSettings?: () => void
   onOpenTrash?: () => void
+  onOpenTasks?: () => void
 }
 
 interface ShortcutDragGhost {
@@ -110,8 +119,11 @@ export function OutlinerSidebar({
   activeView = 'outliner',
   onChange,
   onOpenOutline = () => undefined,
+  onOpenInbox,
+  onOpenDailyNotes = () => undefined,
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
+  onOpenTasks = () => undefined,
 }: OutlinerSidebarProps) {
   const [, setRevision] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -136,6 +148,15 @@ export function OutlinerSidebar({
     [entries],
   )
   const tags = editor ? collectTags(editor.state.doc) : []
+  const taskCount = entries.filter((entry) => entry.bulletKind === 'todo' && !entry.completed).length
+  const zoomId = editor ? getOutlinerUiState(editor).zoomId : null
+  const zoomEntry = zoomId ? entriesById.get(zoomId) : null
+  const zoomPath = zoomEntry ? [zoomEntry.id, ...zoomEntry.ancestorIds] : []
+  const inboxId = editor ? findSystemNode(editor.state.doc, 'inbox')?.id : undefined
+  const dailyNotesId = editor ? findSystemNode(editor.state.doc, 'daily-notes')?.id : undefined
+  const homeActive = activeView === 'outliner' && zoomId === null
+  const inboxActive = activeView === 'outliner' && Boolean(inboxId && zoomPath.includes(inboxId))
+  const dailyNotesActive = activeView === 'outliner' && Boolean(dailyNotesId && zoomPath.includes(dailyNotesId))
 
   function add(shortcut: OutlineShortcut) {
     if (shortcuts.some((item) => shortcutKey(item) === shortcutKey(shortcut))) return
@@ -177,6 +198,23 @@ export function OutlinerSidebar({
       setZoom(editor, shortcut.target)
       selectBullet(editor, shortcut.target)
     }
+  }
+
+  function openInbox() {
+    if (onOpenInbox) {
+      onOpenInbox()
+      return
+    }
+    if (!editor) return
+    const inbox = findSystemNode(editor.state.doc, 'inbox')
+    if (!inbox) return
+    onOpenOutline()
+    setZoom(editor, inbox.id)
+    focusFirstChildOrCreate(editor, inbox.id, newNodeId)
+  }
+
+  function openDailyNotes() {
+    onOpenDailyNotes()
   }
 
   function startShortcutDrag(event: React.PointerEvent, sourceIndex: number, label: string) {
@@ -239,14 +277,45 @@ export function OutlinerSidebar({
     <aside ref={sidebarRef} className={`outline-sidebar${collapsed ? ' is-collapsed' : ''}${dragOver ? ' is-drop-target' : ''}`} aria-label="Outline sidebar">
       <div className="sidebar-top-row">
         <button
-          className={`sidebar-home${activeView === 'outliner' ? ' is-active' : ''}`}
-          aria-current={activeView === 'outliner' ? 'page' : undefined}
+          className={`sidebar-home${homeActive ? ' is-active' : ''}`}
+          aria-current={homeActive ? 'page' : undefined}
           onClick={() => { onOpenOutline(); if (editor) setZoom(editor, null) }}
           title="Home"
         >
           <Home className="sidebar-primary-icon" aria-hidden="true" /><span className="sidebar-primary-label">Home</span>
         </button>
       </div>
+      <nav className="sidebar-system" aria-label="Built-in destinations">
+        <button
+          className={`sidebar-inbox${inboxActive ? ' is-active' : ''}`}
+          aria-current={inboxActive ? 'page' : undefined}
+          onClick={openInbox}
+          title="Inbox"
+        >
+          <Inbox className="sidebar-primary-icon" aria-hidden="true" />
+          <span className="sidebar-primary-label">Inbox</span>
+        </button>
+        <button
+          className={`sidebar-daily-notes${dailyNotesActive ? ' is-active' : ''}`}
+          aria-current={dailyNotesActive ? 'page' : undefined}
+          onClick={openDailyNotes}
+          title="Daily Notes"
+        >
+          <CalendarDays className="sidebar-primary-icon" aria-hidden="true" />
+          <span className="sidebar-primary-label">Daily Notes</span>
+        </button>
+        <button
+          className={`sidebar-tasks${activeView === 'tasks' ? ' is-active' : ''}`}
+          aria-current={activeView === 'tasks' ? 'page' : undefined}
+          onClick={onOpenTasks}
+          title="Tasks"
+          aria-label="Tasks"
+        >
+          <ListTodo className="sidebar-primary-icon" aria-hidden="true" />
+          <span className="sidebar-primary-label">Tasks</span>
+          <span className="sidebar-tasks-count" aria-hidden="true">{taskCount}</span>
+        </button>
+      </nav>
       {!collapsed && (
         <div className="sidebar-shortcut-content">
           <div className="sidebar-section-heading">

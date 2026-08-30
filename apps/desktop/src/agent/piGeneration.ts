@@ -96,6 +96,12 @@ export async function generateWithPi(
       if (write) outlineWrites.push(write)
     }
     if (event.type === 'agent_settled' && !outline) {
+      const finalText = typeof event.text === 'string' ? event.text.trim() : ''
+      if (!text && finalText) {
+        beginOutput()
+        text = finalText
+        options.onDelta(text)
+      }
       beginOutput()
       options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Response ready', durationMs: Date.now() - startedAt })
     }

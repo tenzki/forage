@@ -10,6 +10,7 @@ import {
   type OutlineState,
 } from '@forage/domain'
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
+import { createOutlineSchema, findSystemNode, repairSystemNodes } from '@forage/document'
 import {
   RepositoryError,
   referencedAssetIds,
@@ -51,18 +52,25 @@ export class PostgresServerRepository implements ServerRepository {
       const ownerId = `owner_${randomUUID()}`
       const outlineId = `outline_${randomUUID()}`
       const inboxId = `note_${randomUUID()}`
+      const dailyNotesId = `note_${randomUUID()}`
+      const editableId = `note_${randomUUID()}`
       const now = new Date().toISOString()
-      const state = createInitialOutlineState({
+      const systemIds = [inboxId, dailyNotesId]
+      const repaired = repairSystemNodes({
         type: 'doc',
         content: [{
           type: 'bulletList',
           content: [{
             type: 'listItem',
-            attrs: { nodeId: inboxId, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false },
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+            attrs: {
+              nodeId: editableId, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false,
+              systemRole: null, dailyDate: null,
+            },
+            content: [{ type: 'paragraph' }],
           }],
         }],
-      })
+      }, () => systemIds.shift()!)
+      const state = createInitialOutlineState(repaired.doc)
       const checkpointId = `checkpoint_${randomUUID()}`
       const integrityHash = await sha256Hex(canonicalJson(state))
 
@@ -73,8 +81,10 @@ export class PostgresServerRepository implements ServerRepository {
       )
       await client.query(
         `INSERT INTO note_projections(outline_id, id, parent_id, text_content, created_at)
-         VALUES ($1, $2, NULL, 'Inbox', $3)`,
-        [outlineId, inboxId, now],
+         VALUES ($1, $2, NULL, 'Inbox', $5),
+                ($1, $3, NULL, 'Daily Notes', $5),
+                ($1, $4, NULL, '', $5)`,
+        [outlineId, inboxId, dailyNotesId, editableId, now],
       )
       await client.query(
         `INSERT INTO outline_projections(outline_id, revision, state) VALUES ($1, 0, $2)`,
@@ -138,8 +148,8 @@ export class PostgresServerRepository implements ServerRepository {
   async createNote(principal: Principal, key: string, input: NotesCreateRequest): Promise<CreateNoteResult> {
     return this.transaction(async (client) => {
       await this.recheckCredential(client, principal)
-      const outline = await client.query<{ current_revision: string; api_inbox_id: string }>(
-        'SELECT current_revision, api_inbox_id FROM outlines WHERE id = $1 FOR UPDATE', [principal.outlineId],
+      const outline = await client.query<{ current_revision: string }>(
+        'SELECT current_revision FROM outlines WHERE id = $1 FOR UPDATE', [principal.outlineId],
       )
       const row = outline.rows[0]
       if (!row) throw hiddenResourceError()
@@ -156,7 +166,17 @@ export class PostgresServerRepository implements ServerRepository {
         return { response: previous.rows[0].response, replayed: true }
       }
 
-      const parentId = input.parentId ?? row.api_inbox_id
+      let parentId = input.parentId
+      if (!parentId) {
+        const projection = await client.query<{ state: OutlineState }>(
+          'SELECT state FROM outline_projections WHERE outline_id = $1', [principal.outlineId],
+        )
+        const inbox = projection.rows[0]
+          ? findSystemNode(createOutlineSchema().nodeFromJSON(projection.rows[0].state.doc), 'inbox')
+          : null
+        if (!inbox) throw new RepositoryError('conflict', 'The canonical Inbox is unavailable.')
+        parentId = inbox.id
+      }
       const parent = await client.query(
         `SELECT id FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false`,
         [principal.outlineId, parentId],

@@ -22,6 +22,7 @@ export function rebuildPersistentHistory(events: readonly EventEnvelope[]): Pers
   for (const event of events) {
     if (event.type === 'document.steps_applied') {
       const groupId = event.changeGroupId ?? event.id
+      if (groupId.startsWith('system:')) continue
       const current = state.undo[state.undo.length - 1]
       if (current?.id === groupId) current.events.push(event)
       else state.undo.push({ id: groupId, events: [event] })

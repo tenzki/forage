@@ -9,6 +9,7 @@ import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
 import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
 import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
 import { TrashPanel } from './components/Outliner/TrashPanel'
+import { TasksPanel } from './components/Outliner/TasksPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
 import { ActivitySidebar, type ActivityCall, type ActivityEntry } from './components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './agent/activity'
@@ -30,6 +31,7 @@ import { DesktopSyncEngine, NativeSyncTransport, type SyncState } from './sync/s
 import { EMPTY_DOC, normalizeOutlinerDoc } from './editor/emptyDoc'
 import {
   createInitialOutlineState,
+  buildSystemNodeRepairEvent,
   replayOutlineEvents,
   sha256Hex,
   type EventEnvelope,
@@ -37,8 +39,18 @@ import {
 } from '@forage/domain'
 import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
+import { newNodeId } from './types/tree'
+import {
+  SYSTEM_MAINTENANCE_META,
+  SYSTEM_NODE_REJECTION_EVENT,
+  SYSTEM_NODE_REJECTION_MESSAGE,
+} from './editor/systemNodeGuards'
+import { findSystemNode } from '@forage/document'
+import { focusFirstChildOrCreate } from './editor/outlineModel'
+import { setZoom } from './editor/outlinerUi'
+import { openOrCreateDailyNote } from './editor/dailyNotes'
 
-type View = 'outliner' | 'settings' | 'trash'
+type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 type StorageBackend = { kind: 'local' } | { kind: 'server'; origin: string }
 
 function errorMessage(error: unknown): string {
@@ -167,6 +179,16 @@ export default function App() {
           createdAt: new Date().toISOString(),
         })
       }
+      const systemNodeMigration = await buildSystemNodeRepairEvent(state, {
+        ...activeIdentity,
+        baseRevision: serverRevision.current,
+        nextEventId: () => crypto.randomUUID(),
+        nextNodeId: () => crypto.randomUUID(),
+      })
+      if (systemNodeMigration) {
+        localSequence.current = await repository.current.append(systemNodeMigration.event)
+        state = systemNodeMigration.state
+      }
       const doc = state.doc as JsonValue
       setInitialContent(doc)
       liveDoc.current = doc
@@ -202,7 +224,16 @@ export default function App() {
         const projected = replayOutlineEvents(replay.state, replay.events)
         const nextDoc = projected.doc as JsonValue
         if (JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)) {
-          editor.commands.setContent(nextDoc as object, { emitUpdate: false })
+          const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
+          const transaction = editor.state.tr
+            .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
+            .setMeta('forageRemote', true)
+            .setMeta('preventUpdate', true)
+            .setMeta('addToHistory', false)
+          editor.view.dispatch(transaction)
+          if (!editor.state.doc.eq(projectedDoc)) {
+            throw new Error('The synchronized outline projection could not be applied.')
+          }
           liveDoc.current = nextDoc
         }
         setTrash(projected.trash as unknown as TrashEntry[])
@@ -214,6 +245,15 @@ export default function App() {
     const timer = window.setInterval(() => void synchronize(), 15_000)
     return () => { disposed = true; window.clearInterval(timer) }
   }, [editor])
+
+  useEffect(() => {
+    const handleSystemNodeRejection = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      setViewError(detail?.message ?? SYSTEM_NODE_REJECTION_MESSAGE)
+    }
+    window.addEventListener(SYSTEM_NODE_REJECTION_EVENT, handleSystemNodeRejection)
+    return () => window.removeEventListener(SYSTEM_NODE_REJECTION_EVENT, handleSystemNodeRejection)
+  }, [])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -276,14 +316,19 @@ export default function App() {
   ) => {
     const currentIdentity = identity.current
     if (!currentIdentity) return
+    const systemMaintenance = transaction.getMeta(SYSTEM_MAINTENANCE_META) === true
     const transactionOrigin = String(transaction.getMeta('forageOrigin') ?? 'desktop')
     const compensation = transaction.getMeta('forageCompensation')
     const now = Date.now()
     const prior = activeChangeGroup.current
     const canReuseGroup = !compensation && prior?.origin === transactionOrigin
       && now - prior.at <= (transactionOrigin === 'agent' ? 250 : 500)
-    const changeGroupId = canReuseGroup ? prior.id : crypto.randomUUID()
-    activeChangeGroup.current = compensation ? null : { id: changeGroupId, at: now, origin: transactionOrigin }
+    const changeGroupId = systemMaintenance
+      ? `system:${crypto.randomUUID()}`
+      : canReuseGroup ? prior.id : crypto.randomUUID()
+    activeChangeGroup.current = compensation || systemMaintenance
+      ? null
+      : { id: changeGroupId, at: now, origin: transactionOrigin }
     void buildDocumentEvent(transaction, appendedTransactions, {
       ...currentIdentity,
       baseRevision: serverRevision.current,
@@ -301,7 +346,7 @@ export default function App() {
         }
         return
       }
-      recordDocumentChange(persistentHistory.current, event)
+      if (!systemMaintenance) recordDocumentChange(persistentHistory.current, event)
       appendEvent(event)
       if (event.type === 'document.steps_applied') {
         for (const reference of createAssetReferenceEvents(event, () => crypto.randomUUID())) appendEvent(reference)
@@ -414,6 +459,31 @@ export default function App() {
     ? `server: ${storageBackend.origin}`
     : 'local'
 
+  function openInbox() {
+    if (!editor) return
+    const inbox = findSystemNode(editor.state.doc, 'inbox')
+    if (!inbox) return
+    setViewError(null)
+    setView('outliner')
+    setZoom(editor, inbox.id)
+    focusFirstChildOrCreate(editor, inbox.id, newNodeId)
+  }
+
+  function openDailyNotes() {
+    setViewError(null)
+    setView('outliner')
+    if (!editor) return
+    openOrCreateDailyNote(editor, {
+      nextId: newNodeId,
+      locale: typeof navigator === 'undefined' ? undefined : navigator.language,
+    })
+  }
+
+  function openTasks() {
+    setViewError(null)
+    setView('tasks')
+  }
+
   return (
     <div id="app">
       {saveError && (
@@ -450,8 +520,11 @@ export default function App() {
           activeView={view}
           onChange={handleShortcutsChange}
           onOpenOutline={() => { setViewError(null); setView('outliner') }}
+          onOpenInbox={openInbox}
+          onOpenDailyNotes={openDailyNotes}
           onOpenSettings={() => { setViewError(null); setView('settings') }}
           onOpenTrash={() => { setViewError(null); setView('trash') }}
+          onOpenTasks={openTasks}
         />
         <section className="outline-workspace">
           <div className="outline-editor-view" hidden={view !== 'outliner'}>
@@ -467,6 +540,9 @@ export default function App() {
               onToggleActivitySidebar={() => setActivitySidebarCollapsed((collapsed) => !collapsed)}
               onOpenSettings={() => { setViewError(null); setView('settings') }}
               onOpenTrash={() => { setViewError(null); setView('trash') }}
+              onOpenInbox={openInbox}
+              onOpenDailyNotes={openDailyNotes}
+              onOpenTasks={openTasks}
             />
             <OutlinerEditor
               initialContent={initialContent}
@@ -494,6 +570,9 @@ export default function App() {
               onError={setViewError}
               onClose={() => setView('outliner')}
             />
+          )}
+          {view === 'tasks' && editor && (
+            <TasksPanel editor={editor} onClose={() => setView('outliner')} />
           )}
         </section>
         <ActivitySidebar

@@ -117,4 +117,58 @@ describe('deterministic outline replay', () => {
     expect(JSON.stringify(state.doc)).toContain('"nodeId":"external-note"')
     expect(parentId).toBe('nested-list')
   })
+
+  it('replays edits written after the editor coalesced legacy root lists', () => {
+    const schema = createOutlineSchema()
+    const item = (id: string, text: string, role: 'inbox' | 'daily-notes') => ({
+      type: 'listItem',
+      attrs: {
+        nodeId: id, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false,
+        systemRole: role, dailyDate: null,
+      },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+    })
+    const inbox = item('inbox', 'Inbox', 'inbox')
+    const daily = item('daily', 'Daily Notes', 'daily-notes')
+    const initial = createInitialOutlineState({
+      type: 'doc',
+      content: [
+        { type: 'bulletList', content: [inbox] },
+        { type: 'bulletList', content: [daily] },
+      ],
+    })
+    const legacyDocument = schema.nodeFromJSON(initial.doc)
+    const migrationTransaction = EditorState.create({ schema, doc: legacyDocument }).tr.insertText('!', 8)
+    const migration = {
+      ...envelope('document.steps_applied', {
+        ...captureStepBatch(legacyDocument, migrationTransaction.steps),
+        beforeHash: '0'.repeat(64),
+        afterHash: '1'.repeat(64),
+      }, 0),
+      origin: 'migration' as const,
+    }
+    const normalizedDocument = schema.nodeFromJSON({
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [
+        item('inbox', 'Inbox!', 'inbox'),
+        daily,
+      ] }],
+    })
+    let dailyPos = -1
+    normalizedDocument.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeId === 'daily') dailyPos = pos
+    })
+    const editTransaction = EditorState.create({ schema, doc: normalizedDocument })
+      .tr.insertText('!', dailyPos + 2 + 'Daily Notes'.length)
+    const edit = envelope('document.steps_applied', {
+      ...captureStepBatch(normalizedDocument, editTransaction.steps),
+      beforeHash: '1'.repeat(64),
+      afterHash: '2'.repeat(64),
+    }, 1)
+
+    const replayed = replayOutlineEvents(initial, [migration, edit])
+
+    expect(schema.nodeFromJSON(replayed.doc).eq(editTransaction.doc)).toBe(true)
+    expect((replayed.doc.content as unknown[])).toHaveLength(1)
+  })
 })

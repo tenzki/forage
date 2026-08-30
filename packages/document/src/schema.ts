@@ -3,6 +3,17 @@ import BulletList from '@tiptap/extension-bullet-list'
 import StarterKit from '@tiptap/starter-kit'
 import type { Schema } from '@tiptap/pm/model'
 
+const SYSTEM_ROLES = new Set(['inbox', 'daily-notes', 'daily-note'])
+const DAILY_DATE = /^\d{4}-\d{2}-\d{2}$/u
+
+function parseSystemRole(value: string | null): string | null {
+  return value && SYSTEM_ROLES.has(value) ? value : null
+}
+
+function parseDailyDate(value: string | null): string | null {
+  return value && DAILY_DATE.test(value) ? value : null
+}
+
 export const StableBulletAttributes = Extension.create({
   name: 'stableBulletAttributes',
 
@@ -34,6 +45,20 @@ export const StableBulletAttributes = Extension.create({
           default: false,
           parseHTML: (element) => element.getAttribute('data-completed') === 'true',
           renderHTML: (attrs) => attrs.completed ? { 'data-completed': 'true' } : {},
+        },
+        systemRole: {
+          default: null,
+          parseHTML: (element) => parseSystemRole(element.getAttribute('data-system-role')),
+          renderHTML: (attrs) => parseSystemRole(attrs.systemRole)
+            ? { 'data-system-role': attrs.systemRole }
+            : {},
+        },
+        dailyDate: {
+          default: null,
+          parseHTML: (element) => parseDailyDate(element.getAttribute('data-daily-date')),
+          renderHTML: (attrs) => parseDailyDate(attrs.dailyDate)
+            ? { 'data-daily-date': attrs.dailyDate }
+            : {},
         },
       },
     }]

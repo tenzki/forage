@@ -6,9 +6,10 @@
 // everything above them (persistence, settings store, App) is the real code.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
+import { formatDailyDate, localCalendarDate } from './editor/dailyNotes'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
@@ -76,6 +77,105 @@ describe('App view switching', () => {
 
     expect(screen.queryByRole('status', { name: 'Storage backend: local' })).not.toBeNull()
     expect(container.querySelector('.storage-backend-widget')?.textContent).toBe('local')
+  })
+
+  it('opens the permanent Tasks destination without storing it as a shortcut', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+
+    expect(screen.getByRole('button', { name: 'Inbox' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Daily Notes' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeTruthy()
+    expect(screen.getByText('No tasks in the outline.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Back to outline' }))
+    expect(screen.queryByRole('heading', { name: 'Tasks' })).toBeNull()
+  })
+
+  it('opens today in the outline and changes dates from the picker beside its title', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const todayLabel = formatDailyDate(localCalendarDate(new Date()), navigator.language)
+
+    expect(container.querySelector('[data-system-role="daily-note"]')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Daily Notes' }))
+    const today = container.querySelector('[data-system-role="daily-note"]')
+    expect(today).toBeTruthy()
+    expect(today?.querySelector(':scope > p')?.textContent).toBe(todayLabel)
+    const picker = screen.getByLabelText(`Change daily note date for ${todayLabel}`)
+    expect(picker.closest('label')?.previousSibling?.textContent).toBe(todayLabel)
+
+    fireEvent.change(picker, { target: { value: '2000-01-02' } })
+
+    expect(container.querySelector('[data-system-role="daily-note"][data-daily-date="2000-01-02"]')).toBeTruthy()
+    expect(container.querySelector('[data-system-role="daily-note"][data-daily-date="2000-01-02"]')?.classList)
+      .toContain('zoom-root')
+
+    await user.click(container.querySelector<HTMLButtonElement>('.sidebar-home')!)
+
+    expect(container.querySelector('[data-system-role="daily-note"][data-daily-date="2000-01-02"]')).toBeTruthy()
+    expect(screen.queryAllByLabelText(/Change daily note date for/)).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Daily Notes' }))
+
+    expect(screen.getByLabelText(`Change daily note date for ${todayLabel}`)).toBeTruthy()
+  })
+
+  it('opens the command menu visibly from a secondary view', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Tasks' }))
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+
+    expect(screen.getByRole('dialog', { name: 'Search outline' })).toBeTruthy()
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'daily notes')
+    await user.keyboard('{Enter}')
+    expect(screen.getByLabelText(/Change daily note date for/)).toBeTruthy()
+  })
+
+  it('repairs a legacy checkpoint through one durable migration event before mounting the editor', async () => {
+    const legacyState = {
+      schemaEpoch: 1,
+      trash: [],
+      shortcuts: [],
+      doc: {
+        type: 'doc', content: [{ type: 'bulletList', content: [{
+          type: 'listItem',
+          attrs: { nodeId: 'legacy', nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Legacy content' }] }],
+        }] }],
+      },
+    }
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'event_store_storage_mode') return 'local'
+      if (command === 'event_store_identity') {
+        return { outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1' }
+      }
+      if (command === 'event_store_latest_checkpoint') {
+        return {
+          id: 'checkpoint-legacy', outlineId: 'outline-1', documentVersion: 1,
+          schemaEpoch: 1, localSequence: 5, serverRevision: 0,
+          stateJson: JSON.stringify(legacyState), integrityHash: 'a'.repeat(64),
+          createdAt: '2026-08-30T12:00:00.000Z',
+        }
+      }
+      if (command === 'event_store_events_after') return []
+      if (command === 'event_store_append') return 6
+      return undefined
+    })
+
+    const { container } = await renderApp()
+
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_append',
+      expect.objectContaining({ event: expect.objectContaining({
+        envelope: expect.objectContaining({ origin: 'migration', type: 'document.steps_applied' }),
+      }) }),
+    ))
+    expect(container.querySelector('[data-system-role="inbox"]')).toBeTruthy()
+    expect(container.querySelector('[data-system-role="daily-notes"]')).toBeTruthy()
+    expect(container.textContent).toContain('Legacy content')
   })
 
   it('shows the configured URL in the backend widget for server storage', async () => {
@@ -270,11 +370,13 @@ describe('App view switching', () => {
     await user.click(editor)
     await user.keyboard('Parent{Enter}Child{Tab}')
     const rootList = editor.querySelector(':scope > ul')
-    expect(rootList?.children).toHaveLength(1)
-    expect(rootList?.querySelector('ul li')?.textContent).toContain('Child')
+    const ordinaryRoots = () => Array.from(rootList?.children ?? [])
+      .filter((child) => !(child as HTMLElement).dataset.systemRole)
+    expect(ordinaryRoots()).toHaveLength(1)
+    expect(ordinaryRoots()[0]?.querySelector('ul li')?.textContent).toContain('Child')
 
     await user.keyboard('{Shift>}{Tab}{/Shift}')
-    expect(rootList?.children).toHaveLength(2)
+    expect(ordinaryRoots()).toHaveLength(2)
   })
 
   it('runs a todo slash command after Tab completion', async () => {

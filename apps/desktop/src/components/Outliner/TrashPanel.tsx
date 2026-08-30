@@ -31,7 +31,7 @@ export function TrashPanel({ editor, entries, onClose, onChange, onRestore, onPu
 
   function restore(entry: TrashEntry) {
     if (!restoreBullet(editor, entry)) {
-      onError('The branch could not be restored because its ID is already in use.')
+      onError('The branch could not be restored because its ID or daily-note date is already in use, or its system metadata is invalid.')
       return
     }
     if (onRestore) onRestore(entry)

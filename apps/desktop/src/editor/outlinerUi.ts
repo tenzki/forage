@@ -2,6 +2,7 @@ import { Extension, type Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { isCanonicalDailyDate } from '@forage/document'
 import {
   collectBullets,
   reorderBullet,
@@ -13,6 +14,11 @@ export const OUTLINER_NODE_MENU_EVENT = 'outliner-node-menu'
 export const OUTLINER_POINTER_DRAG_EVENT = 'outliner-pointer-drag'
 export const OUTLINER_OPEN_TRASH_EVENT = 'outliner-open-trash'
 export const OUTLINER_OPEN_SEARCH_EVENT = 'outliner-open-search'
+export const OUTLINER_DAILY_DATE_EVENT = 'outliner-daily-date'
+
+export interface DailyDateRequest {
+  date: string
+}
 
 export interface PointerDragEventDetail {
   phase: 'move' | 'drop' | 'cancel'
@@ -428,6 +434,33 @@ function createActivityWidget(activity: AgentActivity): HTMLElement {
   return status
 }
 
+function createDailyDatePicker(date: string, label: string): HTMLElement {
+  const picker = document.createElement('label')
+  picker.className = 'daily-note-date-picker'
+  picker.title = `Change daily note date for ${label}`
+  picker.setAttribute('contenteditable', 'false')
+
+  const icon = document.createElement('span')
+  icon.className = 'daily-note-calendar-icon'
+  icon.setAttribute('aria-hidden', 'true')
+
+  const input = document.createElement('input')
+  input.type = 'date'
+  input.value = date
+  input.setAttribute('aria-label', `Change daily note date for ${label}`)
+  input.addEventListener('click', (event) => event.stopPropagation())
+  input.addEventListener('change', (event) => {
+    event.stopPropagation()
+    if (!isCanonicalDailyDate(input.value) || input.value === date) return
+    window.dispatchEvent(new CustomEvent<DailyDateRequest>(OUTLINER_DAILY_DATE_EVENT, {
+      detail: { date: input.value },
+    }))
+  })
+
+  picker.append(icon, input)
+  return picker
+}
+
 function createStopButton(onCancel: () => void): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
@@ -472,6 +505,8 @@ function buildDecorations(editor: Editor): DecorationSet {
   const entries = collectBullets(editor.state.doc)
   const zoomTarget = entries.find((entry) => entry.id === ui.zoomId)
   const zoomPath = new Set(zoomTarget ? [...zoomTarget.ancestorIds, zoomTarget.id] : [])
+  const dailyNotes = entries.find((entry) => entry.systemRole === 'daily-notes')
+  const viewingDailyNotes = Boolean(dailyNotes && zoomPath.has(dailyNotes.id))
   const decorations: Decoration[] = []
   for (const entry of entries) {
     const classes = nodeClasses(entry, ui)
@@ -487,6 +522,25 @@ function buildDecorations(editor: Editor): DecorationSet {
     }
     if (classes.length) {
       decorations.push(Decoration.node(entry.pos, entry.pos + entry.node.nodeSize, { class: classes.join(' ') }))
+    }
+    if (entry.systemRole && entry.node.firstChild?.type.name === 'paragraph') {
+      decorations.push(Decoration.node(
+        entry.pos + 1,
+        entry.pos + 1 + entry.node.firstChild.nodeSize,
+        { class: 'system-node-title', 'aria-readonly': 'true' },
+      ))
+    }
+    if (
+      viewingDailyNotes
+      && entry.systemRole === 'daily-note'
+      && isCanonicalDailyDate(entry.dailyDate)
+      && entry.node.firstChild?.type.name === 'paragraph'
+    ) {
+      decorations.push(Decoration.widget(
+        entry.pos + 2 + entry.node.firstChild.content.size,
+        () => createDailyDatePicker(entry.dailyDate!, entry.node.firstChild!.textContent),
+        { key: `daily-date-${entry.id}-${entry.dailyDate}`, side: 1 },
+      ))
     }
     decorations.push(
       Decoration.widget(entry.pos + 1, () => createControls(editor, entry.node), {

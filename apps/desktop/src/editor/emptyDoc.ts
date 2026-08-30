@@ -1,4 +1,5 @@
 import { newNodeId, type JsonValue } from '../types/tree'
+import { repairSystemNodes } from '@forage/document'
 
 type PmJson = {
   type: string
@@ -8,11 +9,11 @@ type PmJson = {
   marks?: JsonValue[]
 }
 
-function blankItem(): PmJson {
+function blankItem(nextId: () => string): PmJson {
   return {
     type: 'listItem',
     attrs: {
-      nodeId: newNodeId(),
+      nodeId: nextId(),
       nodeType: 'user',
       collapsed: false,
       bulletKind: 'bullet',
@@ -23,7 +24,7 @@ function blankItem(): PmJson {
 }
 
 /** Keep persisted and freshly edited documents inside the outliner's root-list invariant. */
-export function normalizeOutlinerDoc(doc: JsonValue): JsonValue {
+export function normalizeOutlinerDoc(doc: JsonValue, nextId: () => string = newNodeId): JsonValue {
   const value = doc as PmJson
   const items: PmJson[] = []
   for (const block of value.content ?? []) {
@@ -33,7 +34,7 @@ export function normalizeOutlinerDoc(doc: JsonValue): JsonValue {
       items.push({
         type: 'listItem',
         attrs: {
-          nodeId: newNodeId(),
+          nodeId: nextId(),
           nodeType: 'user',
           collapsed: false,
           bulletKind: 'bullet',
@@ -43,11 +44,12 @@ export function normalizeOutlinerDoc(doc: JsonValue): JsonValue {
       })
     }
   }
-  return {
+  const normalized = {
     type: 'doc',
-    content: [{ type: 'bulletList', content: items.length ? items : [blankItem()] }],
-  } as JsonValue
+    content: [{ type: 'bulletList', content: items.length ? items : [blankItem(nextId)] }],
+  }
+  return repairSystemNodes(normalized as Record<string, unknown>, nextId).doc as JsonValue
 }
 
-/** A fresh outline: one empty bullet. nodeId is filled in by BulletAttributes. */
+/** A fresh outline with canonical system roots and one ordinary editable bullet. */
 export const EMPTY_DOC: JsonValue = normalizeOutlinerDoc({ type: 'doc' })

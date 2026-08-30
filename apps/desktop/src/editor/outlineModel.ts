@@ -2,6 +2,13 @@ import type { Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { newNodeId, type BulletKind, type JsonValue, type TrashEntry } from '../types/tree'
+import { findSystemNode, isCanonicalDailyDate, type SystemRole } from '@forage/document'
+import {
+  SYSTEM_MAINTENANCE_META,
+  SYSTEM_NODE_TRASH_META,
+  SYSTEM_TITLE_UPDATE_META,
+  validateSystemNodeAction,
+} from './systemNodeGuards'
 
 export interface BulletEntry {
   id: string
@@ -14,6 +21,8 @@ export interface BulletEntry {
   ancestorIds: string[]
   bulletKind: BulletKind
   completed: boolean
+  systemRole: SystemRole | null
+  dailyDate: string | null
 }
 
 export type MovePlacement = 'before' | 'after' | 'inside'
@@ -60,6 +69,8 @@ export function collectBullets(doc: ProseMirrorNode): BulletEntry[] {
       ancestorIds,
       bulletKind: node.attrs.bulletKind === 'todo' ? 'todo' : 'bullet',
       completed: Boolean(node.attrs.completed),
+      systemRole: node.attrs.systemRole ?? null,
+      dailyDate: node.attrs.dailyDate ?? null,
     })
   })
   return entries
@@ -143,10 +154,19 @@ function isBlankItem(node: PmJson): boolean {
   return node.content?.length === 1 && paragraph?.type === 'paragraph' && !paragraph.content?.length
 }
 
-function dispatchDocument(editor: Editor, json: PmJson, selectedId?: string, history = true): void {
+function dispatchDocument(
+  editor: Editor,
+  json: PmJson,
+  selectedId?: string,
+  history = true,
+  options: { allowedSystemNodeTrashId?: string } = {},
+): void {
   const next = editor.schema.nodeFromJSON(json)
   const transaction = editor.state.tr.replaceWith(0, editor.state.doc.content.size, next.content)
   if (!history) transaction.setMeta('addToHistory', false)
+  if (options.allowedSystemNodeTrashId) {
+    transaction.setMeta(SYSTEM_NODE_TRASH_META, options.allowedSystemNodeTrashId)
+  }
   if (selectedId) {
     const moved = findBullet(transaction.doc, selectedId)
     if (moved) transaction.setSelection(TextSelection.near(transaction.doc.resolve(moved.pos + 2)))
@@ -181,6 +201,7 @@ export function moveBulletTo(
   placement: MovePlacement = 'inside',
 ): boolean {
   if (sourceId === targetId) return false
+  if (!validateSystemNodeAction(editor.state.doc, 'move', sourceId, targetId).allowed) return false
   const doc = cloneDocument(editor)
   const source = findJsonItem(doc, sourceId)
   if (!source || (targetId && containsItem(source.node, targetId))) return false
@@ -209,7 +230,7 @@ export function moveCurrentBullet(editor: Editor, direction: -1 | 1): boolean {
 
 export function setBulletKind(editor: Editor, nodeId: string, bulletKind: BulletKind): boolean {
   const entry = findBullet(editor.state.doc, nodeId)
-  if (!entry) return false
+  if (!entry || !validateSystemNodeAction(editor.state.doc, 'convert', nodeId).allowed) return false
   editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
     ...entry.node.attrs,
     bulletKind,
@@ -220,7 +241,7 @@ export function setBulletKind(editor: Editor, nodeId: string, bulletKind: Bullet
 
 export function setTodoCompleted(editor: Editor, nodeId: string, completed: boolean): boolean {
   const entry = findBullet(editor.state.doc, nodeId)
-  if (!entry) return false
+  if (!entry || !validateSystemNodeAction(editor.state.doc, 'convert', nodeId).allowed) return false
   editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
     ...entry.node.attrs,
     bulletKind: 'todo',
@@ -231,7 +252,8 @@ export function setTodoCompleted(editor: Editor, nodeId: string, completed: bool
 
 export function toggleBulletCompleted(editor: Editor, nodeId: string): boolean {
   const entry = findBullet(editor.state.doc, nodeId)
-  if (!entry || entry.bulletKind !== 'todo') return false
+  if (!entry || entry.bulletKind !== 'todo'
+    || !validateSystemNodeAction(editor.state.doc, 'convert', nodeId).allowed) return false
   editor.view.dispatch(editor.state.tr.setNodeMarkup(entry.pos, undefined, {
     ...entry.node.attrs,
     completed: !entry.completed,
@@ -324,6 +346,7 @@ function refreshIds(node: PmJson): void {
 }
 
 export function duplicateBullet(editor: Editor, nodeId: string): boolean {
+  if (!validateSystemNodeAction(editor.state.doc, 'duplicate', nodeId).allowed) return false
   const doc = cloneDocument(editor)
   const source = findJsonItem(doc, nodeId)
   if (!source) return false
@@ -344,6 +367,7 @@ function blankItem(): PmJson {
 
 /** Remove a branch without adding the operation to history; Trash is its recovery path. */
 export function trashBullet(editor: Editor, nodeId: string): TrashEntry | null {
+  if (!validateSystemNodeAction(editor.state.doc, 'trash', nodeId).allowed) return null
   const entry = findBullet(editor.state.doc, nodeId)
   const doc = cloneDocument(editor)
   const source = findJsonItem(doc, nodeId)
@@ -360,7 +384,7 @@ export function trashBullet(editor: Editor, nodeId: string): TrashEntry | null {
     originalIndex: entry.siblingIndex,
     node: node as unknown as JsonValue,
   }
-  dispatchDocument(editor, doc, undefined, false)
+  dispatchDocument(editor, doc, undefined, false, { allowedSystemNodeTrashId: nodeId })
   return trash
 }
 
@@ -369,9 +393,21 @@ export function restoreBullet(editor: Editor, trash: TrashEntry): boolean {
   const node = structuredClone(asPmJson(trash.node))
   const nodeId = String(node.attrs?.nodeId ?? '')
   if (!nodeId || findJsonItem(doc, nodeId)) return false
+  let dailyNotesParentId: string | null = null
+  if (node.attrs?.systemRole === 'daily-note') {
+    const dailyDate = node.attrs.dailyDate
+    if (!isCanonicalDailyDate(dailyDate)) return false
+    if (collectBullets(editor.state.doc).some((entry) => (
+      entry.systemRole === 'daily-note' && entry.dailyDate === dailyDate
+    ))) return false
+    dailyNotesParentId = findSystemNode(editor.state.doc, 'daily-notes')?.id ?? null
+    if (!dailyNotesParentId) return false
+  }
   let list = rootList(doc)
-  if (trash.originalParentId) {
-    const parent = findJsonItem(doc, trash.originalParentId)
+  const parentId = dailyNotesParentId ?? trash.originalParentId
+  if (parentId) {
+    const parent = findJsonItem(doc, parentId)
+    if (dailyNotesParentId && !parent) return false
     if (parent) list = childList(parent.node, true)
   }
   if (!list) return false
@@ -383,16 +419,78 @@ export function restoreBullet(editor: Editor, trash: TrashEntry): boolean {
   return true
 }
 
-export function updateBulletText(editor: Editor, nodeId: string, text: string): boolean {
+export function updateBulletText(
+  editor: Editor,
+  nodeId: string,
+  text: string,
+  options: { allowProtectedTitle?: boolean } = {},
+): boolean {
   const entry = findBullet(editor.state.doc, nodeId)
   const paragraph = entry?.node.firstChild
   if (!entry || !paragraph) return false
   const from = entry.pos + 2
   const transaction = editor.state.tr
+  if (options.allowProtectedTitle) {
+    transaction.setMeta(SYSTEM_TITLE_UPDATE_META, nodeId)
+    transaction.setMeta(SYSTEM_MAINTENANCE_META, true)
+    transaction.setMeta('addToHistory', false)
+  }
   if (text) transaction.replaceWith(from, from + paragraph.content.size, editor.schema.text(text))
   else transaction.delete(from, from + paragraph.content.size)
   editor.view.dispatch(transaction)
   return true
+}
+
+/** Focus an existing first direct child, or create one when a container is empty. */
+export function focusFirstChildOrCreate(editor: Editor, parentId: string, nextId: () => string): string | null {
+  const parent = findBullet(editor.state.doc, parentId)
+  if (!parent) return null
+  const childPath = [...parent.ancestorIds, parent.id]
+  const existing = collectBullets(editor.state.doc).find((entry) => (
+    entry.ancestorIds.length === childPath.length
+    && entry.ancestorIds.every((id, index) => id === childPath[index])
+  ))
+  if (existing && !parent.node.attrs.collapsed) {
+    selectBullet(editor, existing.id)
+    return existing.id
+  }
+
+  const childId = existing?.id ?? nextId()
+  const transaction = editor.state.tr
+  transaction.setMeta(SYSTEM_MAINTENANCE_META, true)
+  transaction.setMeta('addToHistory', false)
+  if (parent.node.attrs.collapsed) {
+    transaction.setNodeMarkup(parent.pos, undefined, { ...parent.node.attrs, collapsed: false })
+  }
+  if (!existing) {
+    const paragraph = editor.schema.nodes.paragraph.create()
+    const child = editor.schema.nodes.listItem.create({
+      nodeId: childId,
+      nodeType: 'user',
+      collapsed: false,
+      bulletKind: 'bullet',
+      completed: false,
+      systemRole: null,
+      dailyDate: null,
+    }, paragraph)
+    let nestedListOffset = -1
+    let childOffset = 0
+    parent.node.forEach((node) => {
+      if (nestedListOffset < 0 && node.type === editor.schema.nodes.bulletList) nestedListOffset = childOffset
+      childOffset += node.nodeSize
+    })
+    if (nestedListOffset < 0) {
+      transaction.insert(
+        parent.pos + parent.node.nodeSize - 1,
+        editor.schema.nodes.bulletList.create(null, child),
+      )
+    } else {
+      transaction.insert(parent.pos + 2 + nestedListOffset, child)
+    }
+  }
+  editor.view.dispatch(transaction.scrollIntoView())
+  selectBullet(editor, childId)
+  return childId
 }
 
 export function selectBullet(editor: Editor, nodeId: string): boolean {

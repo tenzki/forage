@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DesktopSyncEngine, type SyncRepository, type SyncTransport } from './syncEngine'
 import type { EventEnvelope, OutlineState } from '@forage/domain'
-import { canonicalJson, sha256Hex } from '@forage/domain'
+import { canonicalJson, reduceOutlineEvent, replayOutlineEvents, sha256Hex } from '@forage/domain'
 import { EditorState } from '@tiptap/pm/state'
-import { captureStepBatch, createOutlineSchema } from '@forage/document'
+import {
+  captureStepBatch,
+  createOutlineSchema,
+  deserializeStep,
+  documentChangeSteps,
+} from '@forage/document'
 
 const initialState: OutlineState = {
   doc: {
@@ -161,5 +166,117 @@ describe('desktop synchronization state machine', () => {
     await engine.sync()
     expect(engine.state.kind).toBe('up-to-date')
     expect(repo.calls.supersede).toHaveBeenCalledWith('local-doc', expect.any(String))
+  })
+
+  it('rebases follow-up edits against the repaired projection of a pending legacy migration', async () => {
+    const repo = repository('server')
+    const schema = createOutlineSchema()
+    const item = (id: string, text: string, role: string | null = null) => ({
+      type: 'listItem',
+      attrs: {
+        nodeId: id, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false,
+        systemRole: role, dailyDate: null,
+      },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+    })
+    const legacyState: OutlineState = {
+      doc: {
+        type: 'doc', content: [
+          { type: 'bulletList', content: [item('inbox', 'Inbox', 'inbox')] },
+          { type: 'bulletList', content: [item('person', 'Nikola B')] },
+        ],
+      },
+      trash: [], shortcuts: [], schemaEpoch: 1,
+    }
+    const beforeMigration = schema.nodeFromJSON(legacyState.doc)
+    const oldMigrationProjection = schema.nodeFromJSON({
+      type: 'doc', content: [
+        { type: 'bulletList', content: [
+          item('inbox', 'Inbox', 'inbox'),
+          item('daily', 'Daily Notes', 'daily-notes'),
+        ] },
+        { type: 'bulletList', content: [item('person', 'Nikola B')] },
+      ],
+    })
+    const migrationBatch = captureStepBatch(
+      beforeMigration,
+      documentChangeSteps(beforeMigration, oldMigrationProjection)
+        .map((step) => deserializeStep(schema, step)),
+    )
+    const documentEvent = (
+      id: string,
+      batch: typeof migrationBatch,
+      origin: EventEnvelope['origin'],
+    ): EventEnvelope => ({
+      id, outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1',
+      type: 'document.steps_applied', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+      baseRevision: 0, origin, occurredAt: '2026-08-30T12:00:00.000Z', changeGroupId: id,
+      payload: { ...batch, beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64) },
+    })
+    const migration = documentEvent('legacy-migration', migrationBatch, 'migration')
+    const repairedAfterMigration = reduceOutlineEvent(legacyState, migration)
+    const repairedDocument = schema.nodeFromJSON(repairedAfterMigration.doc)
+    let personPos = -1
+    repairedDocument.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeId === 'person') personPos = pos
+    })
+    const editTransaction = EditorState.create({ schema, doc: repairedDocument })
+      .tr.insertText('!', personPos + 2 + 'Nikola B'.length)
+    const edit = documentEvent(
+      'follow-up-edit',
+      captureStepBatch(repairedDocument, editTransaction.steps),
+      'desktop',
+    )
+    const remoteTransaction = EditorState.create({ schema, doc: beforeMigration })
+      .tr.insertText('R', 3 + 'Inbox'.length)
+    const remote = {
+      ...documentEvent('remote-edit', captureStepBatch(beforeMigration, remoteTransaction.steps), 'server'),
+      revision: 1,
+    }
+    repo.loadReplayInput = async () => ({
+      checkpoint: { id: 'checkpoint-local', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, localSequence: 0, serverRevision: 0, stateJson: JSON.stringify(legacyState),
+        integrityHash: 'a'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z' },
+      state: legacyState, events: [],
+    })
+    repo.pending = async () => [migration, edit].map((event, index) => ({
+      localSequence: index + 1, id: event.id, outlineId: event.outlineId,
+      baseRevision: 0, serverRevision: null, envelope: event, status: 'pending' as const,
+      supersededBy: null, createdAt: event.occurredAt,
+    }))
+    let pushes = 0
+    let replacements: EventEnvelope[] = []
+    const transport: SyncTransport = {
+      status: async () => ({ ...status, eventVersions: { 'document.steps_applied': [1] } }),
+      checkpoint: async () => ({ checkpoint: { id: 'checkpoint', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, revision: 0, integrityHash: await sha256Hex(canonicalJson(legacyState)), state: legacyState } }),
+      pull: async () => ({ events: [remote], currentRevision: 1, nextAfterRevision: null }),
+      push: async (_base, events) => {
+        pushes += 1
+        if (pushes === 1) return { status: 'rebase_required', currentRevision: 1, pullAfterRevision: 0 }
+        replacements = events
+        return {
+          status: 'accepted',
+          acknowledgements: events.map((event, index) => ({ eventId: event.id, revision: index + 2 })),
+          currentRevision: events.length + 1,
+        }
+      },
+    }
+
+    const engine = new DesktopSyncEngine(repo, transport)
+    await engine.sync()
+    const replayed = replayOutlineEvents(legacyState, [remote, ...replacements])
+    const afterMigrationReplacement = replayOutlineEvents(legacyState, [remote, replacements[0]])
+    const repairedMigrationHash = await sha256Hex(canonicalJson(
+      schema.nodeFromJSON(afterMigrationReplacement.doc).toJSON(),
+    ))
+
+    const replayedDocument = schema.nodeFromJSON(replayed.doc)
+    expect(engine.state.kind).toBe('up-to-date')
+    expect(replacements[0].payload).toMatchObject({ afterHash: repairedMigrationHash })
+    expect(replacements[1].payload).toMatchObject({ beforeHash: repairedMigrationHash })
+    expect(replayedDocument.childCount).toBe(1)
+    expect(replayedDocument.textContent).toContain('InboxR')
+    expect(replayedDocument.textContent).toContain('Nikola B!')
   })
 })

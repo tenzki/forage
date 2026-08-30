@@ -8,7 +8,6 @@ import {
   type EventEnvelope,
 } from '@forage/domain'
 import {
-  applySerializedSteps,
   createOutlineSchema,
   documentChangeSteps,
   rebaseSerializedSteps,
@@ -225,7 +224,7 @@ export class DesktopSyncEngine {
         this.transition({ kind: 'conflict', message: 'The local edit was removed by a conflicting remote edit.', eventIds: [event.id] })
         return replacementBase
       }
-      const replacement = parseEventEnvelope({
+      const provisionalReplacement = parseEventEnvelope({
         ...event,
         id: crypto.randomUUID(),
         baseRevision: replacementBase,
@@ -238,8 +237,18 @@ export class DesktopSyncEngine {
           afterHash: await sha256Hex(canonicalJson(rebased.doc.toJSON())),
         },
       })
-      originalState = { ...reduceOutlineEvent(originalState, event), doc: applySerializedSteps(originalDocument, event.payload.steps).toJSON() }
-      rebasedState = { ...rebasedState, doc: rebased.doc.toJSON() }
+      const nextOriginalState = reduceOutlineEvent(originalState, event)
+      const nextRebasedState = reduceOutlineEvent(rebasedState, provisionalReplacement)
+      const projectedAfter = schema.nodeFromJSON(nextRebasedState.doc)
+      const replacement = parseEventEnvelope({
+        ...provisionalReplacement,
+        payload: {
+          ...provisionalReplacement.payload,
+          afterHash: await sha256Hex(canonicalJson(projectedAfter.toJSON())),
+        },
+      })
+      originalState = nextOriginalState
+      rebasedState = nextRebasedState
       await this.repository.append(replacement)
       await this.repository.supersede(event.id, replacement.id)
       replacements.push(replacement)

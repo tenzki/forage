@@ -5,6 +5,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileSystemAssetStorage, verifyAssetBytes } from './assets'
+import { captureStepBatch, createOutlineSchema } from '@forage/document'
+import { canonicalJson, parseEventEnvelope, sha256Hex } from '@forage/domain'
+import { Transform } from '@tiptap/pm/transform'
 
 const servers: Array<ReturnType<typeof buildServer>> = []
 const assetRoots: string[] = []
@@ -51,6 +54,65 @@ describe('Forage server', () => {
       headers: { authorization: `Bearer ${deviceToken}` },
     })
     expect(JSON.stringify(checkpoint.json().checkpoint.state.doc)).toContain(response.json().noteId)
+  })
+
+  it('bootstraps canonical Inbox and Daily Notes roles in the authoritative checkpoint', async () => {
+    const { repository, outlineId, inboxId } = await testServer()
+    const checkpoint = await repository.checkpoint(outlineId)
+    const roleNodes: Array<[string, string]> = []
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(visit)
+      if (!value || typeof value !== 'object') return
+      const node = value as Record<string, unknown>
+      const attrs = node.attrs as Record<string, unknown> | undefined
+      if (attrs?.systemRole) roleNodes.push([String(attrs.nodeId), String(attrs.systemRole)])
+      Object.values(node).forEach(visit)
+    }
+    visit(checkpoint.state.doc)
+
+    expect(roleNodes).toEqual(expect.arrayContaining([
+      [inboxId, 'inbox'],
+      [expect.any(String), 'daily-notes'],
+    ]))
+  })
+
+  it('resolves the current canonical Inbox role for each default API capture', async () => {
+    const { repository, outlineId, ownerId, apiToken, deviceToken, inboxId } = await testServer()
+    const checkpoint = await repository.checkpoint(outlineId)
+    const before = createOutlineSchema().nodeFromJSON(checkpoint.state.doc)
+    let oldInboxPos = -1
+    let replacementPos = -1
+    let replacementId = ''
+    before.descendants((node, pos) => {
+      if (node.type.name !== 'listItem') return
+      if (node.attrs.nodeId === inboxId) oldInboxPos = pos
+      if (!replacementId && node.attrs.systemRole == null && node.attrs.nodeId !== inboxId) {
+        replacementPos = pos
+        replacementId = String(node.attrs.nodeId)
+      }
+    })
+    const transform = new Transform(before)
+      .setNodeMarkup(oldInboxPos, undefined, { ...before.nodeAt(oldInboxPos)!.attrs, systemRole: null })
+      .setNodeMarkup(replacementPos, undefined, { ...before.nodeAt(replacementPos)!.attrs, systemRole: 'inbox' })
+    const batch = captureStepBatch(before, transform.steps)
+    const event = parseEventEnvelope({
+      id: 'event-transfer-inbox', outlineId, actorId: ownerId, deviceId: 'device-test',
+      type: 'document.steps_applied', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+      baseRevision: 0, origin: 'desktop', occurredAt: '2026-08-30T12:00:00.000Z',
+      payload: {
+        ...batch,
+        beforeHash: await sha256Hex(canonicalJson(before.toJSON())),
+        afterHash: await sha256Hex(canonicalJson(transform.doc.toJSON())),
+      },
+    })
+    const device = await repository.authenticate(deviceToken, 'sync')
+    await repository.acceptEvents(device, 0, [event])
+    const api = await repository.authenticate(apiToken, 'notes:create')
+
+    const created = await repository.createNote(api, 'role-routed', { text: 'Role routed' })
+
+    expect(created.response.parentId).toBe(replacementId)
+    expect(created.response.parentId).not.toBe(inboxId)
   })
 
   it('replays an identical idempotent retry and rejects changed input for the same key', async () => {

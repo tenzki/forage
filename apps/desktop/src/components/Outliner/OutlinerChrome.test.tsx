@@ -145,6 +145,38 @@ describe('outliner chrome', () => {
     expect(onOpenTrash).toHaveBeenCalledOnce()
   })
 
+  it('opens Inbox, Daily Notes, and Tasks from the command menu', async () => {
+    const user = userEvent.setup()
+    const onOpenInbox = vi.fn()
+    const onOpenDailyNotes = vi.fn()
+    const onOpenTasks = vi.fn()
+    render(
+      <OutlinerChrome
+        editor={editor}
+        trash={[]}
+        onTrashChange={vi.fn()}
+        onOpenInbox={onOpenInbox}
+        onOpenDailyNotes={onOpenDailyNotes}
+        onOpenTasks={onOpenTasks}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'inbox')
+    await user.keyboard('{Enter}')
+    expect(onOpenInbox).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'daily notes')
+    await user.keyboard('{Enter}')
+    expect(onOpenDailyNotes).toHaveBeenCalledOnce()
+
+    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.type(screen.getByLabelText('Search commands and bullets'), 'tasks')
+    await user.keyboard('{Enter}')
+    expect(onOpenTasks).toHaveBeenCalledOnce()
+  })
+
   it('converts a bullet to a todo from its action menu', async () => {
     const user = userEvent.setup()
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
@@ -158,6 +190,110 @@ describe('outliner chrome', () => {
       completed: false,
     })
     expect(editor.view.dom.querySelector('.todo-checkbox')).toBeTruthy()
+  })
+
+  it('surfaces non-destructive feedback when a protected root action is attempted', async () => {
+    const user = userEvent.setup()
+    const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(alpha.pos, undefined, {
+      ...alpha.node.attrs,
+      systemRole: 'inbox',
+    }))
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Convert to todo' }))
+
+    expect(screen.getByRole('alert').textContent).toContain('protected')
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')?.bulletKind).toBe('bullet')
+  })
+
+  it('silently ignores moving a protected root to Trash', async () => {
+    const user = userEvent.setup()
+    const onTrashChange = vi.fn()
+    const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(alpha.pos, undefined, {
+      ...alpha.node.attrs,
+      systemRole: 'inbox',
+    }))
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={onTrashChange} />)
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }))
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onTrashChange).not.toHaveBeenCalled()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')).toBeTruthy()
+  })
+
+  it('moves a daily-note branch to Trash from its Home action menu', async () => {
+    const user = userEvent.setup()
+    const onTrashChange = vi.fn()
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'inbox', nodeType: 'user', systemRole: 'inbox' },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+          },
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'daily', nodeType: 'user', systemRole: 'daily-notes' },
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Daily Notes' }] },
+              {
+                type: 'bulletList',
+                content: [{
+                  type: 'listItem',
+                  attrs: {
+                    nodeId: 'today',
+                    nodeType: 'user',
+                    systemRole: 'daily-note',
+                    dailyDate: '2026-08-30',
+                  },
+                  content: [
+                    { type: 'paragraph', content: [{ type: 'text', text: 'Today' }] },
+                    {
+                      type: 'bulletList',
+                      content: [{
+                        type: 'listItem',
+                        attrs: { nodeId: 'journal', nodeType: 'user' },
+                        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Journal' }] }],
+                      }],
+                    },
+                  ],
+                }],
+              },
+            ],
+          },
+        ],
+      }],
+    })
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={onTrashChange} />)
+    expect(getOutlinerUiState(editor).zoomId).toBeNull()
+    const menuButton = editor.view.dom.querySelector('[data-node-id="today"] .bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }))
+
+    expect(collectBullets(editor.state.doc).map((entry) => entry.id)).toEqual(['inbox', 'daily'])
+    expect(onTrashChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        originalParentId: 'daily',
+        node: expect.objectContaining({
+          attrs: expect.objectContaining({
+            nodeId: 'today',
+            systemRole: 'daily-note',
+            dailyDate: '2026-08-30',
+          }),
+        }),
+      }),
+    ])
   })
 
   it('adds a searchable secondary note from the node menu', async () => {

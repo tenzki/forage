@@ -9,6 +9,7 @@ import {
   type OutlineState,
 } from '@forage/domain'
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
+import { createOutlineSchema, findSystemNode, repairSystemNodes } from '@forage/document'
 
 export type TokenScope = 'notes:create' | 'sync'
 
@@ -111,18 +112,27 @@ export class InMemoryServerRepository implements ServerRepository {
     this.ownerId = `owner_${randomUUID()}`
     this.outlineId = `outline_${randomUUID()}`
     this.inboxId = `note_${randomUUID()}`
+    const dailyNotesId = `note_${randomUUID()}`
+    const editableId = `note_${randomUUID()}`
     this.notes.set(this.inboxId, { id: this.inboxId, parentId: null, text: 'Inbox', deleted: false })
-    this.state = createInitialOutlineState({
+    this.notes.set(dailyNotesId, { id: dailyNotesId, parentId: null, text: 'Daily Notes', deleted: false })
+    this.notes.set(editableId, { id: editableId, parentId: null, text: '', deleted: false })
+    const systemIds = [this.inboxId, dailyNotesId]
+    const repaired = repairSystemNodes({
       type: 'doc',
       content: [{
         type: 'bulletList',
         content: [{
           type: 'listItem',
-          attrs: { nodeId: this.inboxId, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+          attrs: {
+            nodeId: editableId, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false,
+            systemRole: null, dailyDate: null,
+          },
+          content: [{ type: 'paragraph' }],
         }],
       }],
-    })
+    }, () => systemIds.shift()!)
+    this.state = createInitialOutlineState(repaired.doc)
     const apiToken = this.issueToken('api', ['notes:create'])
     const deviceToken = this.issueToken('device', ['sync'])
     return { ownerId: this.ownerId, outlineId: this.outlineId, inboxId: this.inboxId, apiToken, deviceToken }
@@ -167,7 +177,9 @@ export class InMemoryServerRepository implements ServerRepository {
       }
       return { response: structuredClone(existing.response), replayed: true }
     }
-    const parentId = input.parentId ?? this.inboxId
+    const canonicalInbox = findSystemNode(createOutlineSchema().nodeFromJSON(this.state!.doc), 'inbox')
+    if (!canonicalInbox) throw new RepositoryError('conflict', 'The canonical Inbox is unavailable.')
+    const parentId = input.parentId ?? canonicalInbox.id
     const parent = this.notes.get(parentId)
     if (!parent || parent.deleted) throw new RepositoryError('conflict', 'The requested parent does not exist or is deleted.')
 

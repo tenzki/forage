@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
   ArrowRight,
   BookmarkPlus,
+  CalendarDays,
   Eye,
   EyeOff,
   Home,
+  Inbox,
+  ListTodo,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -28,14 +32,18 @@ import {
   getOutlinerUiState,
   navigateBack,
   navigateForward,
+  OUTLINER_DAILY_DATE_EVENT,
   OUTLINER_NODE_MENU_EVENT,
   OUTLINER_OPEN_SEARCH_EVENT,
   setHideCompleted,
   setSearchQuery,
   setZoom,
   type NodeMenuRequest,
+  type DailyDateRequest,
   type SearchRequest,
 } from '../../editor/outlinerUi'
+import { openOrCreateDailyNote } from '../../editor/dailyNotes'
+import { newNodeId } from '../../types/tree'
 import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
@@ -269,7 +277,7 @@ function SaveSearchControl({
 }
 
 interface SearchCommand {
-  id: 'home' | 'settings' | 'trash'
+  id: 'home' | 'inbox' | 'daily-notes' | 'tasks' | 'settings' | 'trash'
   label: string
   description: string
   run: () => void
@@ -291,6 +299,9 @@ function SearchCommands({
         <li key={command.id} className={index === active ? 'active' : ''}>
           <button onMouseDown={(event) => event.preventDefault()} onClick={() => onChoose(command)}>
             {command.id === 'home' && <Home size={17} aria-hidden="true" />}
+            {command.id === 'inbox' && <Inbox size={17} aria-hidden="true" />}
+            {command.id === 'daily-notes' && <CalendarDays size={17} aria-hidden="true" />}
+            {command.id === 'tasks' && <ListTodo size={17} aria-hidden="true" />}
             {command.id === 'settings' && <Settings size={17} aria-hidden="true" />}
             {command.id === 'trash' && <Trash2 size={17} aria-hidden="true" />}
             <span><strong>{command.label}</strong><small>{command.description}</small></span>
@@ -307,6 +318,9 @@ function OutlineSearch({
   initialQuery,
   onSaveSearch,
   onOpenHome,
+  onOpenInbox,
+  onOpenDailyNotes,
+  onOpenTasks,
   onOpenSettings,
   onOpenTrash,
   onClose,
@@ -315,6 +329,9 @@ function OutlineSearch({
   initialQuery: string
   onSaveSearch: (query: string, label: string, scopeId: string | null) => void
   onOpenHome: () => void
+  onOpenInbox: () => void
+  onOpenDailyNotes: () => void
+  onOpenTasks: () => void
   onOpenSettings: () => void
   onOpenTrash: () => void
   onClose: () => void
@@ -326,6 +343,9 @@ function OutlineSearch({
   const results = query.trim() ? searchBullets(allEntries, query) : []
   const commands: SearchCommand[] = [
     { id: 'home', label: 'Home', description: 'Return to the full outline', run: onOpenHome },
+    { id: 'inbox', label: 'Inbox', description: 'Open captured notes', run: onOpenInbox },
+    { id: 'daily-notes', label: 'Daily Notes', description: "Open today's daily note", run: onOpenDailyNotes },
+    { id: 'tasks', label: 'Tasks', description: 'Open all tasks', run: onOpenTasks },
     { id: 'settings', label: 'Settings', description: 'Configure connections, agents, and tools', run: onOpenSettings },
     { id: 'trash', label: 'Trash', description: 'Review and restore deleted items', run: onOpenTrash },
   ]
@@ -446,6 +466,9 @@ export function OutlinerChrome({
   onToggleActivitySidebar = () => undefined,
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
+  onOpenInbox = () => undefined,
+  onOpenDailyNotes = () => undefined,
+  onOpenTasks = () => undefined,
 }: {
   editor: Editor | null
   trash: TrashEntry[]
@@ -458,6 +481,9 @@ export function OutlinerChrome({
   onToggleActivitySidebar?: () => void
   onOpenSettings?: () => void
   onOpenTrash?: () => void
+  onOpenInbox?: () => void
+  onOpenDailyNotes?: () => void
+  onOpenTasks?: () => void
 }) {
   const editorUi = useEditorUi(editor)
   const zoomId = editorUi?.zoomId ?? null
@@ -521,6 +547,20 @@ export function OutlinerChrome({
   }, [editor])
 
   useEffect(() => {
+    const openDailyDate = (event: Event) => {
+      if (!editor) return
+      const { date } = (event as CustomEvent<DailyDateRequest>).detail
+      openOrCreateDailyNote(editor, {
+        date,
+        nextId: newNodeId,
+        locale: typeof navigator === 'undefined' ? undefined : navigator.language,
+      })
+    }
+    window.addEventListener(OUTLINER_DAILY_DATE_EVENT, openDailyDate)
+    return () => window.removeEventListener(OUTLINER_DAILY_DATE_EVENT, openDailyDate)
+  }, [editor])
+
+  useEffect(() => {
     const openTag = (event: Event) => {
       const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
       if (tag) openSearch(`#${tag}`)
@@ -560,7 +600,7 @@ export function OutlinerChrome({
         onOpenSearch={() => openSearch()}
       />
       {actionError && <div className="action-error" role="alert">{actionError}<button onClick={() => setActionError(null)}>Dismiss</button></div>}
-      {searchOpen && (
+      {searchOpen && createPortal(
         <OutlineSearch
           editor={editor}
           initialQuery={searchQuery}
@@ -569,10 +609,14 @@ export function OutlinerChrome({
             setZoom(editor, null)
             editor.commands.focus()
           }}
+          onOpenInbox={onOpenInbox}
+          onOpenDailyNotes={onOpenDailyNotes}
+          onOpenTasks={onOpenTasks}
           onOpenSettings={onOpenSettings}
           onOpenTrash={onOpenTrash}
           onClose={() => setSearchOpen(false)}
-        />
+        />,
+        document.body,
       )}
       {nodeMenu && (
         <NodeActions

@@ -1,4 +1,10 @@
-import { applySerializedSteps, createOutlineSchema, insertPlainTextNote, type SerializedStep } from '../../document/src'
+import {
+  applySerializedSteps,
+  createOutlineSchema,
+  insertPlainTextNote,
+  repairSystemNodes,
+  type SerializedStep,
+} from '../../document/src'
 import type { EventEnvelope } from './envelope'
 
 export type JsonObject = Record<string, unknown>
@@ -25,10 +31,18 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     case 'document.undo_applied':
     case 'document.redo_applied': {
       const document = createOutlineSchema().nodeFromJSON(state.doc)
-      state.doc = applySerializedSteps(
+      const projected = applySerializedSteps(
         document,
         event.payload.steps as SerializedStep[],
       ).toJSON() as JsonObject
+      // Early system-node migrations were recorded before the editor coalesced
+      // legacy root lists. Replaying the same deterministic repair keeps their
+      // already-recorded follow-up steps aligned; current migrations are idempotent here.
+      state.doc = event.origin === 'migration'
+        ? repairSystemNodes(projected, () => {
+          throw new Error('A system-node migration replay unexpectedly requires a new node id.')
+        }).doc
+        : projected
       return state
     }
     case 'shortcut.created':

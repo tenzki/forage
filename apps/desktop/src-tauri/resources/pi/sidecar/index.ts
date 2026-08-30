@@ -12,7 +12,7 @@
  *   {"type":"message_update","assistantMessageEvent":{"type":"text_delta",...}}
  *   {"type":"tool_execution_start","toolName":"...","args":{...},"toolCallId":"..."}
  *   {"type":"tool_execution_end","toolName":"...","result":{...},"toolCallId":"..."}
- *   {"type":"agent_settled"}
+ *   {"type":"agent_settled","text":"optional final assistant text"}
  *   {"type":"process_error","error":"..."}
  */
 
@@ -36,6 +36,7 @@ import {
   type OutlineSnapshotNode,
 } from './tools'
 import { createAuthenticatedModelRuntime } from './runtime-auth'
+import { FinalResponseTracker } from './final-response'
 
 // ── constants ───────────────────────────────────────────────────────────────
 
@@ -249,6 +250,7 @@ async function main(): Promise<void> {
       currentSession = session
 
       // Forward SDK events to stdout.
+      const finalResponse = new FinalResponseTracker()
       const unsubscribe = session.subscribe((event) => {
         switch (event.type) {
           case 'message_update':
@@ -272,9 +274,10 @@ async function main(): Promise<void> {
             })
             break
           case 'agent_end':
-            if (!event.willRetry) {
-              emit({ type: 'agent_settled' })
-            }
+            finalResponse.recordAgentEnd(event.messages, event.willRetry)
+            break
+          case 'agent_settled':
+            emit(finalResponse.settledEvent())
             break
           case 'turn_start':
           case 'turn_end':

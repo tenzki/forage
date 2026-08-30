@@ -16,6 +16,7 @@ import {
 } from '../../editor/bulletNote'
 import { toggleCollapsed } from '../../editor/outlinerUi'
 import type { TrashEntry } from '../../types/tree'
+import { validateSystemNodeAction, type StructuralAction } from '../../editor/systemNodeGuards'
 
 interface MenuPosition {
   nodeId: string
@@ -137,8 +138,19 @@ export function NodeActions({
     return <MoveToDialog editor={editor} sourceId={request.nodeId} onClose={onClose} onError={onError} />
   }
   if (!entry) return null
+  const isProtectedEntry = entry.systemRole !== null
+
+  function allowed(action: StructuralAction, reportError = true): boolean {
+    const decision = validateSystemNodeAction(editor.state.doc, action, request.nodeId)
+    if (!decision.allowed && reportError) onError(decision.message)
+    return decision.allowed
+  }
 
   function remove() {
+    if (!allowed('trash', !isProtectedEntry)) {
+      onClose()
+      return
+    }
     const deleted = trashBullet(editor, request.nodeId)
     if (deleted) onTrashed(deleted)
     else onError('The bullet could not be moved to Trash.')
@@ -156,15 +168,15 @@ export function NodeActions({
         )}
         {entry.bulletKind === 'todo' ? (
           <>
-            <button role="menuitem" onClick={() => { toggleBulletCompleted(editor, request.nodeId); onClose() }}>
+            <button role="menuitem" onClick={() => { if (allowed('convert')) toggleBulletCompleted(editor, request.nodeId); onClose() }}>
               {entry.completed ? 'Mark as open' : 'Mark as complete'}
             </button>
-            <button role="menuitem" onClick={() => { setBulletKind(editor, request.nodeId, 'bullet'); onClose() }}>
+            <button role="menuitem" onClick={() => { if (allowed('convert')) setBulletKind(editor, request.nodeId, 'bullet'); onClose() }}>
               Convert to bullet
             </button>
           </>
         ) : (
-          <button role="menuitem" onClick={() => { setBulletKind(editor, request.nodeId, 'todo'); onClose() }}>
+          <button role="menuitem" onClick={() => { if (allowed('convert')) setBulletKind(editor, request.nodeId, 'todo'); onClose() }}>
             Convert to todo
           </button>
         )}
@@ -176,11 +188,11 @@ export function NodeActions({
             Remove note
           </button>
         )}
-        <button role="menuitem" onClick={() => setMoving(true)}>Move to…</button>
+        <button role="menuitem" onClick={() => { if (allowed('move')) setMoving(true); else onClose() }}>Move to…</button>
         <button role="menuitem" onClick={() => { onToggleShortcut(); onClose() }}>
           {isShortcut ? 'Remove from shortcuts' : 'Add to shortcuts'}
         </button>
-        <button role="menuitem" onClick={() => { duplicateBullet(editor, request.nodeId); onClose() }}>Duplicate branch</button>
+        <button role="menuitem" onClick={() => { if (allowed('duplicate')) duplicateBullet(editor, request.nodeId); onClose() }}>Duplicate branch</button>
         <button role="menuitem" onClick={() => void copyNodeLink(request.nodeId).then(onClose).catch((error: unknown) => onError(error instanceof Error ? error.message : String(error)))}>
           Copy bullet link
         </button>

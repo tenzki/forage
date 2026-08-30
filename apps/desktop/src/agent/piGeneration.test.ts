@@ -6,6 +6,7 @@ type TestEvent = Record<string, unknown> & { type: string }
 const rpc = vi.hoisted(() => ({
   listener: undefined as ((event: TestEvent) => void) | undefined,
   promptEvents: [] as TestEvent[],
+  emitDefaultText: true,
   start: vi.fn(async () => undefined),
   stop: vi.fn(async () => undefined),
 }))
@@ -25,10 +26,12 @@ vi.mock('./piSdkClient', () => ({
 
     async prompt() {
       for (const event of rpc.promptEvents) rpc.listener?.(event)
-      rpc.listener?.({
-        type: 'message_update',
-        assistantMessageEvent: { type: 'text_delta', delta: 'done' },
-      })
+      if (rpc.emitDefaultText) {
+        rpc.listener?.({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'done' },
+        })
+      }
     }
   },
 }))
@@ -39,6 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   rpc.listener = undefined
   rpc.promptEvents = []
+  rpc.emitDefaultText = true
 })
 
 describe('generateWithPi authentication', () => {
@@ -74,6 +78,68 @@ describe('generateWithPi authentication', () => {
 })
 
 describe('generateWithPi activity', () => {
+  it('uses final settled text when the provider emitted no streaming deltas or outline tool result', async () => {
+    const onDelta = vi.fn()
+    rpc.emitDefaultText = false
+    rpc.promptEvents = [{ type: 'agent_settled', text: 'Fallback response' }]
+
+    const result = await generateWithPi({
+      mode: 'api_key',
+      apiKey: 'test-key',
+      oauthCredential: null,
+      modelId: 'gpt-test',
+    }, {
+      skill: SKILLS[0],
+      prompt: 'test',
+      context: [],
+      enabledToolIds: [],
+    }, { onDelta })
+
+    expect(result).toBe('Fallback response')
+    expect(onDelta).toHaveBeenCalledWith('Fallback response')
+  })
+
+  it('does not duplicate settled text after a streamed response', async () => {
+    const onDelta = vi.fn()
+    rpc.emitDefaultText = false
+    rpc.promptEvents = [
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Streamed response' } },
+      { type: 'agent_settled', text: 'Final response' },
+    ]
+
+    const result = await generateWithPi({
+      mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test',
+    }, {
+      skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
+    }, { onDelta })
+
+    expect(result).toBe('Streamed response')
+    expect(onDelta).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not use settled text after an outline tool result', async () => {
+    const onDelta = vi.fn()
+    const onOutline = vi.fn()
+    rpc.emitDefaultText = false
+    rpc.promptEvents = [
+      {
+        type: 'tool_execution_end',
+        toolName: 'emit_outline',
+        result: { details: { action: 'emit_outline', nodes: [{ text: 'Structured response' }] } },
+      },
+      { type: 'agent_settled', text: 'Fallback response' },
+    ]
+
+    await generateWithPi({
+      mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test',
+    }, {
+      skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
+    }, { onDelta, onOutline })
+
+    expect(onOutline).toHaveBeenCalledWith([{ text: 'Structured response' }])
+    expect(onDelta).not.toHaveBeenCalled()
+  })
+
   it('keeps tool arguments in the completed activity event', async () => {
     const onActivity = vi.fn()
     rpc.promptEvents = [

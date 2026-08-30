@@ -36,7 +36,7 @@ Create an API token and capture the displayed secret; only its SHA-256 hash is s
 
 ```bash
 npm run tokens --workspace @forage/server -- create \
-  --kind api --name raycast --scope notes:create
+    --kind api --name apple-shortcuts --scope notes:create
 ```
 
 Optional flags are `--outline OUTLINE_ID` and `--expires 2027-01-01T00:00:00Z`. Device tokens use `--kind device --scope sync`. List non-secret metadata or revoke a token with:
@@ -55,10 +55,12 @@ curl --request POST https://notes.example.com/api/v1/notes \
   --header "Authorization: Bearer $FORAGE_NOTES_TOKEN" \
   --header "Idempotency-Key: capture-20260830-001" \
   --header "Content-Type: application/json" \
-  --data '{"text":"Captured from another app","source":{"application":"Raycast"}}'
+  --data '{"text":"Captured from another app","source":{"application":"Apple Shortcuts"}}'
 ```
 
-With no `parentId`, the server inserts under the configured API Inbox. A supplied parent must be an existing non-deleted stable note ID. HTML, ProseMirror JSON, nested children, and asset data are rejected. A successful response is `201 Created` and contains `noteId`, `eventId`, authoritative `revision`, resolved `parentId`, provenance, and timestamp.
+With no `parentId`, the server resolves the current canonical Inbox role for every request. A supplied parent must be an existing non-deleted stable note ID. HTML, ProseMirror JSON, nested children, and asset data are rejected. A successful response is `201 Created` and contains `noteId`, `eventId`, authoritative `revision`, resolved `parentId`, origin, and timestamp. Optional source provenance remains in the immutable event.
+
+For the system share-sheet workflow, see [Capture to Inbox with Apple Shortcuts](apple-shortcuts-capture.md). It uses this endpoint and requires server mode; Forage does not bundle a native macOS share extension.
 
 ## Operations and limitations
 

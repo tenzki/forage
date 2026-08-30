@@ -3,9 +3,12 @@ import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { BulletNote, focusOrCreateBulletNote, hasBulletNote } from './bulletNote'
+import { openOrCreateDailyNote } from './dailyNotes'
+import { GeneratedImage, GeneratedImageItem, OutlineBulletList } from './generatedImage'
 import { InternalLink } from './internalLinks'
 import {
   collectBullets,
+  currentBulletId,
   duplicateBullet,
   moveBulletById,
   moveBulletTo,
@@ -14,6 +17,7 @@ import {
   setBulletKind,
   toggleBulletCompleted,
   trashBullet,
+  updateBulletText,
 } from './outlineModel'
 import {
   OutlinerUi,
@@ -57,10 +61,38 @@ function linkedItem(id: string, text: string, targetId: string) {
   }
 }
 
+function systemItem(
+  id: string,
+  text: string,
+  role: 'inbox' | 'daily-notes' | 'daily-note',
+  children: object[] = [],
+  dailyDate: string | null = role === 'daily-note' ? '2026-08-30' : null,
+) {
+  const value = item(id, text, children)
+  return {
+    ...value,
+    attrs: {
+      ...value.attrs,
+      systemRole: role,
+      dailyDate,
+    },
+  }
+}
+
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, InternalLink, OutlinerKeymap, OutlinerUi],
+    extensions: [
+      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      OutlineBulletList,
+      GeneratedImageItem,
+      GeneratedImage,
+      BulletAttributes,
+      BulletNote,
+      InternalLink,
+      OutlinerKeymap,
+      OutlinerUi,
+    ],
     content: {
       type: 'doc',
       content: [
@@ -217,6 +249,417 @@ describe('Workflowy-style outline interactions', () => {
 
     editor.commands.undo()
     expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.completed).toBe(false)
+  })
+
+  it('rejects structural and todo mutations on protected system roots', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [item('capture', 'Captured')]),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+          ]),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+
+    expect(moveBulletTo(editor, 'inbox', 'ordinary', 'inside')).toBe(false)
+    expect(moveBulletTo(editor, 'today', 'ordinary', 'after')).toBe(false)
+    expect(trashBullet(editor, 'inbox')).toBeNull()
+    expect(duplicateBullet(editor, 'today')).toBe(false)
+    expect(setBulletKind(editor, 'daily', 'todo')).toBe(false)
+    expect(toggleBulletCompleted(editor, 'today')).toBe(false)
+    expect(collectBullets(editor.state.doc).filter((entry) => entry.systemRole === 'inbox')).toHaveLength(1)
+  })
+
+  it('moves a daily-note root and its descendants to Trash with system metadata intact', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+          ]),
+        ],
+      }],
+    })
+
+    const deleted = trashBullet(editor, 'today')
+
+    expect(deleted).not.toBeNull()
+    expect(deleted?.originalParentId).toBe('daily')
+    expect(deleted?.node).toMatchObject({
+      attrs: {
+        nodeId: 'today',
+        systemRole: 'daily-note',
+        dailyDate: '2026-08-30',
+      },
+      content: expect.arrayContaining([
+        expect.objectContaining({
+          type: 'bulletList',
+          content: expect.arrayContaining([
+            expect.objectContaining({ attrs: expect.objectContaining({ nodeId: 'journal' }) }),
+          ]),
+        }),
+      ]),
+    })
+    expect(collectBullets(editor.state.doc).map((entry) => entry.id)).toEqual(['inbox', 'daily'])
+  })
+
+  it('restores a trashed daily note with its metadata, descendants, parent, and sibling position', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            item('pinned-before', 'Pinned before'),
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+            item('pinned-after', 'Pinned after'),
+          ]),
+        ],
+      }],
+    })
+
+    const deleted = trashBullet(editor, 'today')
+
+    expect(deleted && restoreBullet(editor, deleted)).toBe(true)
+    const restored = collectBullets(editor.state.doc).find((entry) => entry.id === 'today')
+    expect(restored).toMatchObject({
+      systemRole: 'daily-note',
+      dailyDate: '2026-08-30',
+      ancestorIds: ['daily'],
+    })
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'journal')?.ancestorIds)
+      .toEqual(['daily', 'today'])
+    expect(collectBullets(editor.state.doc)
+      .filter((entry) => entry.ancestorIds.length === 1 && entry.ancestorIds[0] === 'daily')
+      .map((entry) => entry.id))
+      .toEqual(['pinned-before', 'today', 'pinned-after'])
+  })
+
+  it('does not restore a daily note when its valid date is already live under a different ID', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+          ]),
+        ],
+      }],
+    })
+    const deleted = trashBullet(editor, 'today')!
+    const ids = ['replacement', 'replacement-entry']
+    expect(openOrCreateDailyNote(editor, {
+      date: '2026-08-30',
+      locale: 'en-US',
+      nextId: () => ids.shift()!,
+    })).toMatchObject({ id: 'replacement', created: true })
+    const beforeRestore = editor.getJSON()
+
+    expect(restoreBullet(editor, deleted)).toBe(false)
+    expect(editor.getJSON()).toEqual(beforeRestore)
+    expect(collectBullets(editor.state.doc).filter((entry) => (
+      entry.systemRole === 'daily-note' && entry.dailyDate === '2026-08-30'
+    ))).toHaveLength(1)
+  })
+
+  it.each([
+    ['missing', null],
+    ['impossible', '2026-02-30'],
+    ['noncanonical', '2026-8-30'],
+  ])('does not restore a daily note with %s daily-date metadata', (_label, dailyDate) => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')], dailyDate),
+          ]),
+        ],
+      }],
+    })
+    const deleted = trashBullet(editor, 'today')!
+    const beforeRestore = editor.getJSON()
+
+    expect(restoreBullet(editor, deleted)).toBe(false)
+    expect(editor.getJSON()).toEqual(beforeRestore)
+  })
+
+  it.each([
+    ['stale', 'retired-daily-notes', 99, ['pinned-before', 'pinned-after', 'today']],
+    ['wrong', 'ordinary', -10, ['today', 'pinned-before', 'pinned-after']],
+    ['missing', null, 1, ['pinned-before', 'today', 'pinned-after']],
+  ])('restores a daily note under the canonical container when its saved parent is %s', (
+    _label,
+    parentId,
+    originalIndex,
+    expectedOrder,
+  ) => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily-current', 'Daily Notes', 'daily-notes', [
+            item('pinned-before', 'Pinned before'),
+            systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+            item('pinned-after', 'Pinned after'),
+          ]),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+    const deleted = trashBullet(editor, 'today')!
+    deleted.originalParentId = parentId
+    deleted.originalIndex = originalIndex
+
+    expect(restoreBullet(editor, deleted)).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'today')?.ancestorIds)
+      .toEqual(['daily-current'])
+    expect(collectBullets(editor.state.doc)
+      .filter((entry) => entry.ancestorIds.length === 1 && entry.ancestorIds[0] === 'daily-current')
+      .map((entry) => entry.id))
+      .toEqual(expectedOrder)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'ordinary')?.ancestorIds)
+      .toEqual([])
+  })
+
+  it('does not restore a daily note when the canonical daily-notes container is absent', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('today', 'Today', 'daily-note', [item('journal', 'Journal')]),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+    const deleted = trashBullet(editor, 'today')!
+    const beforeRestore = editor.getJSON()
+
+    expect(restoreBullet(editor, deleted)).toBe(false)
+    expect(editor.getJSON()).toEqual(beforeRestore)
+  })
+
+  it('silently rejects direct title edits and deletion while keeping the title selectable', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [item('capture', 'Captured')]),
+          systemItem('daily', 'Daily Notes', 'daily-notes'),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+
+    const inbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    const rejected = vi.fn()
+    window.addEventListener('forage-system-node-rejected', rejected, { once: true })
+    const title = editor.view.dom.querySelector('[data-system-role="inbox"] > p')
+    expect(title?.getAttribute('contenteditable')).toBeNull()
+    expect(title?.getAttribute('aria-readonly')).toBe('true')
+    editor.commands.setTextSelection(inbox.pos + 3)
+    editor.commands.insertContent('renamed ')
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')?.text).toBe('Inbox')
+
+    const currentInbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    editor.view.dispatch(editor.state.tr.delete(currentInbox.pos, currentInbox.pos + currentInbox.node.nodeSize))
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')?.text).toBe('Inbox')
+    expect(rejected).not.toHaveBeenCalled()
+    window.removeEventListener('forage-system-node-rejected', rejected)
+  })
+
+  it('renders the bullet for a new Inbox child immediately after deleting the empty child', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [item('capture', 'Captured')]),
+          systemItem('daily', 'Daily Notes', 'daily-notes'),
+        ],
+      }],
+    })
+
+    setZoom(editor, 'inbox')
+    expect(updateBulletText(editor, 'capture', '')).toBe(true)
+    const capture = collectBullets(editor.state.doc).find((entry) => entry.id === 'capture')!
+    editor.commands.setTextSelection(capture.pos + 2)
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Backspace', bubbles: true, cancelable: true,
+    }))
+    expect(collectBullets(editor.state.doc).some((entry) => entry.id === 'capture')).toBe(false)
+    expect(currentBulletId(editor)).toBe('inbox')
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const children = collectBullets(editor.state.doc).filter((entry) => (
+      entry.ancestorIds.length === 1 && entry.ancestorIds[0] === 'inbox'
+    ))
+    expect(children).toHaveLength(1)
+    expect(children[0].text).toBe('')
+    expect(currentBulletId(editor)).toBe(children[0].id)
+    const childId = children[0].id
+    const beforeSecondEnter = editor.getJSON()
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const childrenAfterSecondEnter = collectBullets(editor.state.doc).filter((entry) => (
+      entry.ancestorIds.length === 1 && entry.ancestorIds[0] === 'inbox'
+    ))
+    const childRow = editor.view.dom.querySelector(`[data-node-id="${childId}"]`)
+    expect(editor.getJSON()).toEqual(beforeSecondEnter)
+    expect(currentBulletId(editor)).toBe(childId)
+    expect(childrenAfterSecondEnter).toHaveLength(1)
+    expect(childRow?.querySelector(':scope > .bullet-controls .bullet-dot')).toBeTruthy()
+    expect(childRow?.classList.contains('zoom-hidden')).toBe(false)
+  })
+
+  it('preserves a generated image beside an empty Inbox child removed with Backspace', () => {
+    const assetId = 'a'.repeat(64)
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [
+            item('capture', 'Captured'),
+            {
+              type: 'generatedImageItem',
+              content: [{
+                type: 'generatedImage',
+                attrs: { assetId, alt: 'Keep this image' },
+              }],
+            },
+          ]),
+          systemItem('daily', 'Daily Notes', 'daily-notes'),
+        ],
+      }],
+    })
+
+    expect(updateBulletText(editor, 'capture', '')).toBe(true)
+    const capture = collectBullets(editor.state.doc).find((entry) => entry.id === 'capture')!
+    editor.commands.setTextSelection(capture.pos + 2)
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Backspace', bubbles: true, cancelable: true,
+    }))
+
+    const inbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    const childList = Array.from({ length: inbox.node.childCount }, (_, index) => inbox.node.child(index))
+      .find((node) => node.type === editor.schema.nodes.bulletList)
+    expect(collectBullets(editor.state.doc).some((entry) => entry.id === 'capture')).toBe(false)
+    expect(currentBulletId(editor)).toBe('inbox')
+    expect(childList?.childCount).toBe(1)
+    expect(childList?.firstChild?.type.name).toBe('generatedImageItem')
+    expect(childList?.firstChild?.firstChild?.attrs).toMatchObject({ assetId, alt: 'Keep this image' })
+  })
+
+  it('accepts an explicitly trusted remote projection that updates a protected label', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [
+        systemItem('inbox', 'Inbox', 'inbox'),
+        systemItem('daily', 'Daily Notes', 'daily-notes'),
+      ] }],
+    })
+    const replacement = editor.schema.nodeFromJSON({
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [
+        systemItem('inbox', 'Inbox', 'inbox'),
+        systemItem('daily', 'Notes quotidiennes', 'daily-notes'),
+      ] }],
+    })
+    const transaction = editor.state.tr
+      .replaceWith(0, editor.state.doc.content.size, replacement.content)
+      .setMeta('forageRemote', true)
+    editor.view.dispatch(transaction)
+
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'daily')?.text)
+      .toBe('Notes quotidiennes')
+  })
+
+  it('allows direct edits beneath protected system roots', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [item('capture', 'Captured')]),
+          systemItem('daily', 'Daily Notes', 'daily-notes'),
+        ],
+      }],
+    })
+
+    const capture = collectBullets(editor.state.doc).find((entry) => entry.id === 'capture')!
+    editor.commands.setTextSelection(capture.pos + 2 + capture.text.length)
+    editor.commands.insertContent(' note')
+
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'capture')?.text).toBe('Captured note')
+  })
+
+  it('keeps ordinary descendants fully movable, trashable, and convertible', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox', [item('capture', 'Captured')]),
+          systemItem('daily', 'Daily Notes', 'daily-notes'),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+
+    expect(setBulletKind(editor, 'capture', 'todo')).toBe(true)
+    expect(moveBulletTo(editor, 'capture', 'ordinary', 'inside')).toBe(true)
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'capture')?.ancestorIds).toEqual(['ordinary'])
+    expect(trashBullet(editor, 'capture')).not.toBeNull()
+  })
+
+  it('makes protected keyboard indent, outdent, and full-document replacement no-ops', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [
+          systemItem('inbox', 'Inbox', 'inbox'),
+          systemItem('daily', 'Daily Notes', 'daily-notes', [
+            systemItem('today', 'Today', 'daily-note'),
+          ]),
+          item('ordinary', 'Ordinary'),
+        ],
+      }],
+    })
+    const before = editor.getJSON()
+    const inbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    editor.commands.setTextSelection(inbox.pos + 2)
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    const today = collectBullets(editor.state.doc).find((entry) => entry.id === 'today')!
+    editor.commands.setTextSelection(today.pos + 2)
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    editor.commands.selectAll()
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }))
+
+    expect(editor.getJSON()).toEqual(before)
   })
 
   it('cycles bullet, open todo, and completed todo with Mod-Enter', () => {

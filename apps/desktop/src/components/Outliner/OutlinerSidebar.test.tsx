@@ -9,9 +9,11 @@ import {
   OUTLINER_OPEN_SEARCH_EVENT,
   OUTLINER_POINTER_DRAG_EVENT,
   OutlinerUi,
+  setZoom,
 } from '../../editor/outlinerUi'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import { OutlinerSidebar } from './OutlinerSidebar'
+import { collectBullets, currentBulletId, focusFirstChildOrCreate, setBulletKind, toggleBulletCompleted } from '../../editor/outlineModel'
 
 function makeEditor(): Editor {
   return new Editor({
@@ -21,11 +23,33 @@ function makeEditor(): Editor {
       type: 'doc',
       content: [{
         type: 'bulletList',
-        content: [{
+        content: [
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'inbox', nodeType: 'user', collapsed: false, systemRole: 'inbox' },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+          },
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'daily', nodeType: 'user', collapsed: false, systemRole: 'daily-notes' },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Daily Notes' }] }],
+          },
+          {
           type: 'listItem',
           attrs: { nodeId: 'alpha', nodeType: 'user', collapsed: false },
           content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Alpha #research' }] }],
-        }],
+          },
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'open-task', nodeType: 'user', collapsed: false, bulletKind: 'todo', completed: false },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Open task' }] }],
+          },
+          {
+            type: 'listItem',
+            attrs: { nodeId: 'done-task', nodeType: 'user', collapsed: false, bulletKind: 'todo', completed: true },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Done task' }] }],
+          },
+        ],
       }],
     },
   })
@@ -139,8 +163,99 @@ describe('outliner sidebar', () => {
     expect(screen.queryByRole('heading', { name: 'Shortcuts' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Home' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Inbox' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Daily Notes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Trash' }))
     expect(onTrash).toHaveBeenCalledOnce()
+  })
+
+  it('keeps built-in destinations independent from user shortcuts and resolves roles on invocation', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onOpenOutline = vi.fn()
+    const onOpenTasks = vi.fn()
+    const inbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(inbox.pos, undefined, {
+      ...inbox.node.attrs,
+      collapsed: true,
+    }))
+    render(
+      <OutlinerSidebar
+        editor={editor}
+        shortcuts={[]}
+        onChange={onChange}
+        onOpenOutline={onOpenOutline}
+        onOpenTasks={onOpenTasks}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Inbox' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Daily Notes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tasks' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Inbox' }))
+    expect(getOutlinerUiState(editor).zoomId).toBe('inbox')
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')?.node.attrs.collapsed)
+      .toBe(false)
+    const selected = collectBullets(editor.state.doc).find((entry) => entry.id === currentBulletId(editor))
+    expect(selected).toMatchObject({ text: '', ancestorIds: ['inbox'], systemRole: null })
+    await user.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(onOpenTasks).toHaveBeenCalledOnce()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('shows a live count of open tasks in the Tasks sidebar item', () => {
+    render(<OutlinerSidebar editor={editor} shortcuts={[]} onChange={vi.fn()} />)
+
+    const tasksButton = screen.getByRole('button', { name: 'Tasks' })
+    expect(tasksButton.querySelector('.sidebar-tasks-count')?.textContent).toBe('1')
+
+    act(() => { setBulletKind(editor, 'alpha', 'todo') })
+    expect(tasksButton.querySelector('.sidebar-tasks-count')?.textContent).toBe('2')
+
+    act(() => { toggleBulletCompleted(editor, 'open-task') })
+    expect(tasksButton.querySelector('.sidebar-tasks-count')?.textContent).toBe('1')
+
+    act(() => {
+      setBulletKind(editor, 'alpha', 'bullet')
+      setBulletKind(editor, 'open-task', 'bullet')
+      setBulletKind(editor, 'done-task', 'bullet')
+    })
+    expect(tasksButton.querySelector('.sidebar-tasks-count')?.textContent).toBe('0')
+  })
+
+  it('marks only the current built-in destination as selected', () => {
+    const view = render(
+      <OutlinerSidebar editor={editor} shortcuts={[]} onChange={vi.fn()} />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('button', { name: 'Inbox' }).getAttribute('aria-current')).toBeNull()
+
+    act(() => setZoom(editor, 'inbox'))
+    expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Inbox' }).getAttribute('aria-current')).toBe('page')
+
+    act(() => {
+      focusFirstChildOrCreate(editor, 'inbox', () => 'inbox-child')
+      setZoom(editor, 'inbox-child')
+    })
+    expect(screen.getByRole('button', { name: 'Inbox' }).getAttribute('aria-current')).toBe('page')
+
+    act(() => setZoom(editor, 'daily'))
+    expect(screen.getByRole('button', { name: 'Inbox' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Daily Notes' }).getAttribute('aria-current')).toBe('page')
+
+    view.rerender(
+      <OutlinerSidebar
+        editor={editor}
+        shortcuts={[]}
+        activeView="tasks"
+        onChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Tasks' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('button', { name: 'Daily Notes' }).getAttribute('aria-current')).toBeNull()
   })
 
   it('reorders shortcuts by dragging their reorder grip', () => {
