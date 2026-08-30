@@ -39,6 +39,7 @@ import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 
 type View = 'outliner' | 'settings' | 'trash'
+type StorageBackend = { kind: 'local' } | { kind: 'server'; origin: string }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -60,6 +61,7 @@ export default function App() {
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
   const [syncState, setSyncState] = useState<SyncState>({ kind: 'offline' })
+  const [storageBackend, setStorageBackend] = useState<StorageBackend>({ kind: 'local' })
   const loadSettings = useSettingsStore((state) => state.load)
   const repository = useRef(new NativeEventRepository())
   const identity = useRef<LocalIdentity | null>(null)
@@ -135,6 +137,9 @@ export default function App() {
       }
       const localIdentity = await repository.current.identity()
       const connection = mode === 'server' ? await repository.current.serverConnection() : null
+      setStorageBackend(connection
+        ? { kind: 'server', origin: connection.origin }
+        : { kind: 'local' })
       const activeIdentity = connection ? { ...localIdentity, outlineId: connection.outlineId } : localIdentity
       identity.current = activeIdentity
       const replay = await repository.current.loadReplayInput(activeIdentity.outlineId)
@@ -405,6 +410,10 @@ export default function App() {
     )
   }
 
+  const storageBackendLabel = storageBackend.kind === 'server'
+    ? `server: ${storageBackend.origin}`
+    : 'local'
+
   return (
     <div id="app">
       {saveError && (
@@ -414,11 +423,13 @@ export default function App() {
           <button onClick={() => setSaveError(null)}>Dismiss</button>
         </div>
       )}
-      <div className={`sync-status sync-${syncState.kind}`} role="status">
-        {syncState.kind === 'up-to-date' ? 'Synced'
-          : syncState.kind === 'local-only' ? 'Local only'
-            : syncState.kind.replace(/-/g, ' ')}
-        {'message' in syncState ? `: ${syncState.message}` : ''}
+      <div
+        className={`storage-backend-widget sync-${syncState.kind}`}
+        role="status"
+        aria-label={`Storage backend: ${storageBackendLabel}`}
+        title={storageBackendLabel}
+      >
+        {storageBackendLabel}
       </div>
       {agentError && (
         <div className="agent-error-popup" role="alert">

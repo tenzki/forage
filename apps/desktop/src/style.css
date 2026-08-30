@@ -29,6 +29,25 @@ body {
   color: #888;
 }
 
+.storage-backend-widget {
+  position: fixed;
+  z-index: 80;
+  right: 16px;
+  bottom: 16px;
+  max-width: min(420px, calc(100vw - 32px));
+  overflow: hidden;
+  padding: 7px 11px;
+  border: 1px solid #dedbe6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 4px 16px rgba(32, 25, 48, 0.12);
+  color: #665f70;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ============================================================
    Outliner editor (single TipTap document)
    ============================================================ */

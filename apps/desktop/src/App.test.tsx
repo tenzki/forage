@@ -71,6 +71,74 @@ describe('App view switching', () => {
     ))
   })
 
+  it('shows local storage in a dedicated backend widget', async () => {
+    const { container } = await renderApp()
+
+    expect(screen.queryByRole('status', { name: 'Storage backend: local' })).not.toBeNull()
+    expect(container.querySelector('.storage-backend-widget')?.textContent).toBe('local')
+  })
+
+  it('shows the configured URL in the backend widget for server storage', async () => {
+    const state = {
+      schemaEpoch: 1,
+      trash: [],
+      shortcuts: [],
+      doc: {
+        type: 'doc',
+        content: [{
+          type: 'bulletList',
+          content: [{
+            type: 'listItem',
+            attrs: { nodeId: 'server-note', nodeType: 'user', collapsed: false },
+            content: [{ type: 'paragraph' }],
+          }],
+        }],
+      },
+    }
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'event_store_storage_mode') return 'server'
+      if (command === 'event_store_identity') {
+        return { outlineId: 'local-outline', actorId: 'owner-1', deviceId: 'device-1' }
+      }
+      if (command === 'server_connection_info') {
+        return { origin: 'https://notes.example.com', instanceId: 'instance-1', outlineId: 'outline-1' }
+      }
+      if (command === 'server_test_connection') {
+        return {
+          instanceId: 'instance-1', apiVersions: [1], eventVersions: { 'note.created': [1] },
+          documentSchemaVersion: 1, minimumClientVersion: '0.1.0',
+        }
+      }
+      if (command === 'server_checkpoint') {
+        return { checkpoint: {
+          id: 'server-checkpoint', outlineId: 'outline-1', documentVersion: 1,
+          schemaEpoch: 1, revision: 0, integrityHash: 'a'.repeat(64), state,
+        } }
+      }
+      if (command === 'event_store_latest_checkpoint') {
+        return {
+          id: 'local-checkpoint', outlineId: 'outline-1', documentVersion: 1,
+          schemaEpoch: 1, localSequence: 0, serverRevision: 0,
+          stateJson: JSON.stringify(state), integrityHash: 'a'.repeat(64),
+          createdAt: '2026-08-30T12:00:00.000Z',
+        }
+      }
+      if (command === 'event_store_events_after' || command === 'event_store_pending') return []
+      if (command === 'server_pull_events') {
+        return { events: [], currentRevision: 0, nextAfterRevision: null }
+      }
+      return undefined
+    })
+
+    const { container } = await renderApp()
+
+    expect(screen.queryByRole('status', {
+      name: 'Storage backend: server: https://notes.example.com',
+    })).not.toBeNull()
+    expect(container.querySelector('.storage-backend-widget')?.textContent)
+      .toBe('server: https://notes.example.com')
+  })
+
   it('persists undo as a compensating event targeting the durable typing event', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()
