@@ -104,6 +104,88 @@ fn keeps_superseded_pending_events_for_recovery_but_excludes_them_from_outbox() 
 }
 
 #[test]
+fn commits_an_accepted_rebase_as_one_local_transaction() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store
+        .append(&event("event-old", 0))
+        .expect("append original");
+    let mut pulled = event("event-remote", 0);
+    pulled.status = "accepted".to_string();
+    pulled.server_revision = Some(1);
+    let replacement = event("event-new", 1);
+
+    store
+        .commit_rebase(
+            "outline-1",
+            &[pulled],
+            &[("event-old".to_string(), replacement)],
+            1,
+            &[("event-new", 2)],
+        )
+        .expect("commit rebase");
+
+    assert_eq!(
+        store
+            .event("event-old")
+            .expect("old event")
+            .unwrap()
+            .superseded_by
+            .as_deref(),
+        Some("event-new")
+    );
+    assert!(store
+        .pending_events("outline-1", 100)
+        .expect("pending")
+        .is_empty());
+    let state = store.sync_state("outline-1").expect("sync state");
+    assert_eq!(state.last_pulled_revision, 1);
+    assert_eq!(state.last_acked_revision, 2);
+}
+
+#[test]
+fn rolls_back_every_local_rebase_write_when_one_event_conflicts() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store
+        .append(&event("event-old", 0))
+        .expect("append original");
+    let mut pulled = event("event-remote", 0);
+    pulled.status = "accepted".to_string();
+    pulled.server_revision = Some(1);
+    let mut conflicting_replacement = event("event-old", 1);
+    conflicting_replacement.envelope = json!({ "id": "event-old", "changed": true });
+
+    assert!(store
+        .commit_rebase(
+            "outline-1",
+            &[pulled],
+            &[("event-old".to_string(), conflicting_replacement)],
+            1,
+            &[("event-old", 2)],
+        )
+        .is_err());
+
+    assert!(store
+        .event("event-remote")
+        .expect("remote lookup")
+        .is_none());
+    assert_eq!(
+        store
+            .event("event-old")
+            .expect("old event")
+            .unwrap()
+            .superseded_by,
+        None
+    );
+    assert_eq!(
+        store
+            .sync_state("outline-1")
+            .expect("sync state")
+            .last_pulled_revision,
+        0
+    );
+}
+
+#[test]
 fn skips_a_corrupted_newest_checkpoint_and_uses_the_latest_verified_compatible_one() {
     let store = EventStore::open_in_memory().expect("open event store");
     let valid = CheckpointRecord {

@@ -6,6 +6,7 @@ import {
   type SerializedStep,
 } from '../../document/src'
 import type { EventEnvelope } from './envelope'
+import { canonicalJson, sha256HexSync } from './checkpoint'
 
 export type JsonObject = Record<string, unknown>
 
@@ -30,6 +31,7 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     case 'document.steps_applied':
     case 'document.undo_applied':
     case 'document.redo_applied': {
+      assertDocumentHash(state.doc, event.payload.beforeHash, event.id, 'before')
       const document = createOutlineSchema().nodeFromJSON(state.doc)
       const projected = applySerializedSteps(
         document,
@@ -43,6 +45,7 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
           throw new Error('A system-node migration replay unexpectedly requires a new node id.')
         }).doc
         : projected
+      assertDocumentHash(state.doc, event.payload.afterHash, event.id, 'after')
       return state
     }
     case 'shortcut.created':
@@ -65,9 +68,29 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
       return state
     }
     case 'trash.entry_added':
+      if (event.payload.document) {
+        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before')
+        const document = createOutlineSchema().nodeFromJSON(state.doc)
+        state.doc = applySerializedSteps(
+          document,
+          event.payload.document.steps as SerializedStep[],
+        ).toJSON() as JsonObject
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after')
+      }
       state.trash.push(clone(event.payload.entry))
       return state
     case 'trash.entry_restored':
+      if (event.payload.document) {
+        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before')
+        const document = createOutlineSchema().nodeFromJSON(state.doc)
+        state.doc = applySerializedSteps(
+          document,
+          event.payload.document.steps as SerializedStep[],
+        ).toJSON() as JsonObject
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after')
+      }
+      state.trash = state.trash.filter((entry) => entry.id !== event.payload.entryId)
+      return state
     case 'trash.entry_purged':
       state.trash = state.trash.filter((entry) => entry.id !== event.payload.entryId)
       return state
@@ -81,6 +104,17 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     }
     case 'asset.reference_added':
       return state
+  }
+}
+
+function assertDocumentHash(doc: JsonObject, expected: string, eventId: string, phase: 'before' | 'after'): void {
+  // ProseMirror supplies default attributes while parsing. Events are captured
+  // from that canonical form, so replay must compare the same representation
+  // even when an older checkpoint omitted default-valued attributes.
+  const canonicalDocument = createOutlineSchema().nodeFromJSON(doc).toJSON()
+  const actual = sha256HexSync(canonicalJson(canonicalDocument))
+  if (actual !== expected) {
+    throw new Error(`Document integrity mismatch ${phase} event ${eventId}: expected ${expected}, got ${actual}.`)
   }
 }
 

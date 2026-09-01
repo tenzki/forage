@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
+import type { Transaction } from '@tiptap/pm/state'
 import { OutlinerEditor } from './editor/OutlinerEditor'
 import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
@@ -17,8 +18,11 @@ import {
   NativeEventRepository,
   type LocalIdentity,
 } from './persistence/eventStore'
-import { buildDocumentEvent } from './editor/eventCapture'
-import { mergeAgentDocumentEvents } from './editor/agentEventBatch'
+import {
+  captureDocumentEvent,
+  DOMAIN_MUTATION_META,
+  finalizeDocumentEvent,
+} from './editor/eventCapture'
 import {
   dispatchPersistentRedo,
   dispatchPersistentUndo,
@@ -31,7 +35,7 @@ import { DesktopSyncEngine, NativeSyncTransport, type SyncState } from './sync/s
 import { EMPTY_DOC, normalizeOutlinerDoc } from './editor/emptyDoc'
 import {
   createInitialOutlineState,
-  buildSystemNodeRepairEvent,
+  buildDocumentRepairEvent,
   replayOutlineEvents,
   sha256Hex,
   type EventEnvelope,
@@ -49,12 +53,33 @@ import { findSystemNode } from '@forage/document'
 import { focusFirstChildOrCreate } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
+import { setEditorMutationLocked } from './editor/extensions'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 type StorageBackend = { kind: 'local' } | { kind: 'server'; origin: string }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function inlineHistoryKey(transaction: Transaction): string | null {
+  if (transaction.steps.length !== 1) return null
+  const step = transaction.steps[0].toJSON() as {
+    stepType?: string
+    from?: number
+    to?: number
+    slice?: { content?: Array<{ type?: string }> }
+  }
+  if (step.stepType !== 'replace' || step.from === undefined || step.to === undefined) return null
+  if (step.slice?.content?.some((node) => !['text', 'hardBreak'].includes(node.type ?? ''))) return null
+  const from = transaction.before.resolve(step.from)
+  const to = transaction.before.resolve(step.to)
+  if (from.parent !== to.parent || !['paragraph', 'bulletNote'].includes(from.parent.type.name)) return null
+  for (let depth = from.depth; depth >= 0; depth -= 1) {
+    const node = from.node(depth)
+    if (node.type.name === 'listItem') return `${String(node.attrs.nodeId)}:${from.parent.type.name}`
+  }
+  return null
 }
 
 export default function App() {
@@ -80,15 +105,21 @@ export default function App() {
   const localSequence = useRef(0)
   const serverRevision = useRef(0)
   const appendQueue = useRef<Promise<void>>(Promise.resolve())
-  const failedEvents = useRef<EventEnvelope[]>([])
+  const failedOperations = useRef<Array<() => Promise<void>>>([])
+  const persistenceBlocked = useRef(false)
   const persistentHistory = useRef<PersistentHistoryState>({ undo: [], redo: [] })
-  const activeChangeGroup = useRef<{ id: string; at: number; origin: string } | null>(null)
-  const pendingAgentEvents = useRef<Extract<EventEnvelope, { type: 'document.steps_applied' }>[]>([])
-  const agentBatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeChangeGroup = useRef<{ id: string; at: number; key: string } | null>(null)
+  const activeAgentCalls = useRef(new Set<string>())
   const syncInProgress = useRef(false)
   const checkpointInProgress = useRef(false)
 
   const handleActivity = useCallback((event: ActivityEvent) => {
+    if (!event.callId) {
+      if (event.phase === 'start') activeAgentCalls.current.add(event.id)
+      else if (event.phase === 'complete' || event.phase === 'error' || event.phase === 'cancelled') {
+        activeAgentCalls.current.delete(event.id)
+      }
+    }
     setActivityCalls((current) => {
       const status = event.status ?? (
         event.phase === 'start' ? 'running' :
@@ -156,7 +187,12 @@ export default function App() {
       identity.current = activeIdentity
       const replay = await repository.current.loadReplayInput(activeIdentity.outlineId)
       const allRecords = await repository.current.eventsAfter(activeIdentity.outlineId, 0) ?? []
-      persistentHistory.current = rebuildPersistentHistory(allRecords.map((record) => record.envelope as EventEnvelope))
+      persistentHistory.current = rebuildPersistentHistory(
+        allRecords
+          .filter((record) => !record.supersededBy)
+          .map((record) => record.envelope as EventEnvelope),
+        activeIdentity.deviceId,
+      )
       let state: OutlineState
       if (replay) {
         state = replayOutlineEvents(replay.state, replay.events)
@@ -179,15 +215,19 @@ export default function App() {
           createdAt: new Date().toISOString(),
         })
       }
-      const systemNodeMigration = await buildSystemNodeRepairEvent(state, {
+      const normalizedDoc = normalizeOutlinerDoc(
+        state.doc as JsonValue,
+        () => crypto.randomUUID(),
+      ) as Record<string, unknown>
+      const systemNodeMigration = await buildDocumentRepairEvent(state, normalizedDoc, {
         ...activeIdentity,
         baseRevision: serverRevision.current,
         nextEventId: () => crypto.randomUUID(),
-        nextNodeId: () => crypto.randomUUID(),
       })
       if (systemNodeMigration) {
         localSequence.current = await repository.current.append(systemNodeMigration.event)
         state = systemNodeMigration.state
+        persistentHistory.current = { undo: [], redo: [] }
       }
       const doc = state.doc as JsonValue
       setInitialContent(doc)
@@ -208,41 +248,60 @@ export default function App() {
   useEffect(() => {
     if (!editor || !identity.current) return
     let disposed = false
-    const synchronize = async () => {
-      if (syncInProgress.current) return
+    const synchronize = () => {
+      if (syncInProgress.current || activeAgentCalls.current.size > 0) return
       syncInProgress.current = true
-      try {
-        const engine = new DesktopSyncEngine(repository.current, new NativeSyncTransport(), (state) => {
-          if (disposed) return
-          setSyncState(state)
-          if (state.kind === 'up-to-date') serverRevision.current = state.revision
-        })
-        await engine.sync()
-        if (disposed || engine.state.kind !== 'up-to-date' || !identity.current) return
-        const replay = await repository.current.loadReplayInput(identity.current.outlineId)
-        if (!replay) return
-        const projected = replayOutlineEvents(replay.state, replay.events)
-        const nextDoc = projected.doc as JsonValue
-        if (JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)) {
-          const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
-          const transaction = editor.state.tr
-            .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
-            .setMeta('forageRemote', true)
-            .setMeta('preventUpdate', true)
-            .setMeta('addToHistory', false)
-          editor.view.dispatch(transaction)
-          if (!editor.state.doc.eq(projectedDoc)) {
-            throw new Error('The synchronized outline projection could not be applied.')
+      const wasEditable = editor.isEditable
+      const application = editor.view.dom.closest<HTMLElement>('#app')
+      setEditorMutationLocked(editor, true)
+      editor.setEditable(false)
+      if (application) application.inert = true
+      const run = async () => {
+        try {
+          if (disposed || persistenceBlocked.current) return
+          const engine = new DesktopSyncEngine(repository.current, new NativeSyncTransport(), (state) => {
+            if (disposed) return
+            setSyncState(state)
+            if (state.kind === 'up-to-date') serverRevision.current = state.revision
+          })
+          await engine.sync()
+          if (disposed || engine.state.kind !== 'up-to-date' || !identity.current) return
+          const replay = await repository.current.loadReplayInput(identity.current.outlineId)
+          if (!replay) return
+          const projected = replayOutlineEvents(replay.state, replay.events)
+          const nextDoc = projected.doc as JsonValue
+          const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
+          if (documentChanged) {
+            const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
+            const transaction = editor.state.tr
+              .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
+              .setMeta('forageRemote', true)
+              .setMeta('preventUpdate', true)
+              .setMeta('addToHistory', false)
+            editor.view.dispatch(transaction)
+            if (!editor.state.doc.eq(projectedDoc)) {
+              throw new Error('The synchronized outline projection could not be applied.')
+            }
           }
           liveDoc.current = nextDoc
+          if (documentChanged || engine.historyInvalidated) {
+            activeChangeGroup.current = null
+            persistentHistory.current = { undo: [], redo: [] }
+          }
+          setTrash(projected.trash as unknown as TrashEntry[])
+          setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
+        } catch (error) {
+          if (!disposed) setSyncState({ kind: 'server-unavailable', message: errorMessage(error) })
+        } finally {
+          syncInProgress.current = false
+          setEditorMutationLocked(editor, false)
+          if (!editor.isDestroyed) editor.setEditable(wasEditable)
+          if (application) application.inert = false
         }
-        setTrash(projected.trash as unknown as TrashEntry[])
-        setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
-      } catch (error) {
-        if (!disposed) setSyncState({ kind: 'server-unavailable', message: errorMessage(error) })
-      } finally { syncInProgress.current = false }
+      }
+      appendQueue.current = appendQueue.current.then(run)
     }
-    const timer = window.setInterval(() => void synchronize(), 15_000)
+    const timer = window.setInterval(synchronize, 15_000)
     return () => { disposed = true; window.clearInterval(timer) }
   }, [editor])
 
@@ -268,92 +327,106 @@ export default function App() {
 
   const handleDocChange = useCallback((doc: JsonValue) => { liveDoc.current = doc }, [])
 
-  const appendEvent = useCallback((event: EventEnvelope) => {
-    appendQueue.current = appendQueue.current.then(async () => {
+  const persistEventNow = useCallback(async (event: EventEnvelope) => {
+    localSequence.current = await repository.current.append(event)
+    if (localSequence.current > 0 && localSequence.current % 100 === 0 && !checkpointInProgress.current) {
+      // A server-mode checkpoint may only contain acknowledged events. Including
+      // pending edits would make the pre-rebase document impossible to recover.
+      if (await repository.current.storageMode() === 'server') return
+      checkpointInProgress.current = true
       try {
-        localSequence.current = await repository.current.append(event)
-        if (localSequence.current > 0 && localSequence.current % 100 === 0 && !checkpointInProgress.current) {
-          checkpointInProgress.current = true
-          try {
-            const replay = await repository.current.loadReplayInput(event.outlineId)
-            if (replay) {
-              const state = replayOutlineEvents(replay.state, replay.events)
-              const stateJson = JSON.stringify(state)
-              await repository.current.saveCheckpoint({
-                id: crypto.randomUUID(), outlineId: event.outlineId,
-                documentVersion: 1, schemaEpoch: state.schemaEpoch,
-                localSequence: localSequence.current,
-                serverRevision: Math.max(replay.checkpoint.serverRevision, ...replay.events.map((candidate) => candidate.revision ?? 0)),
-                stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
-              })
-            }
-          } finally { checkpointInProgress.current = false }
+        const replay = await repository.current.loadReplayInput(event.outlineId)
+        if (replay) {
+          const state = replayOutlineEvents(replay.state, replay.events)
+          const stateJson = JSON.stringify(state)
+          await repository.current.saveCheckpoint({
+            id: crypto.randomUUID(), outlineId: event.outlineId,
+            documentVersion: 1, schemaEpoch: state.schemaEpoch,
+            localSequence: localSequence.current,
+            serverRevision: Math.max(replay.checkpoint.serverRevision, ...replay.events.map((candidate) => candidate.revision ?? 0)),
+            stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
+          })
         }
+      } finally { checkpointInProgress.current = false }
+    }
+  }, [])
+
+  const enqueueOperation = useCallback((operation: () => Promise<void>) => {
+    appendQueue.current = appendQueue.current.then(async () => {
+      if (persistenceBlocked.current) {
+        failedOperations.current.push(operation)
+        return
+      }
+      try {
+        await operation()
         setSaveError(null)
       } catch (error) {
-        failedEvents.current.push(event)
+        persistenceBlocked.current = true
+        failedOperations.current.push(operation)
         setSaveError(errorMessage(error))
       }
     })
   }, [])
 
-  const flushAgentEvents = useCallback(() => {
-    if (agentBatchTimer.current) clearTimeout(agentBatchTimer.current)
-    agentBatchTimer.current = null
-    const batch = pendingAgentEvents.current.splice(0)
-    if (batch.length === 0) return
-    const event = mergeAgentDocumentEvents(batch)
-    recordDocumentChange(persistentHistory.current, event)
-    appendEvent(event)
-    for (const reference of createAssetReferenceEvents(event, () => crypto.randomUUID())) appendEvent(reference)
-  }, [appendEvent])
-
-  useEffect(() => () => flushAgentEvents(), [flushAgentEvents])
+  const appendEvent = useCallback((event: EventEnvelope) => {
+    enqueueOperation(() => persistEventNow(event))
+  }, [enqueueOperation, persistEventNow])
 
   const handleEditorTransaction = useCallback((
-    transaction: Parameters<typeof buildDocumentEvent>[0],
-    appendedTransactions: Parameters<typeof buildDocumentEvent>[1],
+    transaction: Parameters<typeof captureDocumentEvent>[0],
+    appendedTransactions: Parameters<typeof captureDocumentEvent>[1],
   ) => {
     const currentIdentity = identity.current
     if (!currentIdentity) return
     const systemMaintenance = transaction.getMeta(SYSTEM_MAINTENANCE_META) === true
     const transactionOrigin = String(transaction.getMeta('forageOrigin') ?? 'desktop')
     const compensation = transaction.getMeta('forageCompensation')
+    const domainMutation = transaction.getMeta(DOMAIN_MUTATION_META)
+    const explicitGroup = transaction.getMeta('forageChangeGroup')
+    const historyExcluded = transaction.getMeta('addToHistory') === false
     const now = Date.now()
+    const inlineKey = appendedTransactions.some((appended) => appended.docChanged)
+      ? null
+      : inlineHistoryKey(transaction)
+    const historyKey = transactionOrigin === 'agent'
+      ? `agent:${String(explicitGroup ?? 'unscoped')}`
+      : inlineKey ? `desktop:${inlineKey}` : null
     const prior = activeChangeGroup.current
-    const canReuseGroup = !compensation && prior?.origin === transactionOrigin
-      && now - prior.at <= (transactionOrigin === 'agent' ? 250 : 500)
+    const canReuseGroup = !compensation && historyKey !== null && prior?.key === historyKey
+      && (transactionOrigin === 'agent' || now - prior.at <= 500)
     const changeGroupId = systemMaintenance
       ? `system:${crypto.randomUUID()}`
       : canReuseGroup ? prior.id : crypto.randomUUID()
-    activeChangeGroup.current = compensation || systemMaintenance
+    activeChangeGroup.current = compensation || systemMaintenance || domainMutation || historyKey === null
       ? null
-      : { id: changeGroupId, at: now, origin: transactionOrigin }
-    void buildDocumentEvent(transaction, appendedTransactions, {
+      : { id: changeGroupId, at: now, key: historyKey }
+    const captured = captureDocumentEvent(transaction, appendedTransactions, {
       ...currentIdentity,
       baseRevision: serverRevision.current,
       nextEventId: () => crypto.randomUUID(),
       nextChangeGroupId: () => changeGroupId,
-    }).then((event) => {
-      if (!event) return
-      if (transactionOrigin === 'agent' && event.type === 'document.steps_applied') {
-        pendingAgentEvents.current.push(event)
-        if (pendingAgentEvents.current.reduce((count, candidate) => count + candidate.payload.steps.length, 0) >= 1_000) {
-          flushAgentEvents()
-        } else {
-          if (agentBatchTimer.current) clearTimeout(agentBatchTimer.current)
-          agentBatchTimer.current = setTimeout(flushAgentEvents, 150)
-        }
-        return
-      }
-      if (!systemMaintenance) recordDocumentChange(persistentHistory.current, event)
-      appendEvent(event)
+    })
+    if (!captured) return
+    const historyEligible = !systemMaintenance
+      && !domainMutation
+      && captured.type === 'document.steps_applied'
+      && (!historyExcluded || transactionOrigin === 'agent')
+    if (historyEligible && captured.type === 'document.steps_applied') {
+      recordDocumentChange(persistentHistory.current, captured)
+    } else if (!compensation) {
+      // An untracked document rewrite invalidates positional inverse steps.
+      persistentHistory.current = { undo: [], redo: [] }
+    }
+    enqueueOperation(async () => {
+      const event = await finalizeDocumentEvent(captured)
+      await persistEventNow(event)
       if (event.type === 'document.steps_applied') {
-        for (const reference of createAssetReferenceEvents(event, () => crypto.randomUUID())) appendEvent(reference)
+        for (const reference of createAssetReferenceEvents(event, () => crypto.randomUUID())) {
+          await persistEventNow(reference)
+        }
       }
     })
-      .catch((error) => setSaveError(errorMessage(error)))
-  }, [appendEvent, flushAgentEvents])
+  }, [enqueueOperation, persistEventNow])
 
   const handleUndo = useCallback((currentEditor: Editor): boolean => {
     activeChangeGroup.current = null
@@ -388,37 +461,35 @@ export default function App() {
   }, [appendEvent, domainContext])
 
   const handleTrashChange = useCallback((next: TrashEntry[]) => {
-    setTrash((current) => {
-      const context = domainContext()
-      if (context) {
-        const currentIds = new Set(current.map((entry) => entry.id))
-        for (const entry of next) {
-          if (!currentIds.has(entry.id)) {
-            for (const event of createDomainEvents({ type: 'trash', operation: 'add', entry }, context)) appendEvent(event)
-          }
-        }
-      }
-      return next
-    })
-  }, [appendEvent, domainContext])
+    setTrash(next)
+  }, [])
 
   const removeTrashEntry = useCallback((operation: 'restore' | 'purge', entry: TrashEntry) => {
-    const context = domainContext()
-    if (context) {
+    const context = operation === 'purge' ? domainContext() : null
+    if (context && operation === 'purge') {
       for (const event of createDomainEvents({ type: 'trash', operation, entry }, context)) appendEvent(event)
     }
     setTrash((current) => current.filter((candidate) => candidate.id !== entry.id))
   }, [appendEvent, domainContext])
 
   async function retrySave() {
-    try {
-      const retry = failedEvents.current
-      failedEvents.current = []
-      for (const event of retry) localSequence.current = await repository.current.append(event)
+    const retryOperation = appendQueue.current.then(async () => {
+      const retry = failedOperations.current.splice(0)
+      persistenceBlocked.current = false
+      for (let index = 0; index < retry.length; index += 1) {
+        try {
+          await retry[index]()
+        } catch (error) {
+          persistenceBlocked.current = true
+          failedOperations.current.push(...retry.slice(index))
+          setSaveError(errorMessage(error))
+          return
+        }
+      }
       setSaveError(null)
-    } catch (error) {
-      setSaveError(errorMessage(error))
-    }
+    })
+    appendQueue.current = retryOperation
+    await retryOperation
   }
 
   async function startEmpty() {
@@ -434,6 +505,8 @@ export default function App() {
     })
     setInitialContent(doc)
     liveDoc.current = doc
+    activeChangeGroup.current = null
+    persistentHistory.current = { undo: [], redo: [] }
     setTrash([])
     setShortcuts([])
     setLoadError(null)

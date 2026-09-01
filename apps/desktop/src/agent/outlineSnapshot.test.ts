@@ -5,10 +5,12 @@ import {
   BulletAttributes,
   OutlinerKeymap,
 } from '../editor/extensions'
+import { BulletNote } from '../editor/bulletNote'
 import {
   GeneratedImage,
   GeneratedImageItem,
   OutlineBulletList,
+  OutlineListItem,
 } from '../editor/generatedImage'
 import {
   buildOutlineSnapshot,
@@ -21,11 +23,13 @@ function makeEditor(content: object): Editor {
   return new Editor({
     element: document.createElement('div'),
     extensions: [
-      StarterKit.configure({ bulletList: false }),
+      StarterKit.configure({ bulletList: false, listItem: false }),
+      OutlineListItem,
       OutlineBulletList,
       GeneratedImageItem,
       GeneratedImage,
       BulletAttributes,
+      BulletNote,
       OutlinerKeymap,
     ],
     content,

@@ -1,7 +1,7 @@
 // Editor extensions for the single-document outliner.
 //
-// Two small extensions on top of StarterKit (listItem, paragraph, marks, and
-// native undo/redo history) plus the custom outline bullet list:
+// Two small extensions on top of StarterKit's editing primitives plus the
+// custom outline list schema:
 //
 //   - BulletAttributes: adds stable `nodeId` + `nodeType` attrs to every
 //     listItem, and auto-assigns a nodeId to any new listItem. This lets the
@@ -22,6 +22,12 @@ import {
 } from './systemNodeGuards'
 
 const idPluginKey = new PluginKey('bulletNodeIds')
+const mutationLockedEditors = new WeakSet<Editor>()
+
+export function setEditorMutationLocked(editor: Editor, locked: boolean): void {
+  if (locked) mutationLockedEditors.add(editor)
+  else mutationLockedEditors.delete(editor)
+}
 
 export const BulletAttributes = StableBulletAttributes.extend({
   name: 'bulletAttributes',
@@ -29,10 +35,12 @@ export const BulletAttributes = StableBulletAttributes.extend({
   // pasted content, or agent-inserted nodes). Runs as an appendTransaction so the
   // ids land in the same history step as the edit that created them.
   addProseMirrorPlugins() {
+    const editor = this.editor
     return [
       new Plugin({
         key: idPluginKey,
         filterTransaction: (transaction, state) => {
+          if (mutationLockedEditors.has(editor) && transaction.getMeta('forageRemote') !== true) return false
           if (!transaction.docChanged || transaction.getMeta('forageRemote') === true) return true
           return preservesProtectedSystemNodes(
             state.doc,
@@ -154,17 +162,49 @@ function removeEmptySystemChild(editor: Editor): boolean {
   return true
 }
 
-function insertBulletAtParentEnd(editor: Editor): boolean {
+function freshBullet(editor: Editor, paragraph = editor.state.schema.nodes.paragraph.create()) {
+  return editor.state.schema.nodes.listItem.create({
+    nodeId: newNodeId(),
+    nodeType: 'user',
+    collapsed: false,
+    bulletKind: 'bullet',
+    completed: false,
+    systemRole: null,
+    dailyDate: null,
+  }, paragraph)
+}
+
+function handleTitleEnter(editor: Editor): boolean {
   const { state, view } = editor
   const { $from } = state.selection
   if (!state.selection.empty || $from.parent.type !== state.schema.nodes.paragraph) return false
-  if ($from.parentOffset !== $from.parent.content.size) return false
 
   const itemDepth = $from.depth - 1
   if (itemDepth < 1 || $from.node(itemDepth).type !== state.schema.nodes.listItem) return false
   if ($from.index(itemDepth) !== 0) return false
 
   const listItem = $from.node(itemDepth)
+  const itemPos = $from.before(itemDepth)
+  if ($from.parentOffset === 0 && $from.parent.content.size > 0) {
+    const item = freshBullet(editor)
+    const tr = state.tr.insert(itemPos, item)
+    tr.setSelection(TextSelection.create(tr.doc, itemPos + 2))
+    view.dispatch(tr.scrollIntoView())
+    return true
+  }
+  if ($from.parentOffset < $from.parent.content.size) {
+    const suffix = $from.parent.content.cut($from.parentOffset)
+    const paragraph = state.schema.nodes.paragraph.create($from.parent.attrs, suffix)
+    const item = freshBullet(editor, paragraph)
+    const deleteTo = $from.start() + $from.parent.content.size
+    const removedSize = deleteTo - $from.pos
+    const insertPos = $from.after(itemDepth) - removedSize
+    const tr = state.tr.delete($from.pos, deleteTo).insert(insertPos, item)
+    tr.setSelection(TextSelection.create(tr.doc, insertPos + 2))
+    view.dispatch(tr.scrollIntoView())
+    return true
+  }
+
   let nestedListOffset = -1
   let childOffset = 0
   listItem.forEach((child) => {
@@ -174,20 +214,20 @@ function insertBulletAtParentEnd(editor: Editor): boolean {
     childOffset += child.nodeSize
   })
   if (nestedListOffset < 0) {
-    if (!listItem.attrs.systemRole) return false
-    const insertPos = $from.before(itemDepth) + listItem.nodeSize - 1
-    const paragraph = state.schema.nodes.paragraph.create()
-    const childItem = state.schema.nodes.listItem.create({
-      nodeId: newNodeId(),
-      nodeType: 'user',
-      collapsed: false,
-      bulletKind: 'bullet',
-      completed: false,
-      systemRole: null,
-      dailyDate: null,
-    }, paragraph)
-    const childList = state.schema.nodes.bulletList.create(null, childItem)
-    const tr = state.tr.insert(insertPos, childList)
+    if (!listItem.attrs.systemRole) {
+      const insertPos = $from.after(itemDepth)
+      const tr = state.tr.insert(insertPos, freshBullet(editor))
+      tr.setSelection(TextSelection.create(tr.doc, insertPos + 2))
+      view.dispatch(tr.scrollIntoView())
+      return true
+    }
+    const insertPos = itemPos + listItem.nodeSize - 1
+    const childList = state.schema.nodes.bulletList.create(null, freshBullet(editor))
+    const tr = state.tr
+    if (listItem.attrs.collapsed) {
+      tr.setNodeMarkup(itemPos, undefined, { ...listItem.attrs, collapsed: false })
+    }
+    tr.insert(insertPos, childList)
     tr.setSelection(TextSelection.create(tr.doc, insertPos + 3))
     view.dispatch(tr.scrollIntoView())
     return true
@@ -197,9 +237,7 @@ function insertBulletAtParentEnd(editor: Editor): boolean {
   const insertPos = listItem.attrs.collapsed
     ? $from.after(itemDepth)
     : nestedListPos + 1
-  const paragraph = state.schema.nodes.paragraph.create()
-  const childItem = state.schema.nodes.listItem.create(null, paragraph)
-  const tr = state.tr.insert(insertPos, childItem)
+  const tr = state.tr.insert(insertPos, freshBullet(editor))
   tr.setSelection(TextSelection.create(tr.doc, insertPos + 2))
   view.dispatch(tr.scrollIntoView())
   return true
@@ -215,7 +253,7 @@ export const OutlinerKeymap = Extension.create({
       Delete: () => preserveEmptyOutline(this.editor),
       Enter: () => {
         if (getEmptySystemChild(this.editor)) return true
-        return insertBulletAtParentEnd(this.editor)
+        return handleTitleEnter(this.editor)
       },
       Tab: () => {
         const nodeId = currentBulletId(this.editor)

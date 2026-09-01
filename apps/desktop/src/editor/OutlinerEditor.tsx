@@ -1,22 +1,22 @@
-// The whole outliner is ONE TipTap editor. Bullets are listItems; nesting is
-// real document nesting. Undo/redo is ProseMirror's native history — no Rust
-// undo table, no Zustand wrapper, no debounce race. This is the structural fix
-// for the undo bugs in the old per-node-editor model.
+// The whole outliner is ONE TipTap editor. Bullets are listItems and nesting is
+// real document nesting. Durable compensating events are the sole undo/redo
+// authority, so StarterKit's in-memory history must stay disabled.
 
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { useEffect } from 'react'
 import { useRef } from 'react'
-import type { Transaction } from '@tiptap/pm/state'
+import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import { BulletAttributes, OutlinerKeymap } from './extensions'
 import { BulletNote } from './bulletNote'
 import { SkillContextPreview } from './contextPreview'
-import { GeneratedImage, GeneratedImageItem, OutlineBulletList } from './generatedImage'
+import { GeneratedImage, GeneratedImageItem, OutlineBulletList, OutlineListItem } from './generatedImage'
 import { InternalLink } from './internalLinks'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
 import { SlashCommandDecorations } from './slashCommands'
 import { EMPTY_DOC, normalizeOutlinerDoc } from './emptyDoc'
+import { collectBullets } from './outlineModel'
 import type { JsonValue } from '../types/tree'
 import { resolveAssetImages } from './assetImages'
 
@@ -46,11 +46,18 @@ export function OutlinerEditor({
   const undoHandler = useRef(onUndo)
   const redoHandler = useRef(onRedo)
   const editorRef = useRef<Editor | null>(null)
+  const content = normalizeOutlinerDoc(initialContent ?? EMPTY_DOC)
   undoHandler.current = onUndo
   redoHandler.current = onRedo
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      StarterKit.configure({
+        bulletList: false,
+        listItem: false,
+        trailingNode: false,
+        undoRedo: false,
+      }),
+      OutlineListItem,
       OutlineBulletList,
       GeneratedImageItem,
       GeneratedImage,
@@ -63,7 +70,7 @@ export function OutlinerEditor({
       SkillContextPreview,
       OutlinerUi,
     ],
-    content: normalizeOutlinerDoc(initialContent ?? EMPTY_DOC) as object,
+    content: content as object,
     editorProps: {
       attributes: {
         autocomplete: 'off',
@@ -76,11 +83,29 @@ export function OutlinerEditor({
         if (!modifier || event.altKey || event.key.toLowerCase() !== 'z') return false
         const current = editorRef.current
         if (!current) return false
-        const handled = event.shiftKey
-          ? redoHandler.current?.(current) ?? false
-          : undoHandler.current?.(current) ?? false
-        if (handled) event.preventDefault()
-        return handled
+        if (event.shiftKey) {
+          redoHandler.current?.(current)
+        } else {
+          undoHandler.current?.(current)
+        }
+        // Never let Mod-Z fall through to the browser or another history
+        // implementation, even when the durable stack is exhausted.
+        event.preventDefault()
+        return true
+      },
+      handleDOMEvents: {
+        mousedown: (view, event) => {
+          if (event.target !== view.dom) return false
+          const editable = collectBullets(view.state.doc)
+            .slice()
+            .reverse()
+            .find((entry) => entry.systemRole === null)
+          if (!editable) return false
+          event.preventDefault()
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, editable.pos + 2)))
+          view.focus()
+          return true
+        },
       },
     },
     onUpdate: ({ editor }) => {
@@ -91,6 +116,20 @@ export function OutlinerEditor({
     },
   })
   editorRef.current = editor
+
+  useEffect(() => {
+    if (!editor) return
+    const bullets = collectBullets(editor.state.doc)
+    const trailing = bullets[bullets.length - 1]
+    if (
+      trailing
+      && trailing.systemRole === null
+      && trailing.text.length === 0
+      && trailing.noteText.length === 0
+    ) {
+      editor.commands.setTextSelection(trailing.pos + 2)
+    }
+  }, [editor])
 
   useEffect(() => {
     if (editor && onReady) onReady(editor)

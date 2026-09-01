@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes } from './extensions'
+import { BulletNote } from './bulletNote'
 import {
   GeneratedImage,
   GeneratedImageItem,
   OutlineBulletList,
+  OutlineListItem,
   validateGeneratedImage,
 } from './generatedImage'
 
@@ -16,11 +18,13 @@ function makeEditor(content: object): Editor {
   const editor = new Editor({
     element: document.createElement('div'),
     extensions: [
-      StarterKit.configure({ bulletList: false }),
+      StarterKit.configure({ bulletList: false, listItem: false }),
+      OutlineListItem,
       OutlineBulletList,
       GeneratedImageItem,
       GeneratedImage,
       BulletAttributes,
+      BulletNote,
     ],
     content,
   })

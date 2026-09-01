@@ -47,6 +47,26 @@ export interface ServerConnectionInfo {
   outlineId: string
 }
 
+export interface RebaseCommit {
+  pulledEvents: EventEnvelope[]
+  replacements: Array<{ originalId: string; event: EventEnvelope }>
+  pulledRevision: number
+  acknowledgements: Array<[string, number]>
+}
+
+function eventRecord(event: EventEnvelope) {
+  return {
+    id: event.id,
+    outlineId: event.outlineId,
+    baseRevision: event.baseRevision,
+    serverRevision: event.revision ?? null,
+    envelope: event,
+    status: event.revision === undefined ? 'pending' : 'accepted',
+    supersededBy: null,
+    createdAt: event.occurredAt,
+  }
+}
+
 export class NativeEventRepository {
   async identity(): Promise<LocalIdentity> {
     return invoke('event_store_identity')
@@ -59,16 +79,17 @@ export class NativeEventRepository {
   async append(eventValue: unknown): Promise<number> {
     const event = parseEventEnvelope(eventValue)
     return invoke<number>('event_store_append', {
-      event: {
-        id: event.id,
-        outlineId: event.outlineId,
-        baseRevision: event.baseRevision,
-        serverRevision: event.revision ?? null,
-        envelope: event,
-        status: event.revision === undefined ? 'pending' : 'accepted',
-        supersededBy: null,
-        createdAt: event.occurredAt,
-      },
+      event: eventRecord(event),
+    })
+  }
+
+  async commitRebase(outlineId: string, commit: RebaseCommit): Promise<void> {
+    await invoke('event_store_commit_rebase', {
+      outlineId,
+      pulledEvents: commit.pulledEvents.map(eventRecord),
+      replacements: commit.replacements.map(({ originalId, event }) => [originalId, eventRecord(event)]),
+      pulledRevision: commit.pulledRevision,
+      acknowledgements: commit.acknowledgements,
     })
   }
 
@@ -95,7 +116,12 @@ export class NativeEventRepository {
       state,
       events: records
         .filter((record) => !record.supersededBy)
-        .map((record) => parseEventEnvelope(record.envelope)),
+        .map((record) => {
+          const event = parseEventEnvelope(record.envelope)
+          return typeof record.serverRevision === 'number' && event.revision === undefined
+            ? parseEventEnvelope({ ...event, revision: record.serverRevision })
+            : event
+        }),
     }
   }
 

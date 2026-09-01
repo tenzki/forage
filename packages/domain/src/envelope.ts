@@ -37,8 +37,14 @@ const eventPayloadSchemas = {
     toVersion: positiveVersion,
     checkpointHash: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict(),
-  'trash.entry_added': z.object({ entry: z.record(z.string(), z.unknown()) }).strict(),
-  'trash.entry_restored': z.object({ entryId: boundedId }).strict(),
+  'trash.entry_added': z.object({
+    entry: z.record(z.string(), z.unknown()),
+    document: stepBatchSchema.optional(),
+  }).strict(),
+  'trash.entry_restored': z.object({
+    entryId: boundedId,
+    document: stepBatchSchema.optional(),
+  }).strict(),
   'trash.entry_purged': z.object({ entryId: boundedId }).strict(),
   'shortcut.created': z.object({ shortcut: shortcutSchema }).strict(),
   'shortcut.updated': z.object({ shortcut: shortcutSchema }).strict(),
@@ -61,7 +67,7 @@ export type OutlineEventType = keyof typeof eventPayloadSchemas
 
 type JsonRecord = Record<string, unknown>
 
-interface StepBatchPayload {
+export interface StepBatchPayload {
   steps: JsonRecord[]
   inverseSteps: JsonRecord[]
   beforeHash: string
@@ -73,8 +79,8 @@ export interface EventPayloadByType {
   'document.undo_applied': StepBatchPayload & { targetEventIds: string[] }
   'document.redo_applied': StepBatchPayload & { targetEventIds: string[] }
   'document.schema_migrated': { fromVersion: number; toVersion: number; checkpointHash: string }
-  'trash.entry_added': { entry: JsonRecord }
-  'trash.entry_restored': { entryId: string }
+  'trash.entry_added': { entry: JsonRecord; document?: StepBatchPayload }
+  'trash.entry_restored': { entryId: string; document?: StepBatchPayload }
   'trash.entry_purged': { entryId: string }
   'shortcut.created': { shortcut: JsonRecord & { id: string; kind: 'node' | 'tag' | 'search' } }
   'shortcut.updated': { shortcut: JsonRecord & { id: string; kind: 'node' | 'tag' | 'search' } }

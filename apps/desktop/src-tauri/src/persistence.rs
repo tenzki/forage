@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -156,6 +156,52 @@ impl EventStore {
                 |row| row.get(0),
             )
             .map_err(StoreError::from)
+    }
+
+    pub fn commit_rebase(
+        &self,
+        outline_id: &str,
+        pulled_events: &[EventRecord],
+        replacements: &[(String, EventRecord)],
+        pulled_revision: i64,
+        acknowledgements: &[(&str, i64)],
+    ) -> StoreResult<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for event in pulled_events {
+            append_event(&transaction, event)?;
+        }
+        for (original_id, replacement) in replacements {
+            append_event(&transaction, replacement)?;
+            transaction.execute(
+                "UPDATE outline_events SET superseded_by = ?2
+                 WHERE id = ?1 AND status = 'pending'
+                   AND (superseded_by IS NULL OR superseded_by = ?2)",
+                params![original_id, replacement.id],
+            )?;
+        }
+        let mut highest_acked = 0;
+        for (event_id, revision) in acknowledgements {
+            transaction.execute(
+                "UPDATE outline_events
+                 SET status = 'accepted', server_revision = ?3
+                 WHERE id = ?1 AND outline_id = ?2
+                   AND (server_revision IS NULL OR server_revision = ?3)",
+                params![event_id, outline_id, revision],
+            )?;
+            highest_acked = highest_acked.max(*revision);
+        }
+        transaction.execute(
+            "INSERT INTO outline_sync_state(outline_id, last_acked_revision, last_pulled_revision)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(outline_id) DO UPDATE SET
+               last_acked_revision = MAX(last_acked_revision, excluded.last_acked_revision),
+               last_pulled_revision = MAX(last_pulled_revision, excluded.last_pulled_revision),
+               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            params![outline_id, highest_acked, pulled_revision.max(0)],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn event(&self, id: &str) -> StoreResult<Option<StoredEvent>> {
@@ -417,6 +463,29 @@ impl EventStore {
         )?;
         Ok(())
     }
+}
+
+fn append_event(transaction: &Transaction<'_>, event: &EventRecord) -> StoreResult<()> {
+    let envelope_json = serde_json::to_string(&event.envelope)
+        .expect("serde_json::Value serialization cannot fail");
+    let inserted = transaction.execute(
+        "INSERT OR IGNORE INTO outline_events
+         (id, outline_id, base_revision, server_revision, envelope_json, status, superseded_by, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![event.id, event.outline_id, event.base_revision, event.server_revision,
+            envelope_json, event.status, event.superseded_by, event.created_at],
+    )?;
+    if inserted == 0 {
+        let existing: String = transaction.query_row(
+            "SELECT envelope_json FROM outline_events WHERE id = ?1",
+            [&event.id],
+            |row| row.get(0),
+        )?;
+        if existing != envelope_json {
+            return Err(StoreError::EventIdConflict(event.id.clone()));
+        }
+    }
+    Ok(())
 }
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {

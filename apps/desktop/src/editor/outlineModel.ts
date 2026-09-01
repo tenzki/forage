@@ -9,6 +9,7 @@ import {
   SYSTEM_TITLE_UPDATE_META,
   validateSystemNodeAction,
 } from './systemNodeGuards'
+import { DOMAIN_MUTATION_META, type EditorDomainMutation } from './eventCapture'
 
 export interface BulletEntry {
   id: string
@@ -56,7 +57,9 @@ export function collectBullets(doc: ProseMirrorNode): BulletEntry[] {
     let noteText = ''
     for (let index = 0; index < node.childCount; index += 1) {
       const child = node.child(index)
-      if (child.type.name === 'bulletNote') noteText = child.textContent
+      if (child.type.name === 'bulletNote') {
+        noteText = child.textBetween(0, child.content.size, '\n', '\n')
+      }
     }
     entries.push({
       id: node.attrs.nodeId,
@@ -159,7 +162,10 @@ function dispatchDocument(
   json: PmJson,
   selectedId?: string,
   history = true,
-  options: { allowedSystemNodeTrashId?: string } = {},
+  options: {
+    allowedSystemNodeTrashId?: string
+    domainMutation?: EditorDomainMutation
+  } = {},
 ): void {
   const next = editor.schema.nodeFromJSON(json)
   const transaction = editor.state.tr.replaceWith(0, editor.state.doc.content.size, next.content)
@@ -167,6 +173,7 @@ function dispatchDocument(
   if (options.allowedSystemNodeTrashId) {
     transaction.setMeta(SYSTEM_NODE_TRASH_META, options.allowedSystemNodeTrashId)
   }
+  if (options.domainMutation) transaction.setMeta(DOMAIN_MUTATION_META, options.domainMutation)
   if (selectedId) {
     const moved = findBullet(transaction.doc, selectedId)
     if (moved) transaction.setSelection(TextSelection.near(transaction.doc.resolve(moved.pos + 2)))
@@ -384,7 +391,10 @@ export function trashBullet(editor: Editor, nodeId: string): TrashEntry | null {
     originalIndex: entry.siblingIndex,
     node: node as unknown as JsonValue,
   }
-  dispatchDocument(editor, doc, undefined, false, { allowedSystemNodeTrashId: nodeId })
+  dispatchDocument(editor, doc, undefined, false, {
+    allowedSystemNodeTrashId: nodeId,
+    domainMutation: { type: 'trash.entry_added', entry: trash },
+  })
   return trash
 }
 
@@ -415,7 +425,9 @@ export function restoreBullet(editor: Editor, trash: TrashEntry): boolean {
     list.content = []
   }
   insertAt(list, node, trash.originalIndex)
-  dispatchDocument(editor, doc, nodeId, false)
+  dispatchDocument(editor, doc, nodeId, false, {
+    domainMutation: { type: 'trash.entry_restored', entryId: trash.id },
+  })
   return true
 }
 

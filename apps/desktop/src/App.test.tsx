@@ -10,6 +10,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { formatDailyDate, localCalendarDate } from './editor/dailyNotes'
+import { replayOutlineEvents, type EventEnvelope } from '@forage/domain'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
@@ -178,6 +179,52 @@ describe('App view switching', () => {
     expect(container.textContent).toContain('Legacy content')
   })
 
+  it('persists compatibility normalization before editing a legacy orphan note', async () => {
+    const legacyState = {
+      schemaEpoch: 1,
+      trash: [],
+      shortcuts: [],
+      doc: {
+        type: 'doc', content: [
+          { type: 'bulletList', content: [
+            {
+              type: 'listItem', attrs: { nodeId: 'inbox', systemRole: 'inbox' },
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+            },
+            {
+              type: 'listItem', attrs: { nodeId: 'daily', systemRole: 'daily-notes' },
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Daily Notes' }] }],
+            },
+          ] },
+          { type: 'bulletNote', content: [{ type: 'text', text: 'Legacy detail' }] },
+        ],
+      },
+    }
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'event_store_storage_mode') return 'local'
+      if (command === 'event_store_identity') return { outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1' }
+      if (command === 'event_store_latest_checkpoint') return {
+        id: 'checkpoint-legacy-note', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, localSequence: 0, serverRevision: 0,
+        stateJson: JSON.stringify(legacyState), integrityHash: 'a'.repeat(64),
+        createdAt: '2026-08-30T12:00:00.000Z',
+      }
+      if (command === 'event_store_events_after') return []
+      if (command === 'event_store_append') return 1
+      return undefined
+    })
+
+    const { container } = await renderApp()
+    const migrationCall = nativeMocks.invoke.mock.calls.find(([command, input]) => (
+      command === 'event_store_append'
+      && (input as { event: { envelope: EventEnvelope } }).event.envelope.origin === 'migration'
+    ))
+    expect(migrationCall).toBeTruthy()
+    const migration = (migrationCall![1] as { event: { envelope: EventEnvelope } }).event.envelope
+    expect(JSON.stringify(replayOutlineEvents(legacyState, [migration]).doc)).toContain('Legacy detail')
+    expect(container.textContent).toContain('Legacy detail')
+  })
+
   it('shows the configured URL in the backend widget for server storage', async () => {
     const state = {
       schemaEpoch: 1,
@@ -259,6 +306,169 @@ describe('App view switching', () => {
         }),
       }) }),
     ))
+  })
+
+  it('does not fall through to a second history implementation after undo is exhausted', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('x')
+    await user.keyboard('{Control>}z{/Control}')
+    await user.keyboard('{Control>}z{/Control}')
+
+    const paragraphTexts = () => [...editor.querySelectorAll(':scope p')].map((node) => node.textContent)
+    expect(paragraphTexts()).not.toContain('x')
+    const undoEvents = nativeMocks.invoke.mock.calls
+      .filter(([command, input]) => command === 'event_store_append'
+        && (input as { event: { envelope: { type: string } } }).event.envelope.type === 'document.undo_applied')
+    expect(undoEvents).toHaveLength(1)
+  })
+
+  it('keeps rapid typing and Enter as separate undo units', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('a{Enter}b')
+    await user.keyboard('{Control>}z{/Control}')
+
+    const paragraphTexts = () => [...editor.querySelectorAll(':scope p')].map((node) => node.textContent)
+    expect(paragraphTexts()).toContain('a')
+    expect(paragraphTexts()).not.toContain('b')
+
+    await user.keyboard('{Control>}z{/Control}')
+    expect(paragraphTexts()).toContain('a')
+
+    await user.keyboard('{Control>}z{/Control}')
+    expect(paragraphTexts()).not.toContain('a')
+  })
+
+  it('captures immediate undo before hashing and persistence finish', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+    const digest = crypto.subtle.digest.bind(crypto.subtle)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      await gate
+      return digest(...args)
+    })
+
+    await user.click(editor)
+    await user.keyboard('x')
+    await user.keyboard('{Control>}z{/Control}')
+    release()
+
+    await waitFor(() => {
+      const types = nativeMocks.invoke.mock.calls
+        .filter(([command]) => command === 'event_store_append')
+        .map(([, input]) => (input as { event: { envelope: { type: string } } }).event.envelope.type)
+      expect(types).toContain('document.undo_applied')
+      expect(types.indexOf('document.steps_applied')).toBeLessThan(types.indexOf('document.undo_applied'))
+    })
+    digestSpy.mockRestore()
+  })
+
+  it('keeps fresh edits behind an in-flight persistence retry', async () => {
+    const user = userEvent.setup()
+    let appendAttempt = 0
+    let releaseRetry!: () => void
+    let announceRetry!: () => void
+    const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve })
+    const retryStarted = new Promise<void>((resolve) => { announceRetry = resolve })
+    const successful: EventEnvelope[] = []
+    nativeMocks.invoke.mockImplementation(async (command: string, input?: unknown) => {
+      if (command === 'event_store_identity') {
+        return { outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1' }
+      }
+      if (command === 'event_store_latest_checkpoint') return null
+      if (command === 'event_store_storage_mode') return 'local'
+      if (command === 'event_store_append') {
+        appendAttempt += 1
+        if (appendAttempt === 1) throw new Error('disk temporarily unavailable')
+        if (appendAttempt === 2) {
+          announceRetry()
+          await retryGate
+        }
+        successful.push((input as { event: { envelope: EventEnvelope } }).event.envelope)
+        return successful.length
+      }
+      return undefined
+    })
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('a')
+    expect(await screen.findByText(/disk temporarily unavailable/)).toBeTruthy()
+    await user.keyboard('b')
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await retryStarted
+    await user.click(editor)
+    await user.keyboard('c')
+    releaseRetry()
+
+    await waitFor(() => expect(successful).toHaveLength(3))
+    const textFrom = (value: unknown): string => {
+      if (!value || typeof value !== 'object') return ''
+      const record = value as Record<string, unknown>
+      return (typeof record.text === 'string' ? record.text : '')
+        + textFrom(record.slice)
+        + (Array.isArray(record.content) ? record.content.map(textFrom).join('') : '')
+    }
+    const inserted = successful.map((event) => (
+      event.type === 'document.steps_applied'
+      || event.type === 'document.undo_applied'
+      || event.type === 'document.redo_applied'
+    ) ? event.payload.steps.map(textFrom).join('') : '')
+    expect(inserted).toEqual(['a', 'b', 'c'])
+  })
+
+  it('serializes periodic synchronization behind pending persistence', async () => {
+    const user = userEvent.setup()
+    let syncTick: (() => void) | null = null
+    const intervalSpy = vi.spyOn(window, 'setInterval').mockImplementation(((handler: TimerHandler) => {
+      if (typeof handler === 'function') syncTick = () => handler()
+      return 1
+    }) as typeof window.setInterval)
+    const { container } = await renderApp()
+    nativeMocks.invoke.mockClear()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+    const digest = crypto.subtle.digest.bind(crypto.subtle)
+    let releaseDigest!: () => void
+    const digestGate = new Promise<void>((resolve) => { releaseDigest = resolve })
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args) => {
+      await digestGate
+      return digest(...args)
+    })
+
+    try {
+      await user.click(editor)
+      await user.keyboard('x')
+      expect(syncTick).not.toBeNull()
+      syncTick!()
+
+      expect(editor.getAttribute('contenteditable')).toBe('false')
+      expect((container.querySelector('#app') as HTMLElement).inert).toBe(true)
+      await Promise.resolve()
+      expect(nativeMocks.invoke.mock.calls.some(([command]) => command === 'event_store_storage_mode')).toBe(false)
+
+      releaseDigest()
+      await waitFor(() => expect(nativeMocks.invoke.mock.calls
+        .some(([command]) => command === 'event_store_storage_mode')).toBe(true))
+      const commands = nativeMocks.invoke.mock.calls.map(([command]) => command)
+      expect(commands.indexOf('event_store_append')).toBeLessThan(commands.indexOf('event_store_storage_mode'))
+      await waitFor(() => expect(editor.getAttribute('contenteditable')).toBe('true'))
+      expect((container.querySelector('#app') as HTMLElement).inert).toBe(false)
+    } finally {
+      releaseDigest()
+      digestSpy.mockRestore()
+      intervalSpy.mockRestore()
+    }
   })
 
   it('shows the live agent activity sidebar and records local commands', async () => {
@@ -360,6 +570,58 @@ describe('App view switching', () => {
     expect(screen.queryByRole('dialog', { name: 'Trash' })).toBeNull()
     expect(document.body.contains(sidebar)).toBe(true)
     expect(container.querySelector('.outline-editor-view')?.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('persists Trash and restore as one atomic document/domain event each', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+    await user.click(editor)
+    await user.keyboard('Atomic branch')
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_append', expect.objectContaining({ event: expect.objectContaining({
+        envelope: expect.objectContaining({ type: 'document.steps_applied' }),
+      }) }),
+    ))
+    await new Promise((resolve) => window.setTimeout(resolve, 25))
+    nativeMocks.invoke.mockClear()
+
+    const paragraph = [...editor.querySelectorAll('p')]
+      .find((node) => node.textContent === 'Atomic branch')!
+    await user.click(paragraph.closest('li')!.querySelector<HTMLButtonElement>('.bullet-menu')!)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }))
+
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_append', expect.objectContaining({ event: expect.objectContaining({
+        envelope: expect.objectContaining({
+          type: 'trash.entry_added',
+          payload: expect.objectContaining({ document: expect.objectContaining({ steps: expect.any(Array) }) }),
+        }),
+      }) }),
+    ))
+    expect(nativeMocks.invoke.mock.calls
+      .filter(([command]) => command === 'event_store_append')
+      .map(([, input]) => (input as { event: { envelope: { type: string } } }).event.envelope.type))
+      .toEqual(['trash.entry_added'])
+    expect([...editor.querySelectorAll('p')].map((node) => node.textContent)).not.toContain('Atomic branch')
+
+    await user.click(screen.getByRole('button', { name: 'Trash' }))
+    nativeMocks.invoke.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Restore' }))
+
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_append', expect.objectContaining({ event: expect.objectContaining({
+        envelope: expect.objectContaining({
+          type: 'trash.entry_restored',
+          payload: expect.objectContaining({ document: expect.objectContaining({ steps: expect.any(Array) }) }),
+        }),
+      }) }),
+    ))
+    expect(nativeMocks.invoke.mock.calls
+      .filter(([command]) => command === 'event_store_append')
+      .map(([, input]) => (input as { event: { envelope: { type: string } } }).event.envelope.type))
+      .toEqual(['trash.entry_restored'])
+    expect([...editor.querySelectorAll('p')].map((node) => node.textContent)).toContain('Atomic branch')
   })
 
   it('keeps Tab and Shift+Tab restructuring active in the complete app', async () => {

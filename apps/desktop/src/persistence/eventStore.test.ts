@@ -31,7 +31,7 @@ describe('native event repository', () => {
         localSequence: 3, serverRevision: 2, stateJson: '{"doc":{"type":"doc"},"trash":[],"shortcuts":[],"schemaEpoch":1}',
         integrityHash: 'a'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z',
       })
-      .mockResolvedValueOnce([{ localSequence: 4, envelope: {
+      .mockResolvedValueOnce([{ localSequence: 4, serverRevision: 3, status: 'accepted', envelope: {
         id: 'event-4', outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1',
         type: 'shortcut.deleted', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
         baseRevision: 2, origin: 'desktop', occurredAt: '2026-08-30T12:00:00.000Z',
@@ -42,5 +42,6 @@ describe('native event repository', () => {
 
     expect(loaded?.checkpoint.localSequence).toBe(3)
     expect(loaded?.events[0].type).toBe('shortcut.deleted')
+    expect(loaded?.events[0].revision).toBe(3)
   })
 })

@@ -15,6 +15,7 @@ import {
   GeneratedImage,
   GeneratedImageItem,
   OutlineBulletList,
+  OutlineListItem,
 } from '../editor/generatedImage'
 import { generateWithPi } from './piGeneration'
 import {
@@ -38,7 +39,8 @@ function makeEditor(text: string): Editor {
   return new Editor({
     element: document.createElement('div'),
     extensions: [
-      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      StarterKit.configure({ bulletList: false, listItem: false, trailingNode: false }),
+      OutlineListItem,
       OutlineBulletList,
       GeneratedImageItem,
       GeneratedImage,

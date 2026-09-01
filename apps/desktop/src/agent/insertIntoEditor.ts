@@ -133,6 +133,8 @@ export function insertAiChild(editor: Editor): string | null {
   const insertPos = li.pos + li.node.nodeSize - 1
   editor
     .chain()
+    .setMeta('forageOrigin', 'agent')
+    .setMeta('forageChangeGroup', nodeId)
     .insertContentAt(
       insertPos,
       {
@@ -176,6 +178,8 @@ function removeAiList(editor: Editor, rootNodeId: string): void {
   if (!list) return
   const transaction = editor.state.tr.delete(list.pos, list.pos + list.node.nodeSize)
   transaction.setMeta('addToHistory', false)
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', rootNodeId)
   editor.view.dispatch(transaction)
 }
 
@@ -386,6 +390,7 @@ function replaceAiList(
   )
   tr.setMeta('addToHistory', false)
   tr.setMeta('forageOrigin', 'agent')
+  tr.setMeta('forageChangeGroup', String(list.node.firstChild?.attrs.nodeId ?? 'unscoped'))
   editor.view.dispatch(tr)
 }
 

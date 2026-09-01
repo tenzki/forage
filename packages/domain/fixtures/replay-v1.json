@@ -45,8 +45,8 @@
         "slice": { "content": [{ "type": "text", "text": "!" }] }
       }],
       "inverseSteps": [{ "stepType": "replace", "from": 8, "to": 9 }],
-      "beforeHash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "afterHash": "1111111111111111111111111111111111111111111111111111111111111111"
+      "beforeHash": "b89ba6580f55dd6168f2ff610fc49225134b1883d92a8f44c3dccb94e62b9e06",
+      "afterHash": "3ca7e998f50b8f394a9cd888150ea407cc5fb2adb6fa996e7702f7461df064a1"
     }
   }],
   "expectedText": "Inbox!"

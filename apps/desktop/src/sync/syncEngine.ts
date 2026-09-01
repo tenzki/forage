@@ -6,11 +6,15 @@ import {
   replayOutlineEvents,
   reduceOutlineEvent,
   type EventEnvelope,
+  type OutlineState,
 } from '@forage/domain'
 import {
+  captureStepBatch,
   createOutlineSchema,
   documentChangeSteps,
+  repairSystemNodes,
   rebaseSerializedSteps,
+  type SerializedStepBatch,
 } from '@forage/document'
 import {
   checkpointBootstrapResponseSchema,
@@ -20,10 +24,13 @@ import {
   type ServerStatus,
 } from '@forage/protocol'
 import type {
+  RebaseCommit,
   ReplayInput,
   StoredCheckpoint,
   StoredEventRecord,
 } from '../persistence/eventStore'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { EditorState } from '@tiptap/pm/state'
 
 export type SyncState =
   | { kind: 'local-only' }
@@ -39,6 +46,8 @@ export type SyncState =
 export interface SyncRepository {
   storageMode(): Promise<'local' | 'server'>
   loadReplayInput(outlineId: string): Promise<ReplayInput | null>
+  eventsAfter(outlineId: string, localSequence: number): Promise<StoredEventRecord[]>
+  commitRebase(outlineId: string, commit: RebaseCommit): Promise<void>
   saveCheckpoint(checkpoint: StoredCheckpoint): Promise<void>
   append(event: unknown): Promise<number>
   pending(outlineId: string, limit?: number): Promise<StoredEventRecord[]>
@@ -73,8 +82,23 @@ export class NativeSyncTransport implements SyncTransport {
   }
 }
 
+function outlineStateFromCheckpoint(value: Record<string, unknown>): OutlineState {
+  if (!value.doc || typeof value.doc !== 'object' || Array.isArray(value.doc)
+    || !Array.isArray(value.trash) || !Array.isArray(value.shortcuts)
+    || typeof value.schemaEpoch !== 'number') {
+    throw new Error('Server checkpoint contains an invalid outline projection.')
+  }
+  return {
+    doc: value.doc as Record<string, unknown>,
+    trash: value.trash as Record<string, unknown>[],
+    shortcuts: value.shortcuts as Record<string, unknown>[],
+    schemaEpoch: value.schemaEpoch,
+  }
+}
+
 export class DesktopSyncEngine {
   state: SyncState = { kind: 'offline' }
+  historyInvalidated = false
 
   constructor(
     private readonly repository: SyncRepository,
@@ -84,6 +108,7 @@ export class DesktopSyncEngine {
   ) {}
 
   async sync(): Promise<void> {
+    this.historyInvalidated = false
     if (await this.repository.storageMode() === 'local') {
       this.transition({ kind: 'local-only' })
       return
@@ -102,17 +127,23 @@ export class DesktopSyncEngine {
       let revision = 0
       if (!replay) {
         const checkpoint = bootstrap
-        const actualHash = await sha256Hex(canonicalJson(checkpoint.state))
+        const bootstrapState = outlineStateFromCheckpoint(checkpoint.state)
+        const actualHash = await sha256Hex(canonicalJson(bootstrapState))
         if (actualHash !== checkpoint.integrityHash) throw new Error('Server checkpoint integrity verification failed.')
         const stateJson = JSON.stringify(checkpoint.state)
-        await this.repository.saveCheckpoint({
+        const storedCheckpoint: StoredCheckpoint = {
           id: checkpoint.id, outlineId: checkpoint.outlineId,
           documentVersion: checkpoint.documentVersion, schemaEpoch: checkpoint.schemaEpoch,
           localSequence: 0, serverRevision: checkpoint.revision, stateJson,
           integrityHash: checkpoint.integrityHash, createdAt: new Date().toISOString(),
-        })
+        }
+        await this.repository.saveCheckpoint(storedCheckpoint)
         revision = checkpoint.revision
-        replay = await this.repository.loadReplayInput(outlineId)
+        replay = await this.repository.loadReplayInput(outlineId) ?? {
+          checkpoint: storedCheckpoint,
+          state: bootstrapState,
+          events: [],
+        }
       } else {
         revision = Math.max(replay.checkpoint.serverRevision, ...replay.events.map((event) => event.revision ?? 0))
       }
@@ -127,7 +158,7 @@ export class DesktopSyncEngine {
         }
         if (this.state.kind === 'conflict') return
       } else {
-        revision = await this.pullAll(outlineId, revision)
+        revision = await this.pullAll(outlineId, revision, replay)
       }
       this.transition({ kind: 'up-to-date', revision })
     } catch (error) {
@@ -138,13 +169,19 @@ export class DesktopSyncEngine {
     }
   }
 
-  private async pullAll(outlineId: string, after: number): Promise<number> {
+  private async pullAll(outlineId: string, after: number, replayInput?: ReplayInput): Promise<number> {
     let cursor = after
+    const replay = replayInput ?? await this.repository.loadReplayInput(outlineId)
+    if (!replay) throw new Error('A local checkpoint is required before pulling events.')
+    let projected = replayOutlineEvents(replay.state, replay.events)
     for (;;) {
       const page = await this.transport.pull(cursor, 100)
       for (const event of page.events) {
-        await this.repository.append(parseEventEnvelope(event))
-        cursor = Math.max(cursor, event.revision ?? cursor)
+        const parsed = parseEventEnvelope(event)
+        projected = reduceOutlineEvent(projected, parsed)
+        await this.repository.append(parsed)
+        if (invalidatesDocumentHistory(parsed)) this.historyInvalidated = true
+        cursor = Math.max(cursor, parsed.revision ?? cursor)
       }
       await this.repository.recordPulled(outlineId, cursor)
       if (page.nextAfterRevision === null) return Math.max(cursor, page.currentRevision)
@@ -165,22 +202,28 @@ export class DesktopSyncEngine {
 
     const replayBeforeRemote = await this.repository.loadReplayInput(outlineId)
     if (!replayBeforeRemote) throw new Error('A local checkpoint is required before rebase.')
-    const pendingIds = new Set(pending.map((event) => event.id))
-    const acceptedBeforeRemote = replayBeforeRemote.events.filter((event) => !pendingIds.has(event.id))
+    const recordsAfterCheckpoint = await this.repository.eventsAfter(
+      outlineId,
+      replayBeforeRemote.checkpoint.localSequence,
+    )
+    const allPendingIds = new Set(recordsAfterCheckpoint
+      .filter((record) => record.status === 'pending' && !record.supersededBy)
+      .map((record) => record.id))
+    const acceptedBeforeRemote = replayBeforeRemote.events.filter((event) => !allPendingIds.has(event.id))
     const baseState = replayOutlineEvents(replayBeforeRemote.state, acceptedBeforeRemote)
     const missingEvents: EventEnvelope[] = []
+    let validatedRemoteState = baseState
     let cursor = response.pullAfterRevision
     let replacementBase = response.currentRevision
     for (;;) {
       const page = await this.transport.pull(cursor, 100)
       for (const event of page.events) {
         const parsed = parseEventEnvelope(event)
+        validatedRemoteState = reduceOutlineEvent(validatedRemoteState, parsed)
         missingEvents.push(parsed)
-        await this.repository.append(parsed)
         cursor = Math.max(cursor, parsed.revision ?? cursor)
       }
       replacementBase = page.currentRevision
-      await this.repository.recordPulled(outlineId, cursor)
       if (page.nextAfterRevision === null) break
       cursor = page.nextAfterRevision
     }
@@ -197,12 +240,11 @@ export class DesktopSyncEngine {
         })
         originalState = reduceOutlineEvent(originalState, event)
         rebasedState = reduceOutlineEvent(rebasedState, replacement)
-        await this.repository.append(replacement)
-        await this.repository.supersede(event.id, replacement.id)
         replacements.push(replacement)
         continue
       }
-      if (!isDocumentEvent(event)) {
+      const documentPayload = eventDocumentPayload(event)
+      if (!documentPayload) {
         this.transition({
           kind: 'conflict',
           message: 'A pending domain change could not be safely transformed automatically.',
@@ -213,9 +255,32 @@ export class DesktopSyncEngine {
       const schema = createOutlineSchema()
       const originalDocument = schema.nodeFromJSON(originalState.doc)
       const remoteDocument = schema.nodeFromJSON(rebasedState.doc)
+      let rebasingEvent: EventEnvelope
       let rebased
       try {
-        rebased = rebaseSerializedSteps(originalDocument, event.payload, documentChangeSteps(originalDocument, remoteDocument))
+        if (event.type === 'trash.entry_added' && event.payload.document) {
+          const refreshed = refreshTrashSnapshot(event, remoteDocument)
+          rebasingEvent = refreshed.event
+          const resolved = remoteDocument.resolve(refreshed.pos)
+          const removesOnlyNestedChild = resolved.parent.type.name === 'bulletList'
+            && resolved.parent.childCount === 1
+            && resolved.depth > 0
+            && resolved.node(resolved.depth - 1).type.name === 'listItem'
+          const deleteFrom = removesOnlyNestedChild
+            ? resolved.before(resolved.depth)
+            : refreshed.pos
+          const deleteTo = removesOnlyNestedChild
+            ? deleteFrom + resolved.parent.nodeSize
+            : refreshed.pos + refreshed.node.nodeSize
+          const transaction = EditorState.create({ schema, doc: remoteDocument }).tr
+            .delete(deleteFrom, deleteTo)
+          rebased = { ...captureStepBatch(remoteDocument, transaction.steps), doc: transaction.doc }
+        } else {
+          rebasingEvent = event
+          const rebasingDocumentPayload = eventDocumentPayload(rebasingEvent)
+          if (!rebasingDocumentPayload) throw new Error('The rebased event lost its document payload.')
+          rebased = rebaseSerializedSteps(originalDocument, rebasingDocumentPayload, documentChangeSteps(originalDocument, remoteDocument))
+        }
       } catch {
         this.transition({ kind: 'conflict', message: 'The local edit overlaps a remote edit and could not be preserved.', eventIds: [event.id] })
         return replacementBase
@@ -224,33 +289,34 @@ export class DesktopSyncEngine {
         this.transition({ kind: 'conflict', message: 'The local edit was removed by a conflicting remote edit.', eventIds: [event.id] })
         return replacementBase
       }
+      const rebasedProjection = event.origin === 'migration'
+        ? repairSystemNodes(rebased.doc.toJSON() as Record<string, unknown>, () => {
+          throw new Error('A rebased migration unexpectedly requires a new node id.')
+        }).doc
+        : rebased.doc.toJSON()
       const provisionalReplacement = parseEventEnvelope({
-        ...event,
+        ...rebasingEvent,
         id: crypto.randomUUID(),
         baseRevision: replacementBase,
         revision: undefined,
-        payload: {
-          ...event.payload,
+        payload: replaceEventDocumentPayload(rebasingEvent, {
           steps: rebased.steps,
           inverseSteps: rebased.inverseSteps,
           beforeHash: await sha256Hex(canonicalJson(remoteDocument.toJSON())),
-          afterHash: await sha256Hex(canonicalJson(rebased.doc.toJSON())),
-        },
+          afterHash: await sha256Hex(canonicalJson(rebasedProjection)),
+        }),
       })
       const nextOriginalState = reduceOutlineEvent(originalState, event)
       const nextRebasedState = reduceOutlineEvent(rebasedState, provisionalReplacement)
       const projectedAfter = schema.nodeFromJSON(nextRebasedState.doc)
       const replacement = parseEventEnvelope({
         ...provisionalReplacement,
-        payload: {
-          ...provisionalReplacement.payload,
+        payload: replaceEventDocumentPayload(provisionalReplacement, {
           afterHash: await sha256Hex(canonicalJson(projectedAfter.toJSON())),
-        },
+        }),
       })
       originalState = nextOriginalState
       rebasedState = nextRebasedState
-      await this.repository.append(replacement)
-      await this.repository.supersede(event.id, replacement.id)
       replacements.push(replacement)
     }
     const retry = await this.transport.push(replacementBase, replacements)
@@ -258,10 +324,15 @@ export class DesktopSyncEngine {
       this.transition({ kind: 'conflict', message: 'The server changed again during rebase.', eventIds: replacements.map((event) => event.id) })
       return retry.currentRevision
     }
-    await this.repository.acknowledge(
-      outlineId,
-      retry.acknowledgements.map((item) => [item.eventId, item.revision]),
-    )
+    await this.repository.commitRebase(outlineId, {
+      pulledEvents: missingEvents,
+      replacements: replacements.map((event, index) => ({ originalId: pending[index].id, event })),
+      pulledRevision: cursor,
+      acknowledgements: retry.acknowledgements.map((item) => [item.eventId, item.revision]),
+    })
+    if (missingEvents.some(invalidatesDocumentHistory) || pending.some(invalidatesDocumentHistory)) {
+      this.historyInvalidated = true
+    }
     return retry.currentRevision
   }
 
@@ -275,6 +346,92 @@ function isDocumentEvent(event: EventEnvelope): event is Extract<EventEnvelope, 
   type: 'document.steps_applied' | 'document.undo_applied' | 'document.redo_applied'
 }> {
   return event.type === 'document.steps_applied' || event.type === 'document.undo_applied' || event.type === 'document.redo_applied'
+}
+
+type EventDocumentPayload = SerializedStepBatch & {
+  beforeHash: string
+  afterHash: string
+}
+
+function eventDocumentPayload(event: EventEnvelope): EventDocumentPayload | null {
+  if (isDocumentEvent(event)) return event.payload
+  if ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored') && event.payload.document) {
+    return event.payload.document
+  }
+  return null
+}
+
+function replaceEventDocumentPayload(
+  event: EventEnvelope,
+  patch: Partial<EventDocumentPayload>,
+): EventEnvelope['payload'] {
+  if (event.type === 'trash.entry_added' || event.type === 'trash.entry_restored') {
+    if (!event.payload.document) throw new Error('The Trash event does not contain a document change.')
+    return {
+      ...event.payload,
+      document: { ...event.payload.document, ...patch },
+    }
+  }
+  if (!isDocumentEvent(event)) throw new Error('The event does not contain a document change.')
+  return { ...event.payload, ...patch }
+}
+
+function refreshTrashSnapshot(
+  event: Extract<EventEnvelope, { type: 'trash.entry_added' }>,
+  remoteDocument: ProseMirrorNode,
+): { event: EventEnvelope; node: ProseMirrorNode; pos: number } {
+  const storedNode = event.payload.entry.node
+  if (!storedNode || typeof storedNode !== 'object' || Array.isArray(storedNode)) {
+    throw new Error('The pending Trash entry does not contain a valid branch snapshot.')
+  }
+  const attrs = (storedNode as Record<string, unknown>).attrs
+  const nodeId = attrs && typeof attrs === 'object' && !Array.isArray(attrs)
+    ? (attrs as Record<string, unknown>).nodeId
+    : null
+  if (typeof nodeId !== 'string') throw new Error('The pending Trash branch has no stable identity.')
+  const match: { node?: ProseMirrorNode; pos: number } = { pos: -1 }
+  remoteDocument.descendants((node, pos) => {
+    if (node.type.name === 'listItem' && node.attrs.nodeId === nodeId) {
+      match.node = node
+      match.pos = pos
+      return false
+    }
+    return undefined
+  })
+  if (!match.node || match.pos < 0) throw new Error('The branch moved to Trash was removed remotely.')
+  const found = match.node
+  const foundPos = match.pos
+  const resolved = remoteDocument.resolve(foundPos)
+  let originalParentId: string | null = null
+  for (let depth = resolved.depth; depth >= 0; depth -= 1) {
+    const ancestor = resolved.node(depth)
+    if (ancestor.type.name === 'listItem') {
+      originalParentId = String(ancestor.attrs.nodeId)
+      break
+    }
+  }
+  return {
+    node: found,
+    pos: foundPos,
+    event: parseEventEnvelope({
+      ...event,
+      payload: {
+        ...event.payload,
+        entry: {
+          ...event.payload.entry,
+          node: found.toJSON(),
+          originalParentId,
+          originalIndex: resolved.index(),
+        },
+      },
+    }),
+  }
+}
+
+function invalidatesDocumentHistory(event: EventEnvelope): boolean {
+  return event.type === 'note.created'
+    || event.type === 'document.schema_migrated'
+    || eventDocumentPayload(event) !== null
 }
 
 function compareVersions(left: string, right: string): number {

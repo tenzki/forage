@@ -41,6 +41,7 @@ pub fn run() {
             commands::event_store_pending,
             commands::event_store_acknowledge,
             commands::event_store_supersede,
+            commands::event_store_commit_rebase,
             commands::event_store_save_checkpoint,
             commands::event_store_latest_checkpoint,
             commands::event_store_sync_state,

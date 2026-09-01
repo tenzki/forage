@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
-import { BulletAttributes, OutlinerKeymap } from './extensions'
+import { BulletAttributes, OutlinerKeymap, setEditorMutationLocked } from './extensions'
 import { BulletNote, focusOrCreateBulletNote, hasBulletNote } from './bulletNote'
 import { openOrCreateDailyNote } from './dailyNotes'
-import { GeneratedImage, GeneratedImageItem, OutlineBulletList } from './generatedImage'
+import { GeneratedImage, GeneratedImageItem, OutlineBulletList, OutlineListItem } from './generatedImage'
 import { InternalLink } from './internalLinks'
 import {
   collectBullets,
@@ -83,7 +83,8 @@ function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
     extensions: [
-      StarterKit.configure({ bulletList: false, trailingNode: false }),
+      StarterKit.configure({ bulletList: false, listItem: false, trailingNode: false }),
+      OutlineListItem,
       OutlineBulletList,
       GeneratedImageItem,
       GeneratedImage,
@@ -218,6 +219,83 @@ describe('Workflowy-style outline interactions', () => {
     expect(rootList.child(1).textContent).toBe('')
     expect(rootList.child(2).attrs.nodeId).toBe('bravo')
     expect(editor.state.selection.$from.parent.textContent).toBe('')
+  })
+
+  it('creates a fresh user bullet after an AI completed todo without copying semantic attrs', () => {
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(bravo.pos, undefined, {
+      ...bravo.node.attrs,
+      nodeType: 'ai',
+      collapsed: true,
+      bulletKind: 'todo',
+      completed: true,
+    }))
+    const updated = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    editor.commands.setTextSelection(updated.pos + 2 + updated.text.length)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const entries = collectBullets(editor.state.doc)
+    const created = entries.find((entry) => entry.id !== 'bravo' && entry.siblingIndex === updated.siblingIndex + 1)!
+    expect(created).toMatchObject({
+      text: '',
+      bulletKind: 'bullet',
+      completed: false,
+    })
+    expect(created.node.attrs).toMatchObject({
+      nodeType: 'user',
+      collapsed: false,
+      systemRole: null,
+      dailyDate: null,
+    })
+    expect(currentBulletId(editor)).toBe(created.id)
+  })
+
+  it('keeps an attached note on its original bullet when Enter creates a sibling', () => {
+    expect(focusOrCreateBulletNote(editor, 'bravo')).toBe(true)
+    expect(editor.commands.insertContent('Secondary detail')).toBe(true)
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    editor.commands.setTextSelection(bravo.pos + 2 + bravo.text.length)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const entries = collectBullets(editor.state.doc)
+    const original = entries.find((entry) => entry.id === 'bravo')!
+    const created = entries.find((entry) => entry.id !== 'bravo' && entry.siblingIndex === original.siblingIndex + 1)!
+    expect(original.noteText).toBe('Secondary detail')
+    expect(created.noteText).toBe('')
+    expect(currentBulletId(editor)).toBe(created.id)
+  })
+
+  it('expands a collapsed empty system parent before selecting its new child', () => {
+    editor.commands.setContent({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [systemItem('inbox', 'Inbox', 'inbox')],
+      }],
+    })
+    const inbox = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(inbox.pos, undefined, {
+      ...inbox.node.attrs,
+      collapsed: true,
+    }))
+    const collapsed = collectBullets(editor.state.doc).find((entry) => entry.id === 'inbox')!
+    editor.commands.setTextSelection(collapsed.pos + 2 + collapsed.text.length)
+
+    editor.view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter', bubbles: true, cancelable: true,
+    }))
+
+    const entries = collectBullets(editor.state.doc)
+    const parent = entries.find((entry) => entry.id === 'inbox')!
+    const child = entries.find((entry) => entry.ancestorIds[entry.ancestorIds.length - 1] === 'inbox')!
+    expect(parent.node.attrs.collapsed).toBe(false)
+    expect(currentBulletId(editor)).toBe(child.id)
   })
 
   it('shows agent activity as transient decoration instead of document content', () => {
@@ -597,6 +675,20 @@ describe('Workflowy-style outline interactions', () => {
       .toBe('Notes quotidiennes')
   })
 
+  it('blocks local document transactions while synchronization applies a trusted projection', () => {
+    const before = editor.state.doc
+    setEditorMutationLocked(editor, true)
+    try {
+      editor.view.dispatch(editor.state.tr.insertText('blocked', 3))
+      expect(editor.state.doc.eq(before)).toBe(true)
+
+      editor.view.dispatch(editor.state.tr.insertText('remote', 3).setMeta('forageRemote', true))
+      expect(editor.state.doc.textContent).toContain('remote')
+    } finally {
+      setEditorMutationLocked(editor, false)
+    }
+  })
+
   it('allows direct edits beneath protected system roots', () => {
     editor.commands.setContent({
       type: 'doc',
@@ -714,6 +806,16 @@ describe('Workflowy-style outline interactions', () => {
     const deleted = trashBullet(editor, 'bravo')
     expect(deleted && restoreBullet(editor, deleted)).toBe(true)
     expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.noteText).toBe('Secondary detail')
+  })
+
+  it('preserves hard breaks in note text used by search and context', () => {
+    expect(focusOrCreateBulletNote(editor, 'bravo')).toBe(true)
+    expect(editor.commands.insertContent('First')).toBe(true)
+    expect(editor.commands.insertContent({ type: 'hardBreak' })).toBe(true)
+    expect(editor.commands.insertContent('Second')).toBe(true)
+
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')?.noteText)
+      .toBe('First\nSecond')
   })
 
   it('removes an empty note without restructuring its parent bullet', () => {

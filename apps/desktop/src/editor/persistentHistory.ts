@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/react'
 import { Step } from '@tiptap/pm/transform'
 import type { EventEnvelope } from '@forage/domain'
-import { COMPENSATION_META } from './eventCapture'
+import { COMPENSATION_META, type CapturedDocumentEvent } from './eventCapture'
 
 export type DocumentChangeEvent = Extract<EventEnvelope, {
   type: 'document.steps_applied' | 'document.undo_applied' | 'document.redo_applied'
@@ -9,7 +9,7 @@ export type DocumentChangeEvent = Extract<EventEnvelope, {
 
 export interface ChangeGroup {
   id: string
-  events: Extract<EventEnvelope, { type: 'document.steps_applied' }>[]
+  events: Array<Extract<EventEnvelope, { type: 'document.steps_applied' }> | CapturedDocumentEvent>
 }
 
 export interface PersistentHistoryState {
@@ -17,12 +17,32 @@ export interface PersistentHistoryState {
   redo: ChangeGroup[]
 }
 
-export function rebuildPersistentHistory(events: readonly EventEnvelope[]): PersistentHistoryState {
+export function rebuildPersistentHistory(
+  events: readonly EventEnvelope[],
+  localDeviceId?: string,
+): PersistentHistoryState {
   const state: PersistentHistoryState = { undo: [], redo: [] }
   for (const event of events) {
+    const externalDocumentChange = (event.origin === 'server'
+      || (localDeviceId !== undefined && event.deviceId !== localDeviceId))
+      && (event.type === 'document.steps_applied'
+        || event.type === 'document.undo_applied'
+        || event.type === 'document.redo_applied'
+        || event.type === 'note.created'
+        || ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored')
+          && Boolean(event.payload.document)))
+    if (externalDocumentChange) {
+      state.undo = []
+      state.redo = []
+      continue
+    }
     if (event.type === 'document.steps_applied') {
       const groupId = event.changeGroupId ?? event.id
-      if (groupId.startsWith('system:')) continue
+      if (event.origin === 'migration' || groupId.startsWith('system:')) {
+        state.undo = []
+        state.redo = []
+        continue
+      }
       const current = state.undo[state.undo.length - 1]
       if (current?.id === groupId) current.events.push(event)
       else state.undo.push({ id: groupId, events: [event] })
@@ -39,6 +59,17 @@ export function rebuildPersistentHistory(events: readonly EventEnvelope[]): Pers
       const targets = new Set(event.payload.targetEventIds)
       const index = findGroup(state.redo, targets)
       if (index >= 0) state.undo.push(...state.redo.splice(index, 1))
+      continue
+    }
+    if ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored')
+      && event.payload.document) {
+      state.undo = []
+      state.redo = []
+      continue
+    }
+    if (event.type === 'note.created' || event.type === 'document.schema_migrated') {
+      state.undo = []
+      state.redo = []
     }
   }
   return state
@@ -62,7 +93,10 @@ export function dispatchPersistentRedo(editor: Editor, history: PersistentHistor
   return group
 }
 
-export function recordDocumentChange(history: PersistentHistoryState, event: DocumentChangeEvent): void {
+export function recordDocumentChange(
+  history: PersistentHistoryState,
+  event: DocumentChangeEvent | CapturedDocumentEvent,
+): void {
   if (event.type !== 'document.steps_applied') return
   const groupId = event.changeGroupId ?? event.id
   const current = history.undo[history.undo.length - 1]

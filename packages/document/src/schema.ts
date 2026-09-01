@@ -1,5 +1,6 @@
 import { Extension, Mark, Node, getSchema, mergeAttributes } from '@tiptap/core'
 import BulletList from '@tiptap/extension-bullet-list'
+import ListItem from '@tiptap/extension-list-item'
 import StarterKit from '@tiptap/starter-kit'
 import type { Schema } from '@tiptap/pm/model'
 
@@ -65,13 +66,16 @@ export const StableBulletAttributes = Extension.create({
   },
 })
 
+export const OutlineListItemSchema = ListItem.extend({
+  content: 'paragraph bulletNote? bulletList?',
+})
+
 export const OutlineBulletListSchema = BulletList.extend({
   content: '(listItem | generatedImageItem)+',
 })
 
 export const BulletNoteSchema = Node.create({
   name: 'bulletNote',
-  group: 'block',
   content: 'inline*',
   defining: true,
   priority: 1_100,
@@ -131,7 +135,8 @@ export const GeneratedImageSchema = Node.create({
 
 export function outlineSchemaExtensions() {
   return [
-    StarterKit.configure({ bulletList: false, trailingNode: false }),
+    StarterKit.configure({ bulletList: false, listItem: false, trailingNode: false }),
+    OutlineListItemSchema,
     OutlineBulletListSchema,
     GeneratedImageItemSchema,
     GeneratedImageSchema,

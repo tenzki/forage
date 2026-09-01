@@ -19,20 +19,23 @@ export interface SystemNodeMigrationContext {
   now?: () => string
 }
 
+export type DocumentRepairContext = Omit<SystemNodeMigrationContext, 'nextNodeId'>
+
 export interface SystemNodeMigrationResult {
   event: Extract<EventEnvelope, { type: 'document.steps_applied' }>
   state: OutlineState
 }
 
-export async function buildSystemNodeRepairEvent(
+/** Persist an already-computed compatibility repair as one replayable event. */
+export async function buildDocumentRepairEvent(
   state: OutlineState,
-  context: SystemNodeMigrationContext,
+  repairedDoc: Record<string, unknown>,
+  context: DocumentRepairContext,
 ): Promise<SystemNodeMigrationResult | null> {
-  const repaired = repairSystemNodes(state.doc, context.nextNodeId)
-  if (!repaired.changed) return null
+  if (JSON.stringify(state.doc) === JSON.stringify(repairedDoc)) return null
   const schema = createOutlineSchema()
   const before = schema.nodeFromJSON(state.doc)
-  const after = schema.nodeFromJSON(repaired.doc)
+  const after = schema.nodeFromJSON(repairedDoc)
   const serializedSteps = documentChangeSteps(before, after)
   if (!serializedSteps.length) return null
   const batch = captureStepBatch(
@@ -61,4 +64,13 @@ export async function buildSystemNodeRepairEvent(
     event,
     state: { ...structuredClone(state), doc: after.toJSON() as Record<string, unknown> },
   }
+}
+
+export async function buildSystemNodeRepairEvent(
+  state: OutlineState,
+  context: SystemNodeMigrationContext,
+): Promise<SystemNodeMigrationResult | null> {
+  const repaired = repairSystemNodes(state.doc, context.nextNodeId)
+  if (!repaired.changed) return null
+  return buildDocumentRepairEvent(state, repaired.doc, context)
 }

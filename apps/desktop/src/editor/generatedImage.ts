@@ -3,6 +3,7 @@ import {
   GeneratedImageItemSchema,
   GeneratedImageSchema,
   OutlineBulletListSchema,
+  OutlineListItemSchema,
 } from '@forage/document'
 
 export const MAX_GENERATED_IMAGE_BYTES = 5 * 1024 * 1024
@@ -68,6 +69,8 @@ export function validateGeneratedImage(value: unknown): GeneratedImageData | nul
 
 /** Bullet lists accept image items as peers of text list items. */
 export const OutlineBulletList = OutlineBulletListSchema
+
+export const OutlineListItem = OutlineListItemSchema
 
 /** A true image-only outline item: no paragraph or text listItem wrapper. */
 export const GeneratedImageItem = GeneratedImageItemSchema

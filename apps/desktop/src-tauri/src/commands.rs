@@ -122,6 +122,31 @@ pub fn event_store_supersede(
 }
 
 #[tauri::command]
+pub fn event_store_commit_rebase(
+    state: State<'_, NativeState>,
+    outline_id: String,
+    pulled_events: Vec<EventRecord>,
+    replacements: Vec<(String, EventRecord)>,
+    pulled_revision: i64,
+    acknowledgements: Vec<(String, i64)>,
+) -> Result<(), String> {
+    let borrowed_acknowledgements = acknowledgements
+        .iter()
+        .map(|(event_id, revision)| (event_id.as_str(), *revision))
+        .collect::<Vec<_>>();
+    state
+        .event_store
+        .commit_rebase(
+            &outline_id,
+            &pulled_events,
+            &replacements,
+            pulled_revision,
+            &borrowed_acknowledgements,
+        )
+        .map_err(command_error)
+}
+
+#[tauri::command]
 pub fn event_store_save_checkpoint(
     state: State<'_, NativeState>,
     checkpoint: CheckpointRecord,

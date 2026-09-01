@@ -6,6 +6,12 @@ import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../../editor/extensions'
 import { BulletNote } from '../../editor/bulletNote'
 import {
+  GeneratedImage,
+  GeneratedImageItem,
+  OutlineBulletList,
+  OutlineListItem,
+} from '../../editor/generatedImage'
+import {
   collectBullets,
   setBulletKind,
   toggleBulletCompleted,
@@ -17,7 +23,17 @@ import { OutlinerChrome } from './OutlinerChrome'
 function makeEditor(): Editor {
   return new Editor({
     element: document.createElement('div'),
-    extensions: [StarterKit.configure({ trailingNode: false }), BulletAttributes, BulletNote, OutlinerKeymap, OutlinerUi],
+    extensions: [
+      StarterKit.configure({ bulletList: false, listItem: false, trailingNode: false }),
+      OutlineListItem,
+      OutlineBulletList,
+      GeneratedImageItem,
+      GeneratedImage,
+      BulletAttributes,
+      BulletNote,
+      OutlinerKeymap,
+      OutlinerUi,
+    ],
     content: {
       type: 'doc',
       content: [{

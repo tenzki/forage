@@ -4,7 +4,9 @@ import { captureStepBatch, createOutlineSchema } from '../../document/src'
 import {
   createCheckpoint,
   createInitialOutlineState,
+  canonicalJson,
   replayOutlineEvents,
+  sha256HexSync,
   verifyCheckpoint,
   type EventEnvelope,
 } from './index'
@@ -52,8 +54,8 @@ describe('deterministic outline replay', () => {
     const batch = captureStepBatch(document, transaction.steps)
     const first = envelope('document.steps_applied', {
       ...batch,
-      beforeHash: '0'.repeat(64),
-      afterHash: '1'.repeat(64),
+      beforeHash: sha256HexSync(canonicalJson(document.toJSON())),
+      afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
     }, 0)
     const second = envelope('shortcut.created', {
       shortcut: { id: 'shortcut-1', kind: 'node', nodeId: 'inbox' },
@@ -87,6 +89,92 @@ describe('deterministic outline replay', () => {
 
     checkpoint.state.shortcuts.push({ id: 'tampered', kind: 'node', nodeId: 'missing' })
     expect(await verifyCheckpoint(checkpoint)).toBe(false)
+  })
+
+  it('moves a branch into Trash atomically with its document steps', () => {
+    const schema = createOutlineSchema()
+    const initial = createInitialOutlineState({
+      type: 'doc',
+      content: [{ type: 'bulletList', content: [
+        {
+          type: 'listItem', attrs: { nodeId: 'keep' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Keep' }] }],
+        },
+        {
+          type: 'listItem', attrs: { nodeId: 'remove' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Remove' }] }],
+        },
+      ] }],
+    })
+    const document = schema.nodeFromJSON(initial.doc)
+    let removePos = -1
+    let removeSize = 0
+    document.descendants((node, pos) => {
+      if (node.type.name === 'listItem' && node.attrs.nodeId === 'remove') {
+        removePos = pos
+        removeSize = node.nodeSize
+        return false
+      }
+      return undefined
+    })
+    const transaction = EditorState.create({ schema, doc: document }).tr.delete(removePos, removePos + removeSize)
+    const entry = {
+      id: 'trash-1', deletedAt: '2026-08-30T12:00:00.000Z', originalParentId: null,
+      originalIndex: 1, node: document.nodeAt(removePos)!.toJSON(),
+    }
+    const event = envelope('trash.entry_added', {
+      entry,
+      document: {
+        ...captureStepBatch(document, transaction.steps),
+        beforeHash: sha256HexSync(canonicalJson(document.toJSON())),
+        afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
+      },
+    }, 0)
+
+    const projected = replayOutlineEvents(initial, [event])
+
+    expect(schema.nodeFromJSON(projected.doc).textContent).toBe('Keep')
+    expect(projected.trash).toEqual([entry])
+  })
+
+  it('restores a branch from Trash atomically with its document steps', () => {
+    const schema = createOutlineSchema()
+    const entry = {
+      id: 'trash-1', deletedAt: '2026-08-30T12:00:00.000Z', originalParentId: null,
+      originalIndex: 1,
+      node: {
+        type: 'listItem', attrs: { nodeId: 'restore' },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Restore' }] }],
+      },
+    }
+    const initial = {
+      ...createInitialOutlineState({
+        type: 'doc', content: [{ type: 'bulletList', content: [{
+          type: 'listItem', attrs: { nodeId: 'keep' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Keep' }] }],
+        }] }],
+      }),
+      trash: [entry],
+    }
+    const document = schema.nodeFromJSON(initial.doc)
+    const restoredItem = schema.nodeFromJSON({
+      type: 'doc', content: [{ type: 'bulletList', content: [entry.node] }],
+    }).firstChild!.firstChild!
+    const insertPos = document.firstChild!.nodeSize - 1
+    const transaction = EditorState.create({ schema, doc: document }).tr.insert(insertPos, restoredItem)
+    const event = envelope('trash.entry_restored', {
+      entryId: entry.id,
+      document: {
+        ...captureStepBatch(document, transaction.steps),
+        beforeHash: sha256HexSync(canonicalJson(document.toJSON())),
+        afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
+      },
+    }, 0)
+
+    const projected = replayOutlineEvents(initial, [event])
+
+    expect(schema.nodeFromJSON(projected.doc).textContent).toBe('KeepRestore')
+    expect(projected.trash).toEqual([])
   })
 
   it('projects note.created under the exact stable parent identity', () => {
@@ -139,14 +227,6 @@ describe('deterministic outline replay', () => {
     })
     const legacyDocument = schema.nodeFromJSON(initial.doc)
     const migrationTransaction = EditorState.create({ schema, doc: legacyDocument }).tr.insertText('!', 8)
-    const migration = {
-      ...envelope('document.steps_applied', {
-        ...captureStepBatch(legacyDocument, migrationTransaction.steps),
-        beforeHash: '0'.repeat(64),
-        afterHash: '1'.repeat(64),
-      }, 0),
-      origin: 'migration' as const,
-    }
     const normalizedDocument = schema.nodeFromJSON({
       type: 'doc',
       content: [{ type: 'bulletList', content: [
@@ -154,6 +234,14 @@ describe('deterministic outline replay', () => {
         daily,
       ] }],
     })
+    const migration = {
+      ...envelope('document.steps_applied', {
+        ...captureStepBatch(legacyDocument, migrationTransaction.steps),
+        beforeHash: sha256HexSync(canonicalJson(legacyDocument.toJSON())),
+        afterHash: sha256HexSync(canonicalJson(normalizedDocument.toJSON())),
+      }, 0),
+      origin: 'migration' as const,
+    }
     let dailyPos = -1
     normalizedDocument.descendants((node, pos) => {
       if (node.type.name === 'listItem' && node.attrs.nodeId === 'daily') dailyPos = pos
@@ -162,13 +250,49 @@ describe('deterministic outline replay', () => {
       .tr.insertText('!', dailyPos + 2 + 'Daily Notes'.length)
     const edit = envelope('document.steps_applied', {
       ...captureStepBatch(normalizedDocument, editTransaction.steps),
-      beforeHash: '1'.repeat(64),
-      afterHash: '2'.repeat(64),
+      beforeHash: sha256HexSync(canonicalJson(normalizedDocument.toJSON())),
+      afterHash: sha256HexSync(canonicalJson(editTransaction.doc.toJSON())),
     }, 1)
 
     const replayed = replayOutlineEvents(initial, [migration, edit])
 
     expect(schema.nodeFromJSON(replayed.doc).eq(editTransaction.doc)).toBe(true)
     expect((replayed.doc.content as unknown[])).toHaveLength(1)
+  })
+
+  it('rejects an event whose document hash does not match replay state', () => {
+    const schema = createOutlineSchema()
+    const initial = createInitialOutlineState({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: 'item' }, content: [{ type: 'paragraph' }],
+      }] }],
+    })
+    const document = schema.nodeFromJSON(initial.doc)
+    const transaction = EditorState.create({ schema, doc: document }).tr.insertText('tampered', 3)
+    const event = envelope('document.steps_applied', {
+      ...captureStepBatch(document, transaction.steps),
+      beforeHash: '0'.repeat(64),
+      afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
+    }, 0)
+
+    expect(() => replayOutlineEvents(initial, [event])).toThrow(/integrity mismatch before event event-1/)
+  })
+
+  it('rejects an event whose projected document does not match its after hash', () => {
+    const schema = createOutlineSchema()
+    const initial = createInitialOutlineState({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: 'item' }, content: [{ type: 'paragraph' }],
+      }] }],
+    })
+    const document = schema.nodeFromJSON(initial.doc)
+    const transaction = EditorState.create({ schema, doc: document }).tr.insertText('tampered', 3)
+    const event = envelope('document.steps_applied', {
+      ...captureStepBatch(document, transaction.steps),
+      beforeHash: sha256HexSync(canonicalJson(document.toJSON())),
+      afterHash: '0'.repeat(64),
+    }, 0)
+
+    expect(() => replayOutlineEvents(initial, [event])).toThrow(/integrity mismatch after event event-1/)
   })
 })
