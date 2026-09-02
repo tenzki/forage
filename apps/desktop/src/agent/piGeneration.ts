@@ -102,8 +102,10 @@ export async function generateWithPi(
         text = finalText
         options.onDelta(text)
       }
-      beginOutput()
-      options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Response ready', durationMs: Date.now() - startedAt })
+      if (text) {
+        beginOutput()
+        options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Response ready', durationMs: Date.now() - startedAt })
+      }
     }
     if (event.type === 'process_error') {
       options.onActivity?.({ id: thinkingId, phase: 'error', kind: 'error', label: 'Agent error', detail: String(event.error ?? 'Unknown agent error') })
@@ -121,19 +123,26 @@ export async function generateWithPi(
       ...(resolvedAuth.mode === 'subscription' ? { oauthExpires: resolvedAuth.expires } : {}),
     })
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
-    const settled = client.waitForSettled()
-    await client.prompt(encodePayload({
+    const payload = encodePayload({
       instructions: [input.agent?.systemPrompt, input.skill.systemPrompt].filter(Boolean).join('\n\n'),
       prompt: input.prompt,
       context: input.context,
       enabledToolIds,
       customTools,
       outlineSnapshot: input.outlineSnapshot,
-    }))
-    await settled
+    })
+    for (let attempt = 0; attempt < 2 && !outline && !text; attempt += 1) {
+      const settled = client.waitForSettled()
+      await client.prompt(payload)
+      await settled
+      if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
+    }
     await Promise.all(outlineWrites)
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
-    if (!outline && !text) throw new Error(`Pi returned no outline. ${client.getStderr()}`)
+    if (!outline && !text) {
+      const stderr = client.getStderr().trim()
+      throw new Error(`The agent finished without producing a response after one retry.${stderr ? ` ${stderr}` : ''}`)
+    }
     return text
   } finally {
     options.signal?.removeEventListener('abort', abort)

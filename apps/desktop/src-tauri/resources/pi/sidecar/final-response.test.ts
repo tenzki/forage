@@ -58,4 +58,22 @@ describe('FinalResponseTracker', () => {
 
     expect(tracker.settledEvent()).toEqual({ type: 'agent_settled' })
   })
+
+  it('preserves the final provider error instead of reporting an empty response', () => {
+    const tracker = new FinalResponseTracker()
+
+    tracker.recordAgentEnd([
+      {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Your ChatGPT session has expired.',
+      },
+    ], false)
+
+    expect(tracker.settledEvent()).toEqual({
+      type: 'process_error',
+      error: 'Your ChatGPT session has expired.',
+    })
+  })
 })

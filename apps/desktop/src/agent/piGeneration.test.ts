@@ -6,6 +6,8 @@ type TestEvent = Record<string, unknown> & { type: string }
 const rpc = vi.hoisted(() => ({
   listener: undefined as ((event: TestEvent) => void) | undefined,
   promptEvents: [] as TestEvent[],
+  promptEventBatches: [] as TestEvent[][],
+  promptCount: 0,
   emitDefaultText: true,
   start: vi.fn(async () => undefined),
   stop: vi.fn(async () => undefined),
@@ -25,7 +27,9 @@ vi.mock('./piSdkClient', () => ({
     getStderr = () => ''
 
     async prompt() {
-      for (const event of rpc.promptEvents) rpc.listener?.(event)
+      const events = rpc.promptEventBatches[rpc.promptCount] ?? rpc.promptEvents
+      rpc.promptCount += 1
+      for (const event of events) rpc.listener?.(event)
       if (rpc.emitDefaultText) {
         rpc.listener?.({
           type: 'message_update',
@@ -42,6 +46,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   rpc.listener = undefined
   rpc.promptEvents = []
+  rpc.promptEventBatches = []
+  rpc.promptCount = 0
   rpc.emitDefaultText = true
 })
 
@@ -78,6 +84,41 @@ describe('generateWithPi authentication', () => {
 })
 
 describe('generateWithPi activity', () => {
+  it('retries once when Pi settles without text or an outline', async () => {
+    const onOutline = vi.fn()
+    rpc.emitDefaultText = false
+    rpc.promptEventBatches = [
+      [{ type: 'agent_settled' }],
+      [{
+        type: 'tool_execution_end',
+        toolName: 'emit_outline',
+        result: { details: { action: 'emit_outline', nodes: [{ text: 'Recovered response' }] } },
+      }],
+    ]
+
+    await generateWithPi({
+      mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test',
+    }, {
+      skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
+    }, { onDelta: vi.fn(), onOutline })
+
+    expect(rpc.promptCount).toBe(2)
+    expect(onOutline).toHaveBeenCalledWith([{ text: 'Recovered response' }])
+  })
+
+  it('stops after one recovery attempt when Pi keeps returning empty', async () => {
+    rpc.emitDefaultText = false
+    rpc.promptEvents = [{ type: 'agent_settled' }]
+
+    await expect(generateWithPi({
+      mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test',
+    }, {
+      skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
+    }, { onDelta: vi.fn() })).rejects.toThrow('The agent finished without producing a response after one retry.')
+
+    expect(rpc.promptCount).toBe(2)
+  })
+
   it('uses final settled text when the provider emitted no streaming deltas or outline tool result', async () => {
     const onDelta = vi.fn()
     rpc.emitDefaultText = false
