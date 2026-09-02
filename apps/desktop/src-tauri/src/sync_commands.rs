@@ -10,6 +10,7 @@ use tauri::State;
 const MAX_STATUS_BYTES: usize = 64 * 1024;
 const MAX_EVENT_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_AGENT_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 #[tauri::command]
 pub async fn server_enroll(
@@ -249,6 +250,311 @@ pub fn server_connection_info(
         }))
 }
 
+#[tauri::command]
+pub async fn server_agent_configuration(state: State<'_, NativeState>) -> Result<Value, String> {
+    let (configuration, pinned, token) = connection(&state)?;
+    request_json(
+        &state.http_client,
+        &pinned,
+        Some(&token),
+        Method::GET,
+        &format!(
+            "/api/v1/outlines/{}/agent-configuration",
+            configuration.outline_id
+        ),
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_publish_configuration(
+    state: State<'_, NativeState>,
+    request: Value,
+) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::PUT,
+        "agent-configuration",
+        Some(request),
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_automation(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::GET,
+        "agent-automation",
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_publish_automation(
+    state: State<'_, NativeState>,
+    request: Value,
+) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::PUT,
+        "agent-automation",
+        Some(request),
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_enroll_api_key(
+    state: State<'_, NativeState>,
+    request: Value,
+) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::POST,
+        "agent-credentials/api-key",
+        Some(request),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_start_device_authorization(
+    state: State<'_, NativeState>,
+) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::POST,
+        "agent-credentials/chatgpt/device",
+        Some(json!({})),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_poll_device_authorization(
+    state: State<'_, NativeState>,
+    authorization_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&authorization_id)?;
+    agent_request(
+        &state,
+        Method::GET,
+        &format!("agent-device-authorizations/{authorization_id}"),
+        None,
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_credential(
+    state: State<'_, NativeState>,
+    credential_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&credential_id)?;
+    agent_request(
+        &state,
+        Method::GET,
+        &format!("agent-credentials/{credential_id}"),
+        None,
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_disconnect_credential(
+    state: State<'_, NativeState>,
+    credential_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&credential_id)?;
+    agent_request(
+        &state,
+        Method::DELETE,
+        &format!("agent-credentials/{credential_id}"),
+        None,
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_invoke(
+    state: State<'_, NativeState>,
+    request: Value,
+    idempotency_key: String,
+) -> Result<Value, String> {
+    if idempotency_key.trim().is_empty() || idempotency_key.len() > 255 {
+        return Err("invalid idempotency key".to_string());
+    }
+    let (configuration, pinned, token) = connection(&state)?;
+    request_json_with_idempotency(
+        &state.http_client,
+        &pinned,
+        Some(&token),
+        Method::POST,
+        &format!("/api/v1/outlines/{}/agent-runs", configuration.outline_id),
+        Some(request),
+        MAX_AGENT_RESPONSE_BYTES,
+        Some(&idempotency_key),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_runs(
+    state: State<'_, NativeState>,
+    cursor: Option<String>,
+    limit: i64,
+    status: Option<String>,
+) -> Result<Value, String> {
+    if cursor.as_ref().is_some_and(|value| value.len() > 512) {
+        return Err("invalid run cursor".to_string());
+    }
+    if status.as_ref().is_some_and(|value| {
+        value.len() > 32
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    }) {
+        return Err("invalid run status".to_string());
+    }
+    let endpoint = {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair("limit", &limit.clamp(1, 100).to_string());
+        if let Some(value) = cursor {
+            query.append_pair("cursor", &value);
+        }
+        if let Some(value) = status {
+            query.append_pair("status", &value);
+        }
+        format!("agent-runs?{}", query.finish())
+    };
+    agent_request(
+        &state,
+        Method::GET,
+        &endpoint,
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_run(
+    state: State<'_, NativeState>,
+    run_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&run_id)?;
+    agent_request(
+        &state,
+        Method::GET,
+        &format!("agent-runs/{run_id}"),
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_activity(
+    state: State<'_, NativeState>,
+    run_id: String,
+    after_sequence: i64,
+    limit: i64,
+) -> Result<Value, String> {
+    validate_agent_id(&run_id)?;
+    agent_request(
+        &state,
+        Method::GET,
+        &format!(
+            "agent-runs/{run_id}/activity?afterSequence={}&limit={}",
+            after_sequence.max(0),
+            limit.clamp(1, 200)
+        ),
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_cancel(
+    state: State<'_, NativeState>,
+    run_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&run_id)?;
+    agent_request(
+        &state,
+        Method::POST,
+        &format!("agent-runs/{run_id}/cancel"),
+        Some(json!({})),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_retry(
+    state: State<'_, NativeState>,
+    run_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&run_id)?;
+    agent_request(
+        &state,
+        Method::POST,
+        &format!("agent-runs/{run_id}/retry"),
+        Some(json!({})),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+fn validate_agent_id(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':'))
+    {
+        Err("invalid agent identifier".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+async fn agent_request(
+    state: &State<'_, NativeState>,
+    method: Method,
+    suffix: &str,
+    body: Option<Value>,
+    maximum: usize,
+) -> Result<Value, String> {
+    if suffix.starts_with('/') || suffix.contains("..") {
+        return Err("invalid agent endpoint".to_string());
+    }
+    let (configuration, pinned, token) = connection(state)?;
+    request_json(
+        &state.http_client,
+        &pinned,
+        Some(&token),
+        method,
+        &format!("/api/v1/outlines/{}/{}", configuration.outline_id, suffix),
+        body,
+        maximum,
+    )
+    .await
+}
+
 fn connection(
     state: &State<'_, NativeState>,
 ) -> Result<(ServerConfiguration, PinnedServer, String), String> {
@@ -375,10 +681,36 @@ async fn request_json(
     body: Option<Value>,
     max_response_bytes: usize,
 ) -> Result<Value, String> {
+    request_json_with_idempotency(
+        client,
+        server,
+        bearer_token,
+        method,
+        path,
+        body,
+        max_response_bytes,
+        None,
+    )
+    .await
+}
+
+async fn request_json_with_idempotency(
+    client: &reqwest::Client,
+    server: &PinnedServer,
+    bearer_token: Option<&str>,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    max_response_bytes: usize,
+    idempotency_key: Option<&str>,
+) -> Result<Value, String> {
     let url = server.endpoint(path).map_err(|error| error.to_string())?;
     let mut request = client.request(method, url);
     if let Some(token) = bearer_token {
         request = request.bearer_auth(token);
+    }
+    if let Some(key) = idempotency_key {
+        request = request.header("Idempotency-Key", key);
     }
     if let Some(value) = body {
         request = request.json(&value);

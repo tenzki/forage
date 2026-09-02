@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { eventEnvelopeSchema } from '../../domain/src'
 
+export * from './agent'
+
 const boundedId = z.string().trim().min(1).max(128)
 const revision = z.number().int().nonnegative()
 
@@ -95,6 +97,8 @@ export const serverStatusSchema = z.object({
   instanceId: boundedId,
   apiVersions: z.array(z.number().int().positive()).min(1),
   eventVersions: z.record(z.string(), z.array(z.number().int().positive()).min(1)),
+  agentOriginVersions: z.array(z.number().int().positive()).min(1),
+  minimumAgentClientVersion: z.string().trim().min(1).max(50),
   documentSchemaVersion: z.number().int().positive(),
   minimumClientVersion: z.string().trim().min(1).max(50),
 }).strict()

@@ -25,8 +25,7 @@ function resolvedAction() {
 function setLoadedSettings() {
   useSettingsStore.setState({
     authMode: 'subscription',
-    openAiApiKey: '',
-    oauthCredential: null,
+    localCredentials: [],
     modelId: 'gpt-5.5',
     enabledToolIds: ['web_search'],
     customTools: [{
@@ -49,6 +48,7 @@ function setLoadedSettings() {
       description: 'Ask about this branch',
       systemPrompt: 'Answer the question.',
       agentId: 'general-agent',
+      requiredToolIds: [],
     }],
     isLoaded: true,
     error: null,

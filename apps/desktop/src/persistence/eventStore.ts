@@ -4,6 +4,14 @@ import {
   type EventEnvelope,
   type OutlineState,
 } from '@forage/domain'
+import {
+  activityEventSchema,
+  runStatusSchema,
+  type ActivityEvent,
+  type RunInput,
+  type RunStatus,
+  type StructuredResult,
+} from '@forage/agent-runtime'
 
 export interface StoredEventRecord {
   localSequence: number
@@ -66,6 +74,28 @@ function eventRecord(event: EventEnvelope) {
     supersededBy: null,
     createdAt: event.occurredAt,
   }
+}
+
+export interface LocalAgentRun {
+  id: string
+  outlineId: string
+  snapshot: RunInput
+  status: RunStatus
+  attemptCount: number
+  resultIdentity: string | null
+  result: StructuredResult | null
+  retryOfRunId: string | null
+  cancelRequestedAt: string | null
+  errorCode: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LocalAgentActivity {
+  runId: string
+  sequence: number
+  event: ActivityEvent
+  createdAt: string
 }
 
 export class NativeEventRepository {
@@ -165,5 +195,51 @@ export class NativeEventRepository {
 
   async setStorageMode(mode: 'local' | 'server'): Promise<void> {
     await invoke('event_store_set_storage_mode', { mode })
+  }
+
+  async admitAgentRun(run: LocalAgentRun): Promise<void> {
+    await invoke('agent_run_admit', { run })
+  }
+
+  async agentRun(runId: string): Promise<LocalAgentRun | null> {
+    const run = await invoke<LocalAgentRun | null>('agent_run_get', { runId })
+    if (!run) return null
+    return { ...run, status: runStatusSchema.parse(run.status) }
+  }
+
+  async beginAgentAttempt(runId: string, startedAt: string): Promise<number> {
+    return invoke('agent_run_begin_attempt', { runId, startedAt })
+  }
+
+  async appendAgentActivity(runId: string, event: ActivityEvent, createdAt: string): Promise<number> {
+    return invoke('agent_run_append_activity', { runId, event: activityEventSchema.parse(event), createdAt })
+  }
+
+  async agentActivityAfter(runId: string, afterSequence: number, limit = 100): Promise<LocalAgentActivity[]> {
+    const records = await invoke<LocalAgentActivity[]>('agent_run_activity_after', { runId, afterSequence, limit })
+    return records.map((record) => ({ ...record, event: activityEventSchema.parse(record.event) }))
+  }
+
+  async cancelAgentRun(runId: string, cancelledAt: string): Promise<void> {
+    await invoke('agent_run_cancel', { runId, cancelledAt })
+  }
+
+  async settleAgentRun(
+    runId: string,
+    status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>,
+    resultIdentity: string | null,
+    result: StructuredResult | null,
+    errorCode: string | null,
+    settledAt: string,
+  ): Promise<void> {
+    await invoke('agent_run_settle', { runId, status, resultIdentity, result, errorCode, settledAt })
+  }
+
+  async retryAgentRun(originalRunId: string, run: LocalAgentRun): Promise<void> {
+    await invoke('agent_run_retry', { originalRunId, run })
+  }
+
+  async interruptUnfinishedAgentRuns(interruptedAt: string): Promise<number> {
+    return invoke('agent_run_interrupt_unfinished', { interruptedAt })
   }
 }

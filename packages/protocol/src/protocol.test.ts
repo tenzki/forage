@@ -27,6 +27,8 @@ describe('shared HTTP protocol schemas', () => {
       instanceId: 'instance-1',
       apiVersions: [1],
       eventVersions: { 'note.created': [1] },
+      agentOriginVersions: [1],
+      minimumAgentClientVersion: '0.2.0',
       documentSchemaVersion: 1,
       minimumClientVersion: '0.1.0',
     })

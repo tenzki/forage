@@ -2,6 +2,13 @@ import { create } from 'zustand'
 import { load, type Store } from '@tauri-apps/plugin-store'
 import type { CodexOAuthCredential } from '../agent/codexAuth'
 import {
+  LOCAL_CODEX_CREDENTIAL_ID,
+  LOCAL_OPENAI_CREDENTIAL_ID,
+  migrateLegacyCredentials,
+  nativeLocalCredentialVault,
+  type LocalCredentialMetadata,
+} from '../agent/localCredentials'
+import {
   copyDefaultAgents,
   copyDefaultSkills,
   DEFAULT_AGENT_ID,
@@ -24,6 +31,7 @@ const STORE_FILE = 'settings.json'
 const AUTH_MODE_FIELD = 'codexAuthMode'
 const API_KEY_FIELD = 'openAiApiKey'
 const OAUTH_FIELD = 'codexOAuthCredential'
+const LOCAL_CREDENTIALS_FIELD = 'localModelCredentials'
 const MODEL_FIELD = 'codexModelId'
 const ENABLED_TOOLS_FIELD = 'enabledTools'
 const CUSTOM_TOOLS_FIELD = 'customHttpTools'
@@ -49,8 +57,7 @@ async function saveField<T>(field: string, value: T): Promise<void> {
 
 interface SettingsState {
   authMode: CodexAuthMode
-  openAiApiKey: string
-  oauthCredential: CodexOAuthCredential | null
+  localCredentials: LocalCredentialMetadata[]
   modelId: string
   enabledToolIds: string[]
   customTools: CustomHttpToolConfig[]
@@ -142,10 +149,25 @@ function validSkills(value: unknown, agents: AgentDefinition[]): SkillDefinition
   })
 }
 
+function mergeCredentialMetadata(
+  stored: LocalCredentialMetadata[] | undefined,
+  updates: LocalCredentialMetadata[],
+): LocalCredentialMetadata[] {
+  const merged = new Map<string, LocalCredentialMetadata>()
+  for (const credential of Array.isArray(stored) ? stored : []) {
+    if (credential && typeof credential.id === 'string'
+      && ['openai', 'openai-codex'].includes(credential.provider)
+      && ['connected', 'authentication_required'].includes(credential.status)) {
+      merged.set(credential.id, credential)
+    }
+  }
+  for (const credential of updates) merged.set(credential.id, credential)
+  return [...merged.values()]
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   authMode: 'subscription',
-  openAiApiKey: '',
-  oauthCredential: null,
+  localCredentials: [],
   modelId: 'gpt-5.5',
   enabledToolIds: DEFAULT_ENABLED_TOOLS,
   customTools: [],
@@ -157,10 +179,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   load: async () => {
     try {
       const store = await getStore()
-      const [authMode, openAiApiKey, oauthCredential, modelId, enabledTools, storedTools, storedAgents, storedSkills] = await Promise.all([
+      const [authMode, openAiApiKey, oauthCredential, storedCredentials, modelId, enabledTools, storedTools, storedAgents, storedSkills] = await Promise.all([
         store.get<CodexAuthMode>(AUTH_MODE_FIELD),
         store.get<string>(API_KEY_FIELD),
         store.get<CodexOAuthCredential>(OAUTH_FIELD),
+        store.get<LocalCredentialMetadata[]>(LOCAL_CREDENTIALS_FIELD),
         store.get<string>(MODEL_FIELD),
         store.get<string[]>(ENABLED_TOOLS_FIELD),
         store.get<CustomHttpToolConfig[]>(CUSTOM_TOOLS_FIELD),
@@ -170,13 +193,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const customTools = validCustomTools(storedTools)
       const agents = validAgents(storedAgents, toolOptions(customTools))
       const skills = validSkills(storedSkills, agents)
+      const migratedCredentials = await migrateLegacyCredentials(
+        { apiKey: openAiApiKey, oauth: oauthCredential },
+        nativeLocalCredentialVault,
+      )
+      const localCredentials = mergeCredentialMetadata(storedCredentials, migratedCredentials)
       if (Array.isArray(storedSkills)) await store.set(SKILLS_FIELD, skills)
+      await store.set(LOCAL_CREDENTIALS_FIELD, localCredentials)
+      await store.delete(API_KEY_FIELD)
+      await store.delete(OAUTH_FIELD)
       await store.delete(LEGACY_ANTHROPIC_FIELD)
       await store.save()
       set({
         authMode: authMode === 'api_key' ? 'api_key' : 'subscription',
-        openAiApiKey: openAiApiKey ?? '',
-        oauthCredential: oauthCredential ?? null,
+        localCredentials,
         modelId: modelId || 'gpt-5.5',
         enabledToolIds: Array.isArray(enabledTools) ? enabledTools : DEFAULT_ENABLED_TOOLS,
         customTools,
@@ -203,24 +233,43 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setOpenAiApiKey: async (openAiApiKey) => {
-    set({ openAiApiKey, error: null })
+    const previous = get().localCredentials
+    const trimmed = openAiApiKey.trim()
     try {
-      await saveField(API_KEY_FIELD, openAiApiKey)
+      if (trimmed) await nativeLocalCredentialVault.store(LOCAL_OPENAI_CREDENTIAL_ID, trimmed)
+      else await nativeLocalCredentialVault.remove(LOCAL_OPENAI_CREDENTIAL_ID)
+      const localCredentials = trimmed
+        ? mergeCredentialMetadata(previous, [{ id: LOCAL_OPENAI_CREDENTIAL_ID, provider: 'openai', status: 'connected' }])
+        : previous.filter((credential) => credential.id !== LOCAL_OPENAI_CREDENTIAL_ID)
+      set({ localCredentials, error: null })
+      await saveField(LOCAL_CREDENTIALS_FIELD, localCredentials)
     } catch (error) {
-      set({ error: message(error) })
+      set({ localCredentials: previous, error: message(error) })
       throw error
     }
   },
 
   setOAuthCredential: async (oauthCredential) => {
-    set({ oauthCredential, error: null })
+    const previous = get().localCredentials
     try {
       const store = await getStore()
-      if (oauthCredential) await store.set(OAUTH_FIELD, oauthCredential)
-      else await store.delete(OAUTH_FIELD)
+      if (oauthCredential) await nativeLocalCredentialVault.store(LOCAL_CODEX_CREDENTIAL_ID, JSON.stringify(oauthCredential))
+      else await nativeLocalCredentialVault.remove(LOCAL_CODEX_CREDENTIAL_ID)
+      const localCredentials = oauthCredential
+        ? mergeCredentialMetadata(previous, [{
+          id: LOCAL_CODEX_CREDENTIAL_ID,
+          provider: 'openai-codex',
+          status: 'connected',
+          accountLabel: oauthCredential.accountId,
+          expiresAt: new Date(oauthCredential.expires).toISOString(),
+        }])
+        : previous.filter((credential) => credential.id !== LOCAL_CODEX_CREDENTIAL_ID)
+      set({ localCredentials, error: null })
+      await store.set(LOCAL_CREDENTIALS_FIELD, localCredentials)
+      await store.delete(OAUTH_FIELD)
       await store.save()
     } catch (error) {
-      set({ error: message(error) })
+      set({ localCredentials: previous, error: message(error) })
       throw error
     }
   },

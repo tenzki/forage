@@ -1,6 +1,7 @@
 use crate::assets::{AssetMetadata, AssetStore, MAX_ASSET_BYTES};
 use crate::persistence::{
-    CheckpointRecord, EventRecord, EventStore, StorageMode, StoredEvent, SyncState,
+    AgentActivityRecord, AgentRunRecord, CheckpointRecord, EventRecord, EventStore, StorageMode,
+    StoredEvent, SyncState,
 };
 use base64::Engine;
 use tauri::State;
@@ -14,6 +15,14 @@ pub struct NativeState {
 
 fn command_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn validate_local_credential_reference(reference: &str) -> Result<(), String> {
+    if matches!(reference, "local-openai" | "local-openai-codex") {
+        Ok(())
+    } else {
+        Err("invalid local credential reference".to_string())
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -233,4 +242,156 @@ pub fn event_store_identity(state: State<'_, NativeState>) -> Result<LocalIdenti
             .get_or_create_identity("device_id", "device")
             .map_err(command_error)?,
     })
+}
+
+#[tauri::command]
+pub fn agent_run_admit(state: State<'_, NativeState>, run: AgentRunRecord) -> Result<(), String> {
+    state
+        .event_store
+        .admit_agent_run(&run)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_get(
+    state: State<'_, NativeState>,
+    run_id: String,
+) -> Result<Option<AgentRunRecord>, String> {
+    state.event_store.agent_run(&run_id).map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_begin_attempt(
+    state: State<'_, NativeState>,
+    run_id: String,
+    started_at: String,
+) -> Result<i64, String> {
+    state
+        .event_store
+        .begin_agent_attempt(&run_id, &started_at)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_append_activity(
+    state: State<'_, NativeState>,
+    run_id: String,
+    event: serde_json::Value,
+    created_at: String,
+) -> Result<i64, String> {
+    state
+        .event_store
+        .append_agent_activity(&run_id, &event, &created_at)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_activity_after(
+    state: State<'_, NativeState>,
+    run_id: String,
+    after_sequence: i64,
+    limit: i64,
+) -> Result<Vec<AgentActivityRecord>, String> {
+    state
+        .event_store
+        .agent_activity_after(&run_id, after_sequence, limit)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_cancel(
+    state: State<'_, NativeState>,
+    run_id: String,
+    cancelled_at: String,
+) -> Result<(), String> {
+    state
+        .event_store
+        .cancel_agent_run(&run_id, &cancelled_at)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_settle(
+    state: State<'_, NativeState>,
+    run_id: String,
+    status: String,
+    result_identity: Option<String>,
+    result: Option<serde_json::Value>,
+    error_code: Option<String>,
+    settled_at: String,
+) -> Result<(), String> {
+    state
+        .event_store
+        .settle_agent_run(
+            &run_id,
+            &status,
+            result_identity.as_deref(),
+            result.as_ref(),
+            error_code.as_deref(),
+            &settled_at,
+        )
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_retry(
+    state: State<'_, NativeState>,
+    original_run_id: String,
+    run: AgentRunRecord,
+) -> Result<(), String> {
+    state
+        .event_store
+        .retry_agent_run(&original_run_id, &run)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_run_interrupt_unfinished(
+    state: State<'_, NativeState>,
+    interrupted_at: String,
+) -> Result<usize, String> {
+    state
+        .event_store
+        .interrupt_unfinished_agent_runs(&interrupted_at)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn local_credential_store(
+    state: State<'_, NativeState>,
+    reference: String,
+    secret: String,
+) -> Result<(), String> {
+    validate_local_credential_reference(&reference)?;
+    if secret.is_empty() || secret.len() > 100_000 {
+        return Err("invalid local credential secret".to_string());
+    }
+    state
+        .credential_vault
+        .store(&reference, &secret)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn local_credential_load(
+    state: State<'_, NativeState>,
+    reference: String,
+) -> Result<String, String> {
+    validate_local_credential_reference(&reference)?;
+    state
+        .credential_vault
+        .load(&reference)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn local_credential_remove(
+    state: State<'_, NativeState>,
+    reference: String,
+) -> Result<(), String> {
+    validate_local_credential_reference(&reference)?;
+    state
+        .credential_vault
+        .remove(&reference)
+        .map_err(command_error)
 }

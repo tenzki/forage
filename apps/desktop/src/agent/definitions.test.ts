@@ -75,7 +75,34 @@ describe('agent and skill definitions', () => {
       description: 'Summarize a branch',
       systemPrompt: 'Summarize.',
       agentId: agent.id,
+      requiredToolIds: [],
     })
     expect(skill).not.toHaveProperty('contextStrategy')
+  })
+
+  it('normalizes required tools against the assigned agent allowlist', () => {
+    const agent = validateAgentDraft({
+      id: DEFAULT_AGENT_ID,
+      name: 'Researcher',
+      description: 'Research assistant',
+      systemPrompt: 'Research.',
+      modelId: '',
+      toolIds: ['web_fetch'],
+    }, BUILTIN_TOOL_OPTIONS)
+
+    expect(validateSkillDraft({
+      label: 'research',
+      description: 'Research',
+      systemPrompt: 'Use sources.',
+      agentId: agent.id,
+      requiredToolIds: ['web_fetch', 'web_fetch'],
+    }, [agent]).requiredToolIds).toEqual(['web_fetch'])
+    expect(() => validateSkillDraft({
+      label: 'research',
+      description: 'Research',
+      systemPrompt: 'Use sources.',
+      agentId: agent.id,
+      requiredToolIds: ['youtube_transcript'],
+    }, [agent])).toThrow(/required tool/i)
   })
 })

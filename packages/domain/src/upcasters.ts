@@ -12,6 +12,12 @@ export interface UnknownEventEnvelope {
   origin: string
   occurredAt: string
   changeGroupId?: string
+  agentProvenance?: {
+    runId: string
+    skillId: string
+    sourceNodeId?: string
+    sourceUrls: string[]
+  }
   payload: Record<string, unknown>
 }
 

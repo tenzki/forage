@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.2",
+    "@forage/agent-runtime": "0.1.0",
     "@forage/document": "0.1.0",
     "@forage/domain": "0.1.0",
     "@forage/protocol": "0.1.0",

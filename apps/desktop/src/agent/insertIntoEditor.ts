@@ -24,6 +24,7 @@ import { buildOutlineSnapshot } from './outlineSnapshot'
 import type { ActivityReporter } from './activity'
 import { NativeAssetRepository } from '../persistence/assetStore'
 import type { GeneratedImageReference } from '../editor/generatedImage'
+import type { StructuredResult, StructuredResultNode } from '@forage/agent-runtime'
 
 function contextText(item: ProseMirrorNode): string {
   const title = item.firstChild?.textContent?.trim() ?? ''
@@ -375,6 +376,47 @@ function createAiOutlineItem(editor: Editor, node: StoredOutlineNode, nodeId: st
     if (children.length) content.push(schema.nodes.bulletList.create(null, children))
   }
   return [schema.nodes.listItem.create({ nodeId, nodeType: 'ai' }, content)]
+}
+
+export function commitStructuredAgentResult(
+  editor: Editor,
+  invocationNodeId: string,
+  skillLabel: string,
+  result: StructuredResult,
+): void {
+  let invocation: { pos: number; node: ProseMirrorNode } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (invocation || node.type.name !== 'listItem' || node.attrs.nodeId !== invocationNodeId) return
+    invocation = { pos, node }
+    return false
+  })
+  if (!invocation) throw new Error('The skill invocation target is no longer available.')
+  const target = invocation as { pos: number; node: ProseMirrorNode }
+  const nodes = result.nodes.map(structuredToStored)
+  const items = nodes.flatMap((node) => createAiOutlineItem(editor, node, newNodeId()))
+  if (!items.length) throw new Error('The agent returned no outline nodes.')
+
+  const paragraph = target.node.firstChild
+  const text = paragraph?.textContent ?? ''
+  const prefix = `/${skillLabel}`
+  let prefixLength = text.startsWith(prefix) ? prefix.length : 0
+  while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
+  const paragraphStart = target.pos + 2
+  const originalInsertPosition = target.pos + target.node.nodeSize - 1
+  const transaction = editor.state.tr
+  if (prefixLength) transaction.delete(paragraphStart, paragraphStart + prefixLength)
+  const insertPosition = transaction.mapping.map(originalInsertPosition, -1)
+  transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
+  transaction.setMeta('forageOrigin', 'agent')
+  editor.view.dispatch(transaction)
+}
+
+function structuredToStored(node: StructuredResultNode): StoredOutlineNode {
+  if (node.type === 'image') return { image: { assetId: node.assetId, alt: node.alt } }
+  return {
+    text: node.text,
+    ...(node.children?.length ? { children: node.children.map(structuredToStored) } : {}),
+  }
 }
 
 function replaceAiList(

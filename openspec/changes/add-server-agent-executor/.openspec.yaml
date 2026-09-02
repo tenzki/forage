@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-30
+goal: Run durable Inbox automations on a local or remote server using
+  configurable skills, source tools, and server-owned model credentials.

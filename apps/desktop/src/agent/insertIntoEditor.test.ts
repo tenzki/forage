@@ -19,6 +19,8 @@ import {
 } from '../editor/generatedImage'
 import { generateWithPi } from './piGeneration'
 import {
+  commitStructuredAgentResult,
+  currentListItemId,
   insertAiChild,
   removeCurrentSlashCommand,
   runSkillIntoEditor,
@@ -156,7 +158,7 @@ describe('agent output insertion', () => {
     expect(() => runSkillIntoEditor(
       editor,
       { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
-      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general' },
+      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general', requiredToolIds: [] },
       { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
       'question',
     )).toThrow(/no longer exists/)
@@ -173,7 +175,7 @@ describe('agent output insertion', () => {
     const generation = runSkillIntoEditor(
       editor,
       { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
-      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general' },
+      { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general', requiredToolIds: [] },
       { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
       'question',
       [],
@@ -356,6 +358,23 @@ describe('agent output insertion', () => {
 
     // A single undo removes the entire generation, leaving the original bullet.
     expect(bulletTexts(editor)).toEqual(['Research topic'])
+  })
+
+  it('commits only the terminal structured result as one coherent undo change', () => {
+    editor.destroy()
+    editor = makeEditor('/research Compare options')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+
+    commitStructuredAgentResult(editor, invocationNodeId, 'research', {
+      version: 1,
+      nodes: [{ type: 'text', text: 'Summary', children: [{ type: 'text', text: 'Evidence' }] }],
+      sources: [],
+    })
+
+    expect(bulletTexts(editor)).toEqual(['Compare options', 'Summary', 'Evidence'])
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['/research Compare options'])
   })
 
   it('does not move the caret while text streams in', () => {

@@ -5,7 +5,8 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-const MIGRATION: &str = include_str!("../migrations/0001_event_store.sql");
+const MIGRATION_0001: &str = include_str!("../migrations/0001_event_store.sql");
+const MIGRATION_0002: &str = include_str!("../migrations/0002_agent_executor.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -17,6 +18,10 @@ pub enum StoreError {
     EventIdConflict(String),
     #[error("invalid storage mode {0}")]
     InvalidStorageMode(String),
+    #[error("agent run {0} conflicts with persisted history")]
+    AgentRunConflict(String),
+    #[error("agent run {0} is not in a valid state for this operation")]
+    InvalidAgentRunState(String),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
@@ -88,6 +93,32 @@ pub struct ServerConfiguration {
     pub outline_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunRecord {
+    pub id: String,
+    pub outline_id: String,
+    pub snapshot: Value,
+    pub status: String,
+    pub attempt_count: i64,
+    pub result_identity: Option<String>,
+    pub result: Option<Value>,
+    pub retry_of_run_id: Option<String>,
+    pub cancel_requested_at: Option<String>,
+    pub error_code: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivityRecord {
+    pub run_id: String,
+    pub sequence: i64,
+    pub event: Value,
+    pub created_at: String,
+}
+
 impl StorageMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -118,7 +149,8 @@ impl EventStore {
             connection.pragma_update(None, "journal_mode", "WAL")?;
             connection.pragma_update(None, "synchronous", "NORMAL")?;
         }
-        connection.execute_batch(MIGRATION)?;
+        connection.execute_batch(MIGRATION_0001)?;
+        connection.execute_batch(MIGRATION_0002)?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -623,6 +655,310 @@ impl EventStore {
         )?;
         Ok(())
     }
+
+    pub fn admit_agent_run(&self, run: &AgentRunRecord) -> StoreResult<()> {
+        let snapshot_json = serde_json::to_string(&run.snapshot)
+            .expect("serde_json::Value serialization cannot fail");
+        let result_json = run.result.as_ref().map(|value| {
+            serde_json::to_string(value).expect("serde_json::Value serialization cannot fail")
+        });
+        let connection = self.connection()?;
+        let inserted = connection.execute(
+            "INSERT OR IGNORE INTO local_agent_runs
+             (id, outline_id, snapshot_json, status, attempt_count, result_identity, result_json,
+              retry_of_run_id, cancel_requested_at, error_code, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                run.id,
+                run.outline_id,
+                snapshot_json,
+                run.status,
+                run.attempt_count,
+                run.result_identity,
+                result_json,
+                run.retry_of_run_id,
+                run.cancel_requested_at,
+                run.error_code,
+                run.created_at,
+                run.updated_at
+            ],
+        )?;
+        if inserted == 0 {
+            let existing = self.agent_run_with_connection(&connection, &run.id)?;
+            if existing.as_ref() != Some(run) {
+                return Err(StoreError::AgentRunConflict(run.id.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn agent_run(&self, id: &str) -> StoreResult<Option<AgentRunRecord>> {
+        let connection = self.connection()?;
+        self.agent_run_with_connection(&connection, id)
+    }
+
+    fn agent_run_with_connection(
+        &self,
+        connection: &Connection,
+        id: &str,
+    ) -> StoreResult<Option<AgentRunRecord>> {
+        connection
+            .query_row(
+                "SELECT id, outline_id, snapshot_json, status, attempt_count, result_identity,
+                        result_json, retry_of_run_id, cancel_requested_at, error_code, created_at, updated_at
+                 FROM local_agent_runs WHERE id = ?1",
+                [id],
+                row_to_agent_run,
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    pub fn begin_agent_attempt(&self, run_id: &str, started_at: &str) -> StoreResult<i64> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let next_attempt: i64 = transaction
+            .query_row(
+                "SELECT attempt_count + 1 FROM local_agent_runs
+             WHERE id = ?1 AND status IN ('queued', 'retry_wait')",
+                [run_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::InvalidAgentRunState(run_id.to_string()))?;
+        transaction.execute(
+            "UPDATE local_agent_runs SET status = 'running', attempt_count = ?2, updated_at = ?3
+             WHERE id = ?1",
+            params![run_id, next_attempt, started_at],
+        )?;
+        transaction.execute(
+            "INSERT INTO local_agent_run_attempts
+             (run_id, attempt_number, status, started_at) VALUES (?1, ?2, 'running', ?3)",
+            params![run_id, next_attempt, started_at],
+        )?;
+        transaction.commit()?;
+        Ok(next_attempt)
+    }
+
+    pub fn append_agent_activity(
+        &self,
+        run_id: &str,
+        event: &Value,
+        created_at: &str,
+    ) -> StoreResult<i64> {
+        let event_json =
+            serde_json::to_string(event).expect("serde_json::Value serialization cannot fail");
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let sequence: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM local_agent_run_activity WHERE run_id = ?1",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "INSERT INTO local_agent_run_activity(run_id, sequence, event_json, created_at)
+             SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM local_agent_runs WHERE id = ?1)",
+            params![run_id, sequence, event_json, created_at],
+        )?;
+        transaction.commit()?;
+        Ok(sequence)
+    }
+
+    pub fn agent_activity_after(
+        &self,
+        run_id: &str,
+        after_sequence: i64,
+        limit: i64,
+    ) -> StoreResult<Vec<AgentActivityRecord>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT run_id, sequence, event_json, created_at
+             FROM local_agent_run_activity
+             WHERE run_id = ?1 AND sequence > ?2
+             ORDER BY sequence ASC LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![run_id, after_sequence.max(0), limit.clamp(1, 200)],
+            row_to_agent_activity,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub fn cancel_agent_run(&self, run_id: &str, cancelled_at: &str) -> StoreResult<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
+            "UPDATE local_agent_runs
+             SET cancel_requested_at = COALESCE(cancel_requested_at, ?2),
+                 status = 'cancelled', updated_at = ?2
+             WHERE id = ?1 AND status IN ('queued', 'running', 'retry_wait')",
+            params![run_id, cancelled_at],
+        )?;
+        let terminal_exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_agent_runs WHERE id = ?1 AND status IN ('completed', 'failed', 'cancelled', 'interrupted'))",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        if changed == 0 && !terminal_exists {
+            return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
+        }
+        transaction.execute(
+            "UPDATE local_agent_run_attempts SET status = 'cancelled', finished_at = ?2
+             WHERE run_id = ?1 AND status = 'running'",
+            params![run_id, cancelled_at],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle_agent_run(
+        &self,
+        run_id: &str,
+        status: &str,
+        result_identity: Option<&str>,
+        result: Option<&Value>,
+        error_code: Option<&str>,
+        settled_at: &str,
+    ) -> StoreResult<()> {
+        if !matches!(status, "completed" | "failed" | "cancelled" | "interrupted") {
+            return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
+        }
+        if (result_identity.is_some() || result.is_some()) && status != "completed" {
+            return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
+        }
+        if result_identity.is_some() != result.is_some() {
+            return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
+        }
+        let result_json = result.map(|value| {
+            serde_json::to_string(value).expect("serde_json::Value serialization cannot fail")
+        });
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: (String, Option<String>) = transaction
+            .query_row(
+                "SELECT status, result_identity FROM local_agent_runs WHERE id = ?1",
+                [run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::InvalidAgentRunState(run_id.to_string()))?;
+        if matches!(
+            existing.0.as_str(),
+            "completed" | "failed" | "cancelled" | "interrupted"
+        ) {
+            if existing.0 == status && existing.1.as_deref() == result_identity {
+                return Ok(());
+            }
+            return Err(StoreError::AgentRunConflict(run_id.to_string()));
+        }
+        transaction.execute(
+            "UPDATE local_agent_runs
+             SET status = ?2, result_identity = ?3, result_json = ?4, error_code = ?5, updated_at = ?6
+             WHERE id = ?1",
+            params![run_id, status, result_identity, result_json, error_code, settled_at],
+        )?;
+        transaction.execute(
+            "UPDATE local_agent_run_attempts SET status = ?2, finished_at = ?3, error_code = ?4
+             WHERE run_id = ?1 AND status = 'running'",
+            params![run_id, status, settled_at, error_code],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn interrupt_unfinished_agent_runs(&self, interrupted_at: &str) -> StoreResult<usize> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
+            "UPDATE local_agent_runs SET status = 'interrupted', error_code = 'desktop_restarted', updated_at = ?1
+             WHERE status IN ('queued', 'running', 'retry_wait')",
+            [interrupted_at],
+        )?;
+        transaction.execute(
+            "UPDATE local_agent_run_attempts
+             SET status = 'interrupted', error_code = 'desktop_restarted', finished_at = ?1
+             WHERE status = 'running'",
+            [interrupted_at],
+        )?;
+        transaction.commit()?;
+        Ok(changed)
+    }
+
+    pub fn retry_agent_run(
+        &self,
+        original_run_id: &str,
+        retry: &AgentRunRecord,
+    ) -> StoreResult<()> {
+        if retry.retry_of_run_id.as_deref() != Some(original_run_id) || retry.status != "queued" {
+            return Err(StoreError::InvalidAgentRunState(
+                original_run_id.to_string(),
+            ));
+        }
+        let original = self
+            .agent_run(original_run_id)?
+            .ok_or_else(|| StoreError::InvalidAgentRunState(original_run_id.to_string()))?;
+        if !matches!(
+            original.status.as_str(),
+            "failed" | "cancelled" | "interrupted"
+        ) {
+            return Err(StoreError::InvalidAgentRunState(
+                original_run_id.to_string(),
+            ));
+        }
+        self.admit_agent_run(retry)
+    }
+}
+
+fn row_to_agent_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunRecord> {
+    let snapshot_json: String = row.get(2)?;
+    let result_json: Option<String> = row.get(6)?;
+    Ok(AgentRunRecord {
+        id: row.get(0)?,
+        outline_id: row.get(1)?,
+        snapshot: serde_json::from_str(&snapshot_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                snapshot_json.len(),
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        status: row.get(3)?,
+        attempt_count: row.get(4)?,
+        result_identity: row.get(5)?,
+        result: result_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+        retry_of_run_id: row.get(7)?,
+        cancel_requested_at: row.get(8)?,
+        error_code: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
+fn row_to_agent_activity(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentActivityRecord> {
+    let event_json: String = row.get(2)?;
+    Ok(AgentActivityRecord {
+        run_id: row.get(0)?,
+        sequence: row.get(1)?,
+        event: serde_json::from_str(&event_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                event_json.len(),
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        created_at: row.get(3)?,
+    })
 }
 
 fn append_event(transaction: &Transaction<'_>, event: &EventRecord) -> StoreResult<()> {

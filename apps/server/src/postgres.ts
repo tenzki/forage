@@ -21,17 +21,33 @@ import {
   type CreateNoteResult,
   type Principal,
   type ServerRepository,
+  type DispatcherAgentContext,
   type TokenScope,
 } from './repository.js'
+import { PostgresAgentStore } from './postgresAgentStore.js'
+import { agentConfigurationSchema, parseStructuredResult, resolveEffectiveToolIds, runInputSchema, type RunInput, type StructuredResult } from '@forage/agent-runtime'
+import { automationPolicySetSchema } from '@forage/protocol'
+import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
 export class PostgresServerRepository implements ServerRepository {
   readonly instanceId: string
+  readonly agentStore: PostgresAgentStore
+  private readonly supportedAgentToolIds: string[]
+  private readonly agentMaxAttempts: number
+  private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
 
   constructor(
     private readonly pool: Pool,
-    options: { instanceId: string },
+    options: {
+      instanceId: string; supportedAgentToolIds?: string[]; agentMaxAttempts?: number
+      dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
+    },
   ) {
     this.instanceId = options.instanceId
+    this.agentStore = new PostgresAgentStore(pool)
+    this.supportedAgentToolIds = options.supportedAgentToolIds ?? []
+    this.agentMaxAttempts = options.agentMaxAttempts ?? 3
+    this.dispatcherForAgent = options.dispatcherForAgent
   }
 
   async ready(): Promise<boolean> {
@@ -97,7 +113,7 @@ export class PostgresServerRepository implements ServerRepository {
         [checkpointId, outlineId, state, integrityHash],
       )
       const apiToken = await this.issueToken(client, ownerId, outlineId, 'api', 'External note capture', ['notes:create'])
-      const deviceToken = await this.issueToken(client, ownerId, outlineId, 'device', 'Initial desktop', ['sync'])
+      const deviceToken = await this.issueToken(client, ownerId, outlineId, 'device', 'Initial desktop', ['sync', 'agents:read', 'agents:execute', 'agents:manage'])
       return { ownerId, outlineId, inboxId, apiToken, deviceToken }
     })
   }
@@ -166,17 +182,14 @@ export class PostgresServerRepository implements ServerRepository {
         return { response: previous.rows[0].response, replayed: true }
       }
 
-      let parentId = input.parentId
-      if (!parentId) {
-        const projection = await client.query<{ state: OutlineState }>(
-          'SELECT state FROM outline_projections WHERE outline_id = $1', [principal.outlineId],
-        )
-        const inbox = projection.rows[0]
-          ? findSystemNode(createOutlineSchema().nodeFromJSON(projection.rows[0].state.doc), 'inbox')
-          : null
-        if (!inbox) throw new RepositoryError('conflict', 'The canonical Inbox is unavailable.')
-        parentId = inbox.id
-      }
+      const projection = await client.query<{ state: OutlineState }>(
+        'SELECT state FROM outline_projections WHERE outline_id = $1', [principal.outlineId],
+      )
+      const inbox = projection.rows[0]
+        ? findSystemNode(createOutlineSchema().nodeFromJSON(projection.rows[0].state.doc), 'inbox')
+        : null
+      if (!inbox) throw new RepositoryError('conflict', 'The canonical Inbox is unavailable.')
+      const parentId = input.parentId ?? inbox.id
       const parent = await client.query(
         `SELECT id FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false`,
         [principal.outlineId, parentId],
@@ -208,8 +221,81 @@ export class PostgresServerRepository implements ServerRepository {
          VALUES ($1, $2, $3, $4)`,
         [principal.tokenId, key, requestHash, response],
       )
+      if (parentId === inbox.id) await this.admitAutomaticRuns(client, principal, noteId, input, revision)
       return { response, replayed: false }
     })
+  }
+
+  private async admitAutomaticRuns(
+    client: PoolClient, principal: Principal, noteId: string, capture: NotesCreateRequest, baseRevision: number,
+  ): Promise<void> {
+    const [configurationResult, automationResult] = await Promise.all([
+      client.query<{ configuration: unknown }>(
+        'SELECT configuration FROM agent_configuration_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
+      ),
+      client.query<{ policies: unknown }>(
+        'SELECT policies FROM agent_automation_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
+      ),
+    ])
+    if (!configurationResult.rows[0] || !automationResult.rows[0]) return
+    const configuration = agentConfigurationSchema.parse(configurationResult.rows[0].configuration)
+    const policies = automationPolicySetSchema.parse(automationResult.rows[0].policies)
+    const matches = await resolveAutomationMatches(
+      policies,
+      captureFacts(capture.text, capture.source),
+      { text: capture.text, source: capture.source ?? {} },
+      async (agentId) => {
+        const agent = configuration.agents.find((candidate) => candidate.id === agentId)
+        if (!agent?.credentialRef || !this.dispatcherForAgent) return undefined
+        const credential = await client.query(
+          `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
+          [agent.credentialRef, principal.ownerId, principal.outlineId],
+        )
+        if (!credential.rowCount) return undefined
+        return this.dispatcherForAgent({ ownerId: principal.ownerId, outlineId: principal.outlineId, agent })
+      },
+      AbortSignal.timeout(15_000),
+    )
+    for (const match of matches) {
+      const skill = configuration.skills.find((candidate) => candidate.id === match.skillId)
+      const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
+      const credentialRef = agent?.credentialRef
+      if (!skill || !agent || !credentialRef) continue
+      const credential = await client.query(
+        `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
+        [credentialRef, principal.ownerId, principal.outlineId],
+      )
+      if (!credential.rowCount) continue
+      let effectiveToolIds: string[]
+      try {
+        effectiveToolIds = resolveEffectiveToolIds({
+          agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
+          globallyEnabledToolIds: configuration.globallyEnabledToolIds,
+          policyAllowedToolIds: configuration.globallyEnabledToolIds,
+          executorSupportedToolIds: this.supportedAgentToolIds,
+        })
+      } catch { continue }
+      const runId = `run_${randomUUID()}`
+      const input: RunInput = {
+        version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
+        source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
+        target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
+        credentialRef, agent, skill, effectiveToolIds,
+        prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
+        customTools: configuration.customTools,
+      }
+      await client.query(
+        `INSERT INTO agent_runs
+         (id,owner_id,outline_id,trigger_kind,trigger_identity,source_note_id,target_note_id,input_snapshot,
+          definition_snapshot,configuration_revision,credential_reference,status,max_attempts)
+         VALUES ($1,$2,$3,'inbox_automation',$4,$5,$5,$6,$7,$8,$9,'queued',$10)
+         ON CONFLICT (outline_id,trigger_identity,configuration_revision) DO NOTHING`,
+        [runId, principal.ownerId, principal.outlineId,
+          `capture:${noteId}:policy:${policies.revision}:skill:${skill.id}`, noteId, input,
+          { agent, skill, effectiveToolIds, policyId: match.policyId }, configuration.revision,
+          credentialRef, this.agentMaxAttempts],
+      )
+    }
   }
 
   async eventsAfter(outlineId: string, revision: number, limit: number): Promise<EventEnvelope[]> {
@@ -329,6 +415,145 @@ export class PostgresServerRepository implements ServerRepository {
     return assetFromRow(result.rows[0])
   }
 
+  async runAdmissionContext(principal: Principal, sourceNodeId: string, targetParentId: string) {
+    const notes = await this.pool.query<{ id: string; parent_id: string | null; text_content: string }>(
+      `WITH RECURSIVE ancestors AS (
+         SELECT id, parent_id, text_content, 1 AS depth FROM note_projections
+          WHERE outline_id = $1 AND id = $2 AND deleted = false
+         UNION ALL
+         SELECT parent.id, parent.parent_id, parent.text_content, child.depth + 1
+          FROM note_projections parent JOIN ancestors child ON child.parent_id = parent.id
+          WHERE parent.outline_id = $1 AND parent.deleted = false AND child.depth < 20
+       ) SELECT id, parent_id, text_content FROM ancestors`,
+      [principal.outlineId, targetParentId],
+    )
+    const source = await this.pool.query<{ text_content: string }>(
+      'SELECT text_content FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false',
+      [principal.outlineId, sourceNodeId],
+    )
+    if (!source.rows[0] || !notes.rows.some((note) => note.id === targetParentId)) throw hiddenResourceError()
+    return {
+      sourceText: source.rows[0].text_content,
+      context: [...notes.rows].reverse().map((note) => note.text_content),
+      baseRevision: await this.currentRevision(principal.outlineId),
+    }
+  }
+
+  async searchOutline(outlineId: string, query: string, limit = 20) {
+    const result = await this.pool.query<{ id: string; text_content: string }>(
+      `SELECT id,text_content FROM note_projections WHERE outline_id=$1 AND deleted=false
+       AND text_content ILIKE $2 ORDER BY created_at DESC LIMIT $3`,
+      [outlineId, `%${query.trim().replace(/[\\%_]/g, '\\$&')}%`, Math.max(1, Math.min(limit, 50))],
+    )
+    return result.rows.map((row) => ({ nodeId: row.id, text: row.text_content.slice(0, 2_000) }))
+  }
+
+  async commitAgentResult(runId: string, workerId: string, rawResult: StructuredResult) {
+    const result = parseStructuredResult(rawResult)
+    const committed = await this.transaction(async (client) => {
+      const selected = await client.query<{
+        id: string; owner_id: string; outline_id: string; input_snapshot: unknown; status: string; lease_owner: string | null
+        cancel_requested_at: Date | null; attempt_count: number
+      }>('SELECT * FROM agent_runs WHERE id = $1 FOR UPDATE', [runId])
+      const run = selected.rows[0]
+      if (!run) throw hiddenResourceError()
+      const existing = await client.query<{ first_revision: string; last_revision: string; root_note_ids: string[] }>(
+        'SELECT first_revision, last_revision, root_note_ids FROM agent_run_results WHERE run_id = $1', [runId],
+      )
+      if (existing.rows[0]) return {
+        firstRevision: Number(existing.rows[0].first_revision), lastRevision: Number(existing.rows[0].last_revision), rootNoteIds: existing.rows[0].root_note_ids,
+      }
+      if (run.status !== 'running' || run.lease_owner !== workerId) throw new RepositoryError('conflict', 'Run lease was lost.')
+      if (run.cancel_requested_at) throw new RepositoryError('conflict', 'Run cancellation was requested.')
+      const input = runInputSchema.parse(run.input_snapshot)
+      const target = await client.query(
+        'SELECT id FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false FOR UPDATE',
+        [run.outline_id, input.target.parentId],
+      )
+      if (!target.rowCount) {
+        await client.query(
+          `UPDATE agent_runs SET status='cancelled', error_code='target_unavailable', lease_owner=NULL,
+           lease_expires_at=NULL, updated_at=now() WHERE id=$1`, [runId],
+        )
+        await client.query(
+          `UPDATE agent_run_attempts SET status='cancelled', error_code='target_unavailable', finished_at=now()
+           WHERE run_id=$1 AND attempt_number=$2`, [runId, run.attempt_count],
+        )
+        return null
+      }
+      const imageIds = collectImageIds(result)
+      if (imageIds.length) {
+        const assets = await client.query(
+          'SELECT asset_id FROM assets WHERE owner_id=$1 AND completed_at IS NOT NULL AND asset_id = ANY($2::text[])',
+          [run.owner_id, imageIds],
+        )
+        if (assets.rowCount !== imageIds.length) throw new RepositoryError('conflict', 'Structured result references an unavailable asset.')
+      }
+      const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
+        'SELECT current_revision, document_version, schema_epoch FROM outlines WHERE id=$1 FOR UPDATE', [run.outline_id],
+      )
+      let revision = Number(outline.rows[0]!.current_revision)
+      const firstRevision = revision + 1
+      const rootNoteIds: string[] = []
+      const changeGroupId = `run_${runId}`.slice(0, 128)
+      const provenance = {
+        runId, skillId: input.skill.id, ...(input.source.nodeId ? { sourceNodeId: input.source.nodeId } : {}),
+        sourceUrls: result.sources.map((source) => source.url).slice(0, 20),
+      }
+      const addNodes = async (nodes: StructuredResult['nodes'], parentId: string): Promise<void> => {
+        for (const node of nodes) {
+          revision += 1
+          if (node.type === 'image') {
+            const event = parseEventEnvelope({
+              id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
+              deviceId: `agent_${this.instanceId}`, type: 'asset.reference_added', eventVersion: 1,
+              documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+              baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
+              changeGroupId, occurredAt: new Date().toISOString(), payload: { assetId: node.assetId, alt: node.alt },
+            })
+            await this.insertEvent(client, event); await this.applyProjection(client, run.outline_id, revision, event)
+            continue
+          }
+          const noteId = `note_${randomUUID()}`
+          if (parentId === input.target.parentId) rootNoteIds.push(noteId)
+          const event = parseEventEnvelope({
+            id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
+            deviceId: `agent_${this.instanceId}`, type: 'note.created', eventVersion: 1,
+            documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+            baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
+            changeGroupId, occurredAt: new Date().toISOString(), payload: { noteId, parentId, text: node.text },
+          })
+          await this.insertEvent(client, event)
+          await client.query(
+            `INSERT INTO note_projections(outline_id,id,parent_id,text_content,created_at) VALUES ($1,$2,$3,$4,$5)`,
+            [run.outline_id, noteId, parentId, node.text, event.occurredAt],
+          )
+          await this.applyProjection(client, run.outline_id, revision, event)
+          if (node.children?.length) await addNodes(node.children, noteId)
+        }
+      }
+      await addNodes(result.nodes, input.target.parentId)
+      if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
+      const settled = { firstRevision, lastRevision: revision, rootNoteIds }
+      await client.query('UPDATE outlines SET current_revision=$2 WHERE id=$1', [run.outline_id, revision])
+      await client.query(
+        `INSERT INTO agent_run_results(run_id,result_identity,first_revision,last_revision,root_note_ids)
+         VALUES ($1,$2,$3,$4,$5)`, [runId, `result:${runId}`, firstRevision, revision, rootNoteIds],
+      )
+      await client.query(
+        `UPDATE agent_run_attempts SET status='completed',finished_at=now() WHERE run_id=$1 AND attempt_number=$2`,
+        [runId, run.attempt_count],
+      )
+      await client.query(
+        `UPDATE agent_runs SET status='completed',error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
+        [runId],
+      )
+      return settled
+    })
+    if (!committed) throw new RepositoryError('conflict', 'The target is unavailable.')
+    return committed
+  }
+
   private async requireCompletedAssets(client: PoolClient, principal: Principal, event: EventEnvelope): Promise<void> {
     const ids = referencedAssetIds(event.payload)
     if (ids.length === 0) return
@@ -353,11 +578,11 @@ export class PostgresServerRepository implements ServerRepository {
     await client.query(
       `INSERT INTO outline_events
        (id, outline_id, revision, base_revision, event_type, event_version, document_version,
-        schema_epoch, actor_id, device_id, origin, change_group_id, payload, occurred_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        schema_epoch, actor_id, device_id, origin, change_group_id, payload, occurred_at, agent_provenance)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [event.id, event.outlineId, event.revision, event.baseRevision, event.type, event.eventVersion,
         event.documentVersion, event.schemaEpoch, event.actorId, event.deviceId, event.origin,
-        event.changeGroupId ?? null, event.payload, event.occurredAt],
+        event.changeGroupId ?? null, event.payload, event.occurredAt, event.agentProvenance ?? null],
     )
   }
 
@@ -403,6 +628,7 @@ interface EventRow extends QueryResultRow {
   event_version: number; document_version: number; schema_epoch: number; actor_id: string
   device_id: string; origin: EventEnvelope['origin']; change_group_id: string | null
   payload: Record<string, unknown>; occurred_at: Date
+  agent_provenance: EventEnvelope['agentProvenance'] | null
 }
 
 interface AssetRow extends QueryResultRow {
@@ -432,8 +658,19 @@ function eventFromRow(row: EventRow): EventEnvelope {
     eventVersion: row.event_version, documentVersion: row.document_version,
     schemaEpoch: row.schema_epoch, actorId: row.actor_id, deviceId: row.device_id,
     origin: row.origin, changeGroupId: row.change_group_id ?? undefined,
+    agentProvenance: row.agent_provenance ?? undefined,
     payload: row.payload, occurredAt: row.occurred_at.toISOString(),
   })
+}
+
+function collectImageIds(result: StructuredResult): string[] {
+  const found = new Set<string>()
+  const visit = (nodes: StructuredResult['nodes']): void => nodes.forEach((node) => {
+    if (node.type === 'image') found.add(node.assetId)
+    else if (node.children) visit(node.children)
+  })
+  visit(result.nodes)
+  return [...found]
 }
 
 function hiddenResourceError(): RepositoryError {

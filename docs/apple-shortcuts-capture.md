@@ -30,7 +30,7 @@ In Shortcuts on macOS:
    - `Idempotency-Key`: the generated UUID variable
    - Request Body: JSON
    - `text`: the converted Shortcut input
-   - Optional `source`: a Dictionary whose `application` value is `Apple Shortcuts`
+   - Optional `source`: a Dictionary with canonical string properties such as `application` = `Apple Shortcuts`, `kind` = `share`, and `url` = the shared URL
 8. Show a success notification only after **Get Contents of URL** returns successfully. Let request errors remain visible instead of claiming the capture was saved.
 
 Apple documents that a Shortcut can receive input from the macOS share sheet and that **Get Contents of URL** exposes a JSON request body for `POST` requests. The first use may require enabling Shortcuts under System Settings → Privacy & Security → Extensions → Sharing.
@@ -38,6 +38,12 @@ Apple documents that a Shortcut can receive input from the macOS share sheet and
 ## Delivery behavior
 
 When `parentId` is omitted, the server resolves the node currently carrying the canonical `inbox` role. Renaming or reordering Inbox does not affect routing. The new child is ordinary outline content and can be edited, nested, moved, linked, or trashed normally.
+
+If the owner has explicitly published and enabled Inbox automation, `source.kind`, exact source properties, normalized URL host, and URL type (`youtube`, `x`, or `webpage`) can select one or more skills. Repeated skills are de-duplicated in policy priority order. The existing Notes API response is unchanged and returns as soon as the capture and any queued run snapshots commit; transcription or research continues in the background while the desktop is closed. The original shared note is always preserved, including when enrichment later fails.
+
+YouTube, X, and webpage rules can each select a different published skill and can be reordered in Settings. For genuinely ambiguous captures, an explicitly configured dispatcher agent may choose only from that policy's allowlisted skills; it receives no write-capable tools.
+
+YouTube, X/Twitter, and webpage policies are disabled by default. Enable them only after publishing compatible server skills and enrolling a server credential. A typical YouTube skill requires `youtube_transcript` and asks for a summary plus transcript notes; an X or webpage research skill uses `x_read`, `web_fetch`, and optionally `web_search`. Output is attached below the stable capture and synchronized as ordinary agent-provenance notes.
 
 `Idempotency-Key` is mandatory. Repeating the exact request with the same key returns the original result; reusing that key with changed content returns `409 Conflict`. Generate the key once near the start of the Shortcut and reuse that variable if the workflow contains an explicit retry branch.
 

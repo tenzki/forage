@@ -170,6 +170,7 @@ export default function App() {
   const readOutline = useCallback(async () => {
     setLoadError(null)
     try {
+      await repository.current.interruptUnfinishedAgentRuns(new Date().toISOString())
       const mode = await repository.current.storageMode()
       if (mode === 'server') {
         await new DesktopSyncEngine(repository.current, new NativeSyncTransport(), (state) => {

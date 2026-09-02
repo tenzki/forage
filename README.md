@@ -14,6 +14,7 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 - **Bi-directional links** — type `[[` to link any bullet to any other via stable IDs: click to jump, and a backlinks panel shows everything that references the current bullet. Links survive reordering and nesting, and linked branches can be pinned as explicit agent context.
 - **Your notes as agent memory** — every skill invocation automatically carries the bullet's full ancestry and branch, and agents can search your whole outline (`search_outline`) before writing, so answers build on what you already know instead of duplicating it.
 - **Extensible agents and skills** — every agent and slash-command skill is a typed definition you can edit in Settings (Cmd+,): model, instructions, and a per-agent tool allowlist. Add your own custom HTTP tools, new skills, or whole new agents.
+- **Optional unattended server execution** — in server storage mode, manual skills and opt-in Inbox link policies run durably on the self-hosted server, including bounded webpage/X reading and replaceable YouTube transcription.
 - **Tags, shortcuts, and trash** — tag bullets, pin frequently used branches to the sidebar, and recover deleted branches from trash.
 
 ## Requirements
@@ -41,4 +42,4 @@ Agent execution runs on [Pi](https://pi.dev): Forage embeds the Pi SDK in an iso
 - **Editor:** one TipTap document; bullets are ProseMirror `listItem`s, agent output is marked and styled separately, images are dedicated nodes.
 - **Identity:** each bullet gets a stable UUID via a ProseMirror plugin, so links and references survive reordering.
 - **Persistence:** SQLite stores immutable events, verified checkpoints, sync state, and the durable pending outbox. In optional server mode, PostgreSQL is authoritative while SQLite remains the offline cache.
-- **Agent:** work runs in an isolated Node.js sidecar embedding the Pi SDK, communicating over JSONL. Tools are bounded (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, plus validated custom HTTP tools). Context sent to the agent is capped by a fixed safety budget.
+- **Agent:** local mode uses an isolated Node.js sidecar; server mode uses the same portable validated model/tool loop with PostgreSQL leases and executor-owned credentials. Execution follows storage authority and never silently falls back between modes.

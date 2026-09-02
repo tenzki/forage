@@ -8,6 +8,7 @@ import { FileSystemAssetStorage, verifyAssetBytes } from './assets'
 import { captureStepBatch, createOutlineSchema } from '@forage/document'
 import { canonicalJson, parseEventEnvelope, sha256Hex } from '@forage/domain'
 import { Transform } from '@tiptap/pm/transform'
+import { InMemoryProviderCredentialStore, ServerCredentialService } from './credentialService'
 
 const servers: Array<ReturnType<typeof buildServer>> = []
 const assetRoots: string[] = []
@@ -17,7 +18,13 @@ async function testServer() {
   const bootstrap = await repository.bootstrapOwner('owner@test.invalid')
   const assetRoot = await mkdtemp(join(tmpdir(), 'forage-app-assets-'))
   assetRoots.push(assetRoot)
-  const app = buildServer({ repository, assetStorage: new FileSystemAssetStorage(assetRoot), logger: false })
+  const credentialService = new ServerCredentialService(new InMemoryProviderCredentialStore(), {
+    encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 3).toString('base64') }],
+  })
+  const app = buildServer({
+    repository, credentialService, supportedAgentToolIds: ['web_read', 'youtube_transcript'],
+    assetStorage: new FileSystemAssetStorage(assetRoot), logger: false,
+  })
   servers.push(app)
   return { app, repository, ...bootstrap }
 }
@@ -141,6 +148,83 @@ describe('Forage server', () => {
     })
     expect((await request('invalid')).statusCode).toBe(401)
     expect((await request(deviceToken)).statusCode).toBe(403)
+  })
+
+  it('grants agent scopes only to the owner device credential', async () => {
+    const { repository, apiToken, deviceToken } = await testServer()
+    await expect(repository.authenticate(deviceToken, 'agents:read')).resolves.toMatchObject({ kind: 'device' })
+    await expect(repository.authenticate(deviceToken, 'agents:execute')).resolves.toMatchObject({ kind: 'device' })
+    await expect(repository.authenticate(deviceToken, 'agents:manage')).resolves.toMatchObject({ kind: 'device' })
+    await expect(repository.authenticate(apiToken, 'agents:read')).rejects.toThrow(/scope/i)
+  })
+
+  it('publishes server configuration, enrolls credentials, and manages a manual run without exposing secrets', async () => {
+    const { app, apiToken, deviceToken, outlineId, inboxId } = await testServer()
+    const headers = { authorization: `Bearer ${deviceToken}` }
+    const configuration = {
+      version: 1, revision: 1,
+      agents: [{ id: 'agent', name: 'Agent', description: 'Researcher', systemPrompt: 'Research.', modelId: 'gpt-5', toolIds: ['web_read'] }],
+      skills: [{ id: 'research', label: 'research', description: 'Research', systemPrompt: 'Document.', agentId: 'agent', requiredToolIds: ['web_read'] }],
+      customTools: [], globallyEnabledToolIds: ['web_read'],
+    }
+    const published = await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`, headers,
+      payload: { baseRevision: 0, configuration },
+    })
+    expect(published.statusCode).toBe(200)
+    expect((await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`,
+      headers: { authorization: `Bearer ${apiToken}` }, payload: { baseRevision: 0, configuration },
+    })).statusCode).toBe(403)
+
+    const enrolled = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-credentials/api-key`, headers,
+      payload: { provider: 'openai', apiKey: 'sk-a-very-long-secret-api-key' },
+    })
+    expect(enrolled.statusCode).toBe(201)
+    expect(enrolled.body).not.toContain('very-long-secret')
+    const credentialRef = enrolled.json().id
+
+    const admitted = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`, headers: { ...headers, 'idempotency-key': 'manual-1' },
+      payload: { sourceNodeId: inboxId, targetParentId: inboxId, skillId: 'research', prompt: 'Research this.', configurationRevision: 1, credentialRef },
+    })
+    expect(admitted.statusCode).toBe(202)
+    expect(admitted.json()).toMatchObject({ status: 'queued' })
+    const runId = admitted.json().runId
+    const detail = await app.inject({ method: 'GET', url: `/api/v1/outlines/${outlineId}/agent-runs/${runId}`, headers })
+    expect(detail.json()).toMatchObject({ id: runId, skillId: 'research', status: 'queued' })
+    const cancelled = await app.inject({ method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs/${runId}/cancel`, headers })
+    expect(cancelled.json()).toMatchObject({ runId, status: 'cancelled' })
+    const retry = await app.inject({ method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs/${runId}/retry`, headers })
+    expect(retry.json()).toMatchObject({ retryOfRunId: runId, status: 'queued' })
+  })
+
+  it('atomically admits de-duplicated automation only for new canonical Inbox captures', async () => {
+    const repository = new InMemoryServerRepository({
+      instanceId: 'automation', supportedAgentToolIds: ['youtube_transcript'], credentialAvailable: async () => true,
+    })
+    const bootstrap = await repository.bootstrapOwner('automation@test.invalid')
+    const configuration = {
+      version: 1 as const, revision: 1,
+      agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: ['youtube_transcript'], credentialRef: 'credential-1' }],
+      skills: [{ id: 'summarize', label: 'summarize', description: 'Summarize', systemPrompt: 'Summarize.', agentId: 'agent', requiredToolIds: ['youtube_transcript'] }],
+      customTools: [], globallyEnabledToolIds: ['youtube_transcript'],
+    }
+    await repository.agentStore.publishConfiguration(bootstrap.outlineId, 0, configuration)
+    await repository.agentStore.publishAutomation(bootstrap.outlineId, 0, {
+      version: 1, revision: 1, enabled: true, policies: [
+        { id: 'high', name: 'YouTube', enabled: true, priority: 2, match: { urlTypes: ['youtube'] }, skillIds: ['summarize'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+        { id: 'duplicate', name: 'Duplicate', enabled: true, priority: 1, match: { urlHosts: ['www.youtube.com'] }, skillIds: ['summarize'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+      ],
+    })
+    const principal = await repository.authenticate(bootstrap.apiToken, 'notes:create')
+    const first = await repository.createNote(principal, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ', source: { kind: 'share' } })
+    await repository.createNote(principal, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ', source: { kind: 'share' } })
+    const runs = await repository.agentStore.listRuns(bootstrap.outlineId, 10)
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ trigger: 'inbox_automation', skillId: 'summarize', policyId: 'high' })
+    expect(runs[0]?.input.target.parentId).toBe(first.response.noteId)
   })
 
   it('returns rebase_required for a stale push without advancing the outline revision', async () => {

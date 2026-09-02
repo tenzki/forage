@@ -4,6 +4,20 @@ const boundedId = z.string().trim().min(1).max(128)
 const revision = z.number().int().nonnegative()
 const positiveVersion = z.number().int().positive()
 
+export interface AgentEventProvenance {
+  runId: string
+  skillId: string
+  sourceNodeId?: string
+  sourceUrls: string[]
+}
+
+const agentEventProvenanceSchema = z.object({
+  runId: boundedId,
+  skillId: boundedId,
+  sourceNodeId: boundedId.optional(),
+  sourceUrls: z.array(z.url().max(2_000)).max(20),
+}).strict()
+
 const shortcutSchema = z.object({
   id: boundedId,
   kind: z.enum(['node', 'tag', 'search']),
@@ -106,7 +120,8 @@ interface EventEnvelopeBase {
   schemaEpoch: number
   baseRevision: number
   revision?: number
-  origin: 'desktop' | 'notes_api' | 'server' | 'migration'
+  origin: 'desktop' | 'notes_api' | 'server' | 'migration' | 'agent'
+  agentProvenance?: AgentEventProvenance
   occurredAt: string
   changeGroupId?: string
 }
@@ -128,7 +143,8 @@ const eventBaseSchema = z.object({
   schemaEpoch: positiveVersion,
   baseRevision: revision,
   revision: revision.optional(),
-  origin: z.enum(['desktop', 'notes_api', 'server', 'migration']),
+  origin: z.enum(['desktop', 'notes_api', 'server', 'migration', 'agent']),
+  agentProvenance: agentEventProvenanceSchema.optional(),
   occurredAt: z.iso.datetime({ offset: true }),
   changeGroupId: boundedId.optional(),
 }).strict()
@@ -137,7 +153,16 @@ const eventVariants = Object.entries(eventPayloadSchemas).map(([type, payload]) 
   eventBaseSchema.extend({ type: z.literal(type), payload }),
 ) as unknown as [z.ZodType, ...z.ZodType[]]
 
-export const eventEnvelopeSchema = z.union(eventVariants) as z.ZodType<EventEnvelope>
+const eventUnionSchema = z.union(eventVariants) as z.ZodType<EventEnvelope>
+
+export const eventEnvelopeSchema = eventUnionSchema.superRefine((event, context) => {
+  if (event.origin === 'agent' && !event.agentProvenance) {
+    context.addIssue({ code: 'custom', path: ['agentProvenance'], message: 'Agent provenance is required for agent-origin events' })
+  }
+  if (event.origin !== 'agent' && event.agentProvenance) {
+    context.addIssue({ code: 'custom', path: ['agentProvenance'], message: 'Agent provenance is only valid for agent-origin events' })
+  }
+})
 
 export function parseEventEnvelope(value: unknown): EventEnvelope {
   return eventEnvelopeSchema.parse(value)
@@ -153,11 +178,19 @@ export const commandEnvelopeSchema = z.object({
   documentVersion: positiveVersion,
   schemaEpoch: positiveVersion,
   baseRevision: revision,
-  origin: z.enum(['desktop', 'notes_api', 'server', 'migration']),
+  origin: z.enum(['desktop', 'notes_api', 'server', 'migration', 'agent']),
+  agentProvenance: agentEventProvenanceSchema.optional(),
   issuedAt: z.iso.datetime({ offset: true }),
   idempotencyKey: z.string().trim().min(1).max(255).optional(),
   payload: z.record(z.string(), z.unknown()),
-}).strict()
+}).strict().superRefine((command, context) => {
+  if (command.origin === 'agent' && !command.agentProvenance) {
+    context.addIssue({ code: 'custom', path: ['agentProvenance'], message: 'Agent provenance is required for agent-origin commands' })
+  }
+  if (command.origin !== 'agent' && command.agentProvenance) {
+    context.addIssue({ code: 'custom', path: ['agentProvenance'], message: 'Agent provenance is only valid for agent-origin commands' })
+  }
+})
 
 export type CommandEnvelope = z.infer<typeof commandEnvelopeSchema>
 

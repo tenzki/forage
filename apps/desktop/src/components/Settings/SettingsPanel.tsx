@@ -22,6 +22,7 @@ import {
 } from '../../store/settingsStore'
 import { SecondaryViewHeader } from '../SecondaryViewHeader'
 import { StorageBackendSettings } from './StorageBackendSettings'
+import { ServerAgentSettings } from './ServerAgentSettings'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -37,8 +38,9 @@ const SETTINGS_VIEWS: Array<{ id: SettingsView; label: string }> = [
 
 export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const authMode = useSettingsStore((state) => state.authMode)
-  const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
-  const oauthCredential = useSettingsStore((state) => state.oauthCredential)
+  const localCredentials = useSettingsStore((state) => state.localCredentials)
+  const oauthCredential = localCredentials.find((credential) => credential.provider === 'openai-codex' && credential.status === 'connected')
+  const apiKeyConfigured = localCredentials.some((credential) => credential.provider === 'openai' && credential.status === 'connected')
   const modelId = useSettingsStore((state) => state.modelId)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
   const customTools = useSettingsStore((state) => state.customTools)
@@ -72,7 +74,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     if (!isLoaded) void loadSettings()
   }, [isLoaded, loadSettings])
 
-  useEffect(() => setDraft(openAiApiKey), [openAiApiKey])
+  useEffect(() => setDraft(''), [apiKeyConfigured])
   useEffect(() => () => loginController.current?.abort(), [])
 
   async function chooseMode(mode: CodexAuthMode) {
@@ -92,6 +94,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     setActionError(null)
     try {
       await setOpenAiApiKey(draft.trim())
+      setDraft('')
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1500)
     } catch (error) {
@@ -224,6 +227,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         <section hidden={activeView !== 'connection'} className="settings-section" aria-labelledby="connection-heading">
         <h2 id="connection-heading">Storage</h2>
         <StorageBackendSettings />
+        <ServerAgentSettings />
         <h2>Codex</h2>
         <div className="auth-mode" role="group" aria-label="Codex authentication method">
           <button
@@ -291,7 +295,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
               id="openai-key"
               className="settings-monospace"
               type="password"
-              placeholder="sk-..."
+              placeholder={apiKeyConfigured ? 'API key stored securely — enter a new key to replace it' : 'sk-...'}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               autoComplete="off"

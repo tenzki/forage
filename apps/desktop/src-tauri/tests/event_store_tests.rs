@@ -1,4 +1,6 @@
-use forage_lib::persistence::{CheckpointRecord, EventRecord, EventStore, StorageMode};
+use forage_lib::persistence::{
+    AgentRunRecord, CheckpointRecord, EventRecord, EventStore, StorageMode,
+};
 use serde_json::json;
 
 fn event(id: &str, base_revision: i64) -> EventRecord {
@@ -409,4 +411,135 @@ fn creates_stable_local_identity_values_once() {
         .expect("second identity");
     assert_eq!(first, second);
     assert!(first.starts_with("device_"));
+}
+
+fn agent_run(id: &str, status: &str) -> AgentRunRecord {
+    AgentRunRecord {
+        id: id.to_string(),
+        outline_id: "outline-1".to_string(),
+        snapshot: json!({ "version": 1, "runId": id, "credentialRef": "local-openai" }),
+        status: status.to_string(),
+        attempt_count: 0,
+        result_identity: None,
+        result: None,
+        retry_of_run_id: None,
+        cancel_requested_at: None,
+        error_code: None,
+        created_at: "2026-08-31T10:00:00.000Z".to_string(),
+        updated_at: "2026-08-31T10:00:00.000Z".to_string(),
+    }
+}
+
+#[test]
+fn persists_local_agent_runs_ordered_activity_and_one_terminal_result() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store
+        .admit_agent_run(&agent_run("run-1", "queued"))
+        .expect("admit run");
+    store
+        .begin_agent_attempt("run-1", "2026-08-31T10:00:01.000Z")
+        .expect("begin attempt");
+    let first = store
+        .append_agent_activity(
+            "run-1",
+            &json!({ "kind": "status", "label": "Running" }),
+            "2026-08-31T10:00:01.000Z",
+        )
+        .expect("first activity");
+    let second = store
+        .append_agent_activity(
+            "run-1",
+            &json!({ "kind": "output", "label": "Ready" }),
+            "2026-08-31T10:00:02.000Z",
+        )
+        .expect("second activity");
+    assert_eq!((first, second), (1, 2));
+
+    store
+        .settle_agent_run(
+            "run-1",
+            "completed",
+            Some("result-run-1"),
+            Some(&json!({ "version": 1, "nodes": [{ "type": "text", "text": "Done" }], "sources": [] })),
+            None,
+            "2026-08-31T10:00:03.000Z",
+        )
+        .expect("settle run");
+
+    let loaded = store
+        .agent_run("run-1")
+        .expect("load run")
+        .expect("run exists");
+    assert_eq!(loaded.status, "completed");
+    assert_eq!(loaded.attempt_count, 1);
+    assert_eq!(loaded.result_identity.as_deref(), Some("result-run-1"));
+    let activity = store
+        .agent_activity_after("run-1", 0, 100)
+        .expect("activity");
+    assert_eq!(
+        activity
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+
+    let duplicate = store.settle_agent_run(
+        "run-1",
+        "completed",
+        Some("different-result"),
+        Some(&json!({ "version": 1, "nodes": [{ "type": "text", "text": "Duplicate" }], "sources": [] })),
+        None,
+        "2026-08-31T10:00:04.000Z",
+    );
+    assert!(duplicate.is_err());
+}
+
+#[test]
+fn cancellation_retry_and_startup_interruption_preserve_history() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store
+        .admit_agent_run(&agent_run("queued", "queued"))
+        .expect("queued");
+    store
+        .admit_agent_run(&agent_run("running", "queued"))
+        .expect("running");
+    store
+        .begin_agent_attempt("running", "2026-08-31T10:00:01.000Z")
+        .expect("begin running");
+    store
+        .cancel_agent_run("queued", "2026-08-31T10:00:02.000Z")
+        .expect("cancel queued");
+    assert_eq!(
+        store.agent_run("queued").unwrap().unwrap().status,
+        "cancelled"
+    );
+
+    let interrupted = store
+        .interrupt_unfinished_agent_runs("2026-08-31T10:00:03.000Z")
+        .expect("interrupt unfinished");
+    assert_eq!(interrupted, 1);
+    assert_eq!(
+        store.agent_run("running").unwrap().unwrap().status,
+        "interrupted"
+    );
+
+    let mut retry = agent_run("retry", "queued");
+    retry.retry_of_run_id = Some("running".to_string());
+    store
+        .retry_agent_run("running", &retry)
+        .expect("retry terminal run");
+    assert_eq!(
+        store
+            .agent_run("retry")
+            .unwrap()
+            .unwrap()
+            .retry_of_run_id
+            .as_deref(),
+        Some("running")
+    );
+    assert_eq!(
+        store.agent_run("running").unwrap().unwrap().status,
+        "interrupted"
+    );
 }

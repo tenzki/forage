@@ -10,8 +10,12 @@ import {
 } from '@forage/domain'
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
 import { createOutlineSchema, findSystemNode, repairSystemNodes } from '@forage/document'
+import { InMemoryAgentStore, type AgentStore } from './agentStore.js'
+import type { AgentDefinition, StructuredResult } from '@forage/agent-runtime'
+import { resolveEffectiveToolIds, type RunInput } from '@forage/agent-runtime'
+import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
-export type TokenScope = 'notes:create' | 'sync'
+export type TokenScope = 'notes:create' | 'sync' | 'agents:read' | 'agents:execute' | 'agents:manage'
 
 export interface Principal {
   tokenId: string
@@ -54,6 +58,7 @@ export class RepositoryError extends Error {
 
 export interface ServerRepository {
   readonly instanceId: string
+  readonly agentStore: AgentStore
   ready(): Promise<boolean>
   authenticate(secret: string, scope: TokenScope): Promise<Principal>
   currentRevision(outlineId: string): Promise<number>
@@ -67,6 +72,19 @@ export interface ServerRepository {
   initiateAsset(principal: Principal, input: Omit<AssetRecord, 'ownerId' | 'storageKey' | 'completed'>): Promise<AssetRecord>
   completeAsset(principal: Principal, assetId: string, storageKey: string): Promise<AssetRecord>
   asset(principal: Principal, assetId: string): Promise<AssetRecord>
+  runAdmissionContext(principal: Principal, sourceNodeId: string, targetParentId: string): Promise<{
+    sourceText: string; context: string[]; baseRevision: number
+  }>
+  commitAgentResult(runId: string, workerId: string, result: StructuredResult): Promise<{
+    firstRevision: number; lastRevision: number; rootNoteIds: string[]
+  }>
+  searchOutline(outlineId: string, query: string, limit?: number): Promise<Array<{ nodeId: string; text: string }>>
+}
+
+export interface DispatcherAgentContext {
+  ownerId: string
+  outlineId: string
+  agent: AgentDefinition
 }
 
 interface TokenRecord extends Principal {
@@ -90,6 +108,7 @@ interface NoteProjection {
 
 export class InMemoryServerRepository implements ServerRepository {
   readonly instanceId: string
+  readonly agentStore: AgentStore
   private ownerId = ''
   private outlineId = ''
   private inboxId = ''
@@ -100,9 +119,24 @@ export class InMemoryServerRepository implements ServerRepository {
   private readonly notes = new Map<string, NoteProjection>()
   private readonly idempotency = new Map<string, IdempotencyRecord>()
   private readonly assets = new Map<string, AssetRecord>()
+  private readonly supportedAgentToolIds: string[]
+  private readonly credentialAvailable: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
+  private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
+  private readonly agentMaxAttempts: number
 
-  constructor(options: { instanceId?: string } = {}) {
+  constructor(options: {
+    instanceId?: string
+    supportedAgentToolIds?: string[]
+    credentialAvailable?: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
+    dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
+    agentMaxAttempts?: number
+  } = {}) {
     this.instanceId = options.instanceId ?? `instance_${randomUUID()}`
+    this.agentStore = new InMemoryAgentStore()
+    this.supportedAgentToolIds = options.supportedAgentToolIds ?? []
+    this.credentialAvailable = options.credentialAvailable ?? (async () => false)
+    this.dispatcherForAgent = options.dispatcherForAgent
+    this.agentMaxAttempts = options.agentMaxAttempts ?? 3
   }
 
   async ready(): Promise<boolean> { return true }
@@ -134,7 +168,7 @@ export class InMemoryServerRepository implements ServerRepository {
     }, () => systemIds.shift()!)
     this.state = createInitialOutlineState(repaired.doc)
     const apiToken = this.issueToken('api', ['notes:create'])
-    const deviceToken = this.issueToken('device', ['sync'])
+    const deviceToken = this.issueToken('device', ['sync', 'agents:read', 'agents:execute', 'agents:manage'])
     return { ownerId: this.ownerId, outlineId: this.outlineId, inboxId: this.inboxId, apiToken, deviceToken }
   }
 
@@ -186,6 +220,9 @@ export class InMemoryServerRepository implements ServerRepository {
     const noteId = `note_${randomUUID()}`
     const eventId = `event_${randomUUID()}`
     const createdAt = new Date().toISOString()
+    const automaticRuns = parentId === canonicalInbox.id
+      ? await this.automaticAdmissions(noteId, input, this.revision + 1)
+      : []
     const event = parseEventEnvelope({
       id: eventId, outlineId: principal.outlineId, actorId: principal.ownerId,
       deviceId: `api_${principal.tokenId}`, type: 'note.created', eventVersion: 1,
@@ -199,7 +236,58 @@ export class InMemoryServerRepository implements ServerRepository {
     this.notes.set(noteId, { id: noteId, parentId, text: input.text, deleted: false })
     const response: NotesCreateResponse = { noteId, eventId, revision: this.revision, parentId, origin: 'notes_api', createdAt }
     this.idempotency.set(recordKey, { requestHash, response: structuredClone(response) })
+    for (const admission of automaticRuns) await this.agentStore.admitRun(admission)
     return { response, replayed: false }
+  }
+
+  private async automaticAdmissions(noteId: string, capture: NotesCreateRequest, baseRevision: number) {
+    const [configurationRevision, automationRevision] = await Promise.all([
+      this.agentStore.currentConfiguration(this.outlineId), this.agentStore.currentAutomation(this.outlineId),
+    ])
+    if (!configurationRevision || !automationRevision) return []
+    const configuration = configurationRevision.configuration
+    const matches = await resolveAutomationMatches(
+      automationRevision.policies,
+      captureFacts(capture.text, capture.source),
+      { text: capture.text, source: capture.source ?? {} },
+      async (agentId) => {
+        const agent = configuration.agents.find((candidate) => candidate.id === agentId)
+        if (!agent?.credentialRef || !this.dispatcherForAgent) return undefined
+        if (!await this.credentialAvailable(this.ownerId, this.outlineId, agent.credentialRef)) return undefined
+        return this.dispatcherForAgent({ ownerId: this.ownerId, outlineId: this.outlineId, agent })
+      },
+      AbortSignal.timeout(15_000),
+    )
+    const admissions: Array<Parameters<AgentStore['admitRun']>[0]> = []
+    for (const match of matches) {
+      const skill = configuration.skills.find((candidate) => candidate.id === match.skillId)
+      const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
+      const credentialRef = agent?.credentialRef
+      if (!skill || !agent || !credentialRef || !await this.credentialAvailable(this.ownerId, this.outlineId, credentialRef)) continue
+      let effectiveToolIds: string[]
+      try {
+        effectiveToolIds = resolveEffectiveToolIds({
+          agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
+          globallyEnabledToolIds: configuration.globallyEnabledToolIds,
+          policyAllowedToolIds: configuration.globallyEnabledToolIds,
+          executorSupportedToolIds: this.supportedAgentToolIds,
+        })
+      } catch { continue }
+      const input: RunInput = {
+        version: 1, runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: this.outlineId,
+        source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
+        target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
+        credentialRef, agent, skill, effectiveToolIds,
+        prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
+        customTools: configuration.customTools,
+      }
+      admissions.push({
+        input, ownerId: this.ownerId, trigger: 'inbox_automation',
+        triggerIdentity: `capture:${noteId}:policy:${automationRevision.policies.revision}:skill:${skill.id}`,
+        policyId: match.policyId, maxAttempts: this.agentMaxAttempts,
+      })
+    }
+    return admissions
   }
 
   async eventsAfter(outlineId: string, revision: number, limit: number): Promise<EventEnvelope[]> {
@@ -274,6 +362,74 @@ export class InMemoryServerRepository implements ServerRepository {
     return structuredClone(record)
   }
 
+  async runAdmissionContext(principal: Principal, sourceNodeId: string, targetParentId: string) {
+    this.requireOutline(principal.outlineId)
+    const source = this.notes.get(sourceNodeId)
+    const target = this.notes.get(targetParentId)
+    if (!source || source.deleted || !target || target.deleted) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+    const context: string[] = []
+    let current: NoteProjection | undefined = target
+    while (current && context.length < 20) {
+      context.unshift(current.text)
+      current = current.parentId ? this.notes.get(current.parentId) : undefined
+    }
+    return { sourceText: source.text, context, baseRevision: this.revision }
+  }
+
+  async searchOutline(outlineId: string, query: string, limit = 20) {
+    this.requireOutline(outlineId)
+    const needle = query.trim().toLowerCase()
+    if (!needle) return []
+    return [...this.notes.values()].filter((note) => !note.deleted && note.text.toLowerCase().includes(needle))
+      .slice(0, Math.max(1, Math.min(limit, 50))).map((note) => ({ nodeId: note.id, text: note.text.slice(0, 2_000) }))
+  }
+
+  async commitAgentResult(runId: string, workerId: string, result: StructuredResult) {
+    const run = await this.agentStore.getRun(this.outlineId, runId)
+    if (!run) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+    const target = this.notes.get(run.input.target.parentId)
+    if (!target || target.deleted) {
+      await this.agentStore.fail(runId, workerId, 'target_unavailable', false, new Date(), 0)
+      throw new RepositoryError('conflict', 'The target is unavailable.')
+    }
+    const ownership = await this.agentStore.renewLease(runId, workerId, new Date(), 60_000)
+    if (!ownership.owned) throw new RepositoryError('conflict', 'Run lease was lost.')
+    if (ownership.cancelRequested) throw new RepositoryError('conflict', 'Run cancellation was requested.')
+    const rootNoteIds: string[] = []
+    const firstRevision = this.revision + 1
+    const changeGroupId = `run_${runId}`.slice(0, 128)
+    const provenance = { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: result.sources.map((source) => source.url).slice(0, 20) }
+    const addNodes = (nodes: StructuredResult['nodes'], parentId: string): void => {
+      for (const node of nodes) {
+        if (node.type === 'image') {
+          const event = parseEventEnvelope({
+            id: `event_${randomUUID()}`, outlineId: run.outlineId, actorId: this.ownerId, deviceId: `agent_${this.instanceId}`,
+            type: 'asset.reference_added', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+            baseRevision: this.revision, revision: this.revision + 1, origin: 'agent', agentProvenance: provenance,
+            changeGroupId, occurredAt: new Date().toISOString(), payload: { assetId: node.assetId, alt: node.alt },
+          })
+          this.revision += 1; this.events.push(event); this.state = reduceOutlineEvent(this.state!, event)
+          continue
+        }
+        const noteId = `note_${randomUUID()}`
+        if (parentId === run.input.target.parentId) rootNoteIds.push(noteId)
+        const event = parseEventEnvelope({
+          id: `event_${randomUUID()}`, outlineId: run.outlineId, actorId: this.ownerId, deviceId: `agent_${this.instanceId}`,
+          type: 'note.created', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+          baseRevision: this.revision, revision: this.revision + 1, origin: 'agent', agentProvenance: provenance,
+          changeGroupId, occurredAt: new Date().toISOString(), payload: { noteId, parentId, text: node.text },
+        })
+        this.revision += 1; this.events.push(event); this.state = reduceOutlineEvent(this.state!, event)
+        this.notes.set(noteId, { id: noteId, parentId, text: node.text, deleted: false })
+        if (node.children?.length) addNodes(node.children, noteId)
+      }
+    }
+    addNodes(result.nodes, run.input.target.parentId)
+    if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
+    const settled = { firstRevision, lastRevision: this.revision, rootNoteIds }
+    return this.agentStore.complete(runId, workerId, `result:${runId}`, settled)
+  }
+
   private requireCompletedAssets(principal: Principal, event: EventEnvelope): void {
     for (const assetId of referencedAssetIds(event.payload)) {
       const record = this.assets.get(assetId)
@@ -324,6 +480,7 @@ export function sameEventContent(left: EventEnvelope, right: EventEnvelope): boo
     type: event.type, eventVersion: event.eventVersion, documentVersion: event.documentVersion,
     schemaEpoch: event.schemaEpoch, origin: event.origin, occurredAt: event.occurredAt,
     changeGroupId: event.changeGroupId, payload: event.payload,
+    agentProvenance: event.agentProvenance,
   })
   return content(left) === content(right)
 }

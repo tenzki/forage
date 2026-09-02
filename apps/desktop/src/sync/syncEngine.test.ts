@@ -75,6 +75,7 @@ function repository(mode: 'local' | 'server'): SyncRepository & { calls: Record<
 
 const status = {
   instanceId: 'instance-1', apiVersions: [1], eventVersions: { 'note.created': [1] },
+  agentOriginVersions: [1], minimumAgentClientVersion: '0.1.0',
   documentSchemaVersion: 1, minimumClientVersion: '0.1.0',
 }
 
@@ -105,6 +106,29 @@ describe('desktop synchronization state machine', () => {
 
     expect(states).toEqual(['connecting', 'syncing', 'up-to-date'])
     expect(repo.calls.saveCheckpoint).toHaveBeenCalledOnce()
+  })
+
+  it('does not append or acknowledge an unknown agent-origin event version', async () => {
+    const repo = repository('server')
+    const incompatible: EventEnvelope = {
+      ...noteEvent('agent-event', 'agent-note', 1),
+      eventVersion: 2, origin: 'agent',
+      agentProvenance: { runId: 'run-1', skillId: 'skill-1', sourceNodeId: 'inbox', sourceUrls: [] },
+    }
+    const transport: SyncTransport = {
+      status: async () => status,
+      checkpoint: async () => ({ checkpoint: {
+        id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        revision: 0, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState,
+      } }),
+      pull: async () => ({ events: [incompatible], currentRevision: 1, nextAfterRevision: null }),
+      push: async () => { throw new Error('no pending events') },
+    }
+    const engine = new DesktopSyncEngine(repo, transport)
+    await engine.sync()
+    expect(engine.state.kind).toBe('upgrade-required')
+    expect(repo.calls.append).not.toHaveBeenCalled()
+    expect(repo.calls.recordPulled).not.toHaveBeenCalled()
   })
 
   it('automatically supersedes and retries an independent pending note after a stale push', async () => {

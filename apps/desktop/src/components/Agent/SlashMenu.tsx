@@ -7,8 +7,8 @@ import type { Editor } from '@tiptap/react'
 import type { SkillDefinition } from '../../agent/definitions'
 import { resolveAgentContext } from '../../agent/context'
 import {
+  commitStructuredAgentResult,
   currentListItemId,
-  runSkillIntoEditor,
   setCurrentBulletText,
 } from '../../agent/insertIntoEditor'
 import { focusOrCreateBulletNote } from '../../editor/bulletNote'
@@ -25,6 +25,17 @@ import {
 } from '../../editor/outlineModel'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ActivityReporter } from '../../agent/activity'
+import {
+  nativeLocalCredentialVault,
+  resolveLocalCredential,
+} from '../../agent/localCredentials'
+import { NativeEventRepository } from '../../persistence/eventStore'
+import { LocalAgentExecutor } from '../../agent/localExecutor'
+import { ServerAgentExecutor, TauriServerAgentTransport } from '../../agent/serverExecutor'
+import { createPiLocalRunner } from '../../agent/piLocalRunner'
+import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
+import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
+import { resolveEffectiveToolIds, type ActivityEvent as RuntimeActivityEvent, type RunInput } from '@forage/agent-runtime'
 
 interface CommandChoice {
   id: string
@@ -97,8 +108,7 @@ export function SlashMenu({
   onActivity?: ActivityReporter
 }) {
   const authMode = useSettingsStore((state) => state.authMode)
-  const openAiApiKey = useSettingsStore((state) => state.openAiApiKey)
-  const oauthCredential = useSettingsStore((state) => state.oauthCredential)
+  const localCredentials = useSettingsStore((state) => state.localCredentials)
   const modelId = useSettingsStore((state) => state.modelId)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
   const customTools = useSettingsStore((state) => state.customTools)
@@ -265,33 +275,85 @@ export function SlashMenu({
       return
     }
     onError(null)
-    try {
-      runSkillIntoEditor(
-        editor,
-        {
-          mode: authMode,
-          apiKey: openAiApiKey,
-          oauthCredential,
-          modelId,
-          onCredentialRefresh: setOAuthCredential,
-        },
-        skill,
-        agent,
-        prompt,
-        enabledToolIds,
-        customTools,
-        onError,
-        onActivity,
-      )
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error)
-      onError(detail)
-      const invocationNodeId = currentListItemId(editor)
-      if (invocationNodeId) showSkillContextError(editor, invocationNodeId, detail)
-      setContextError(detail)
-      if (state) setMenu(state)
+    const invocationNodeId = currentListItemId(editor)
+    if (!invocationNodeId) {
+      onError('Could not find the skill invocation bullet.')
       return
     }
+    const contextSnapshot = resolveAgentContext(editor.state.doc, invocationNodeId)
+    const repository = new NativeEventRepository()
+    void (async () => {
+      const mode = await repository.storageMode()
+      if (mode === 'server') {
+        const transport = new TauriServerAgentTransport()
+        const published = await transport.configuration()
+        const serverSkill = published.configuration.skills.find((candidate) => candidate.id === skill.id)
+        const serverAgent = serverSkill
+          ? published.configuration.agents.find((candidate) => candidate.id === serverSkill.agentId)
+          : undefined
+        if (!serverSkill || !serverAgent) throw new Error(`/${skill.label} is not published on the configured server.`)
+        if (!serverAgent.credentialRef) throw new Error(`/${skill.label} has no connected server credential.`)
+        const connection = await repository.serverConnection()
+        if (!connection) throw new Error('Server mode is not configured.')
+        const sync = await repository.syncState(connection.outlineId)
+        const effectiveToolIds = resolveEffectiveToolIds({
+          agentToolIds: serverAgent.toolIds,
+          requiredToolIds: serverSkill.requiredToolIds,
+          globallyEnabledToolIds: published.configuration.globallyEnabledToolIds,
+          policyAllowedToolIds: serverAgent.toolIds,
+          executorSupportedToolIds: published.configuration.globallyEnabledToolIds,
+        })
+        const input: RunInput = {
+          version: 1, runId: crypto.randomUUID(), executionMode: 'server', outlineId: connection.outlineId,
+          source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
+          baseRevision: sync.lastPulledRevision, configurationRevision: published.configuration.revision,
+          credentialRef: serverAgent.credentialRef, agent: serverAgent, skill: serverSkill,
+          effectiveToolIds, prompt: prompt || serverSkill.label, context: contextSnapshot.lines,
+          customTools: published.configuration.customTools,
+        }
+        const handle = await new ServerAgentExecutor(transport).invoke(input, {
+          onActivity: (event) => onActivity?.(desktopActivity(event)),
+        })
+        await handle.completion
+        return
+      }
+
+      const provider = authMode === 'subscription' ? 'openai-codex' : 'openai'
+      const credential = localCredentials.find((candidate) => candidate.provider === provider && candidate.status === 'connected')
+      if (!credential) throw new Error(authMode === 'subscription'
+        ? 'Not signed in to ChatGPT. Open Settings and connect your subscription.'
+        : 'No OpenAI API key set. Open Settings and add your API key.')
+      const identity = await repository.identity()
+      const effectiveToolIds = resolveEffectiveToolIds({
+        agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
+        globallyEnabledToolIds: enabledToolIds, policyAllowedToolIds: agent.toolIds,
+        executorSupportedToolIds: [...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id), ...customTools.map((tool) => tool.id)],
+      })
+      const input: RunInput = {
+        version: 1, runId: crypto.randomUUID(), executionMode: 'local', outlineId: identity.outlineId,
+        source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
+        baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
+        agent, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
+        customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
+      }
+      const runner = createPiLocalRunner({
+        resolveCredential: async (reference) => {
+          if (reference !== credential.id) throw new Error('The local credential reference changed before execution.')
+          const auth = await resolveLocalCredential(credential, nativeLocalCredentialVault)
+          return { ...auth, modelId, onCredentialRefresh: setOAuthCredential }
+        },
+      })
+      const handle = await new LocalAgentExecutor(repository, runner).invoke(input, {
+        onActivity: (event) => onActivity?.(desktopActivity(event)),
+      })
+      const result = await handle.completion
+      commitStructuredAgentResult(editor, invocationNodeId, skill.label, result)
+    })().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      onError(detail)
+      showSkillContextError(editor, invocationNodeId, detail)
+      setContextError(detail)
+    })
     clearSkillContext(editor)
     setContextError(null)
     setMenu(null)
@@ -321,4 +383,21 @@ export function SlashMenu({
       ))}
     </ul>
   )
+}
+
+function desktopActivity(event: RuntimeActivityEvent): Parameters<ActivityReporter>[0] {
+  return {
+    id: event.id,
+    ...(event.callId ? { callId: event.callId } : {}),
+    phase: event.phase === 'progress' ? 'start' : event.phase,
+    kind: event.kind === 'status' ? 'thinking' : event.kind,
+    label: event.label,
+    ...(event.detail ? { detail: event.detail } : {}),
+    ...(event.status ? {
+      status: event.status === 'success' ? 'complete'
+        : event.status === 'pending' ? 'running'
+          : event.status,
+    } : {}),
+    ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+  }
 }

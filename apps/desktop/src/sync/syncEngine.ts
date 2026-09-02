@@ -120,6 +120,10 @@ export class DesktopSyncEngine {
         this.transition({ kind: 'upgrade-required', message: 'This server requires a newer Forage client.' })
         return
       }
+      if (!status.agentOriginVersions.includes(1) || compareVersions(this.clientVersion, status.minimumAgentClientVersion) < 0) {
+        this.transition({ kind: 'upgrade-required', message: 'This server requires a newer client for agent-generated outline events.' })
+        return
+      }
       this.transition({ kind: 'syncing' })
       const bootstrap = checkpointBootstrapResponseSchema.parse(await this.transport.checkpoint()).checkpoint
       const outlineId = bootstrap.outlineId
@@ -178,6 +182,7 @@ export class DesktopSyncEngine {
       const page = await this.transport.pull(cursor, 100)
       for (const event of page.events) {
         const parsed = parseEventEnvelope(event)
+        requireSupportedAgentEvent(parsed)
         projected = reduceOutlineEvent(projected, parsed)
         await this.repository.append(parsed)
         if (invalidatesDocumentHistory(parsed)) this.historyInvalidated = true
@@ -219,6 +224,7 @@ export class DesktopSyncEngine {
       const page = await this.transport.pull(cursor, 100)
       for (const event of page.events) {
         const parsed = parseEventEnvelope(event)
+        requireSupportedAgentEvent(parsed)
         validatedRemoteState = reduceOutlineEvent(validatedRemoteState, parsed)
         missingEvents.push(parsed)
         cursor = Math.max(cursor, parsed.revision ?? cursor)
@@ -340,6 +346,10 @@ export class DesktopSyncEngine {
     this.state = state
     this.onState(state)
   }
+}
+
+function requireSupportedAgentEvent(event: EventEnvelope): void {
+  if (event.origin === 'agent' && event.eventVersion !== 1) throw new Error('upgrade_required: unsupported agent event version')
 }
 
 function isDocumentEvent(event: EventEnvelope): event is Extract<EventEnvelope, {

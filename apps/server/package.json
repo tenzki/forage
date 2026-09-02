@@ -14,6 +14,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@forage/agent-runtime": "0.1.0",
     "@forage/domain": "0.1.0",
     "@forage/document": "0.1.0",
     "@forage/protocol": "0.1.0",
