@@ -147,8 +147,34 @@ export function outlineSchemaExtensions() {
 }
 
 let cachedSchema: Schema | null = null
+let cachedLegacyReplaySchema: Schema | null = null
+
+/**
+ * Persisted schema epochs are immutable replay contracts. Epoch 1 used
+ * StarterKit's permissive `paragraph block*` list item, so a multi-step event
+ * may temporarily contain shapes that the current editor correctly rejects.
+ */
+export const CURRENT_SCHEMA_EPOCH = 1
+
+function legacyReplaySchemaExtensions() {
+  return [
+    StarterKit.configure({ bulletList: false, trailingNode: false }),
+    OutlineBulletListSchema,
+    GeneratedImageItemSchema,
+    GeneratedImageSchema,
+    StableBulletAttributes,
+    BulletNoteSchema.extend({ group: 'block' }),
+    InternalLinkSchema,
+  ]
+}
 
 export function createOutlineSchema(): Schema {
   cachedSchema ??= getSchema(outlineSchemaExtensions())
   return cachedSchema
+}
+
+export function createReplayOutlineSchema(epoch: number): Schema {
+  if (epoch !== 1) throw new Error(`upgrade_required: Unsupported outline schema epoch: ${epoch}`)
+  cachedLegacyReplaySchema ??= getSchema(legacyReplaySchemaExtensions())
+  return cachedLegacyReplaySchema
 }

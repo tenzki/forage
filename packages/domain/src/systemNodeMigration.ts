@@ -1,6 +1,7 @@
 import {
   captureStepBatch,
   createOutlineSchema,
+  createReplayOutlineSchema,
   deserializeStep,
   documentChangeSteps,
   repairSystemNodes,
@@ -33,7 +34,8 @@ export async function buildDocumentRepairEvent(
   context: DocumentRepairContext,
 ): Promise<SystemNodeMigrationResult | null> {
   if (JSON.stringify(state.doc) === JSON.stringify(repairedDoc)) return null
-  const schema = createOutlineSchema()
+  createOutlineSchema().nodeFromJSON(repairedDoc).check()
+  const schema = createReplayOutlineSchema(state.schemaEpoch)
   const before = schema.nodeFromJSON(state.doc)
   const after = schema.nodeFromJSON(repairedDoc)
   const serializedSteps = documentChangeSteps(before, after)

@@ -1,6 +1,6 @@
 import {
   applySerializedSteps,
-  createOutlineSchema,
+  createReplayOutlineSchema,
   insertPlainTextNote,
   repairSystemNodes,
   type SerializedStep,
@@ -17,6 +17,23 @@ export interface OutlineState {
   schemaEpoch: number
 }
 
+export class OutlineReplayError extends Error {
+  readonly eventId: string
+  readonly eventIndex: number
+  readonly schemaEpoch: number
+  readonly cause: unknown
+
+  constructor(event: EventEnvelope, eventIndex: number, schemaEpoch: number, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause)
+    super(`Outline replay stopped at event ${event.id}: ${detail}`)
+    this.name = 'OutlineReplayError'
+    this.eventId = event.id
+    this.eventIndex = eventIndex
+    this.schemaEpoch = schemaEpoch
+    this.cause = cause
+  }
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value)
 }
@@ -27,12 +44,17 @@ export function createInitialOutlineState(doc: JsonObject): OutlineState {
 
 export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope): OutlineState {
   const state = clone(current)
+  if (event.type !== 'document.schema_migrated' && event.schemaEpoch !== state.schemaEpoch) {
+    throw new Error(
+      `Event ${event.id} uses schema epoch ${event.schemaEpoch}, but the outline is at epoch ${state.schemaEpoch}.`,
+    )
+  }
   switch (event.type) {
     case 'document.steps_applied':
     case 'document.undo_applied':
     case 'document.redo_applied': {
-      assertDocumentHash(state.doc, event.payload.beforeHash, event.id, 'before')
-      const document = createOutlineSchema().nodeFromJSON(state.doc)
+      assertDocumentHash(state.doc, event.payload.beforeHash, event.id, 'before', state.schemaEpoch)
+      const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
       const projected = applySerializedSteps(
         document,
         event.payload.steps as SerializedStep[],
@@ -45,7 +67,7 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
           throw new Error('A system-node migration replay unexpectedly requires a new node id.')
         }).doc
         : projected
-      assertDocumentHash(state.doc, event.payload.afterHash, event.id, 'after')
+      assertDocumentHash(state.doc, event.payload.afterHash, event.id, 'after', state.schemaEpoch)
       return state
     }
     case 'shortcut.created':
@@ -69,25 +91,25 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     }
     case 'trash.entry_added':
       if (event.payload.document) {
-        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before')
-        const document = createOutlineSchema().nodeFromJSON(state.doc)
+        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before', state.schemaEpoch)
+        const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
         state.doc = applySerializedSteps(
           document,
           event.payload.document.steps as SerializedStep[],
         ).toJSON() as JsonObject
-        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after')
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch)
       }
       state.trash.push(clone(event.payload.entry))
       return state
     case 'trash.entry_restored':
       if (event.payload.document) {
-        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before')
-        const document = createOutlineSchema().nodeFromJSON(state.doc)
+        assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before', state.schemaEpoch)
+        const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
         state.doc = applySerializedSteps(
           document,
           event.payload.document.steps as SerializedStep[],
         ).toJSON() as JsonObject
-        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after')
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch)
       }
       state.trash = state.trash.filter((entry) => entry.id !== event.payload.entryId)
       return state
@@ -98,7 +120,7 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
       state.schemaEpoch = event.schemaEpoch
       return state
     case 'note.created': {
-      const document = createOutlineSchema().nodeFromJSON(state.doc)
+      const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
       state.doc = insertPlainTextNote(document, event.payload).toJSON() as JsonObject
       return state
     }
@@ -107,11 +129,17 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
   }
 }
 
-function assertDocumentHash(doc: JsonObject, expected: string, eventId: string, phase: 'before' | 'after'): void {
+function assertDocumentHash(
+  doc: JsonObject,
+  expected: string,
+  eventId: string,
+  phase: 'before' | 'after',
+  schemaEpoch: number,
+): void {
   // ProseMirror supplies default attributes while parsing. Events are captured
   // from that canonical form, so replay must compare the same representation
   // even when an older checkpoint omitted default-valued attributes.
-  const canonicalDocument = createOutlineSchema().nodeFromJSON(doc).toJSON()
+  const canonicalDocument = createReplayOutlineSchema(schemaEpoch).nodeFromJSON(doc).toJSON()
   const actual = sha256HexSync(canonicalJson(canonicalDocument))
   if (actual !== expected) {
     throw new Error(`Document integrity mismatch ${phase} event ${eventId}: expected ${expected}, got ${actual}.`)
@@ -140,5 +168,14 @@ export function replayOutlineEvents(
   initial: OutlineState,
   events: readonly EventEnvelope[],
 ): OutlineState {
-  return events.reduce(reduceOutlineEvent, initial)
+  let state = initial
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index]
+    try {
+      state = reduceOutlineEvent(state, event)
+    } catch (error) {
+      throw new OutlineReplayError(event, index, state.schemaEpoch, error)
+    }
+  }
+  return state
 }

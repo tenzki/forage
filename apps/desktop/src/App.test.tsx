@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event'
 import App from './App'
 import { formatDailyDate, localCalendarDate } from './editor/dailyNotes'
 import { replayOutlineEvents, type EventEnvelope } from '@forage/domain'
+import { EMPTY_DOC } from './editor/emptyDoc'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
@@ -174,6 +175,12 @@ describe('App view switching', () => {
         envelope: expect.objectContaining({ origin: 'migration', type: 'document.steps_applied' }),
       }) }),
     ))
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_save_checkpoint',
+      expect.objectContaining({ checkpoint: expect.objectContaining({
+        outlineId: 'outline-1', localSequence: 6, schemaEpoch: 1,
+      }) }),
+    ))
     expect(container.querySelector('[data-system-role="inbox"]')).toBeTruthy()
     expect(container.querySelector('[data-system-role="daily-notes"]')).toBeTruthy()
     expect(container.textContent).toContain('Legacy content')
@@ -223,6 +230,38 @@ describe('App view switching', () => {
     const migration = (migrationCall![1] as { event: { envelope: EventEnvelope } }).event.envelope
     expect(JSON.stringify(replayOutlineEvents(legacyState, [migration]).doc)).toContain('Legacy detail')
     expect(container.textContent).toContain('Legacy detail')
+  })
+
+  it('starts empty at the current event barrier instead of replaying the abandoned history', async () => {
+    nativeMocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'event_store_storage_mode') return 'local'
+      if (command === 'event_store_identity') {
+        return { outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1' }
+      }
+      if (command === 'event_store_latest_checkpoint') return {
+        id: 'checkpoint-broken', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, localSequence: 5, serverRevision: 0,
+        stateJson: '{broken', integrityHash: 'a'.repeat(64),
+        createdAt: '2026-08-30T12:00:00.000Z',
+      }
+      if (command === 'event_store_events_after') return [
+        { localSequence: 6 },
+        { localSequence: 9 },
+      ]
+      return undefined
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Could not open your outline' })
+    await user.click(screen.getByRole('button', { name: 'Start with an empty outline' }))
+
+    await waitFor(() => expect(nativeMocks.invoke).toHaveBeenCalledWith(
+      'event_store_save_checkpoint',
+      expect.objectContaining({ checkpoint: expect.objectContaining({
+        outlineId: 'outline-1', localSequence: 9,
+      }) }),
+    ))
   })
 
   it('shows the configured URL in the backend widget for server storage', async () => {
@@ -426,6 +465,52 @@ describe('App view switching', () => {
       || event.type === 'document.redo_applied'
     ) ? event.payload.steps.map(textFrom).join('') : '')
     expect(inserted).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps saving after a committed event cannot refresh its recovery checkpoint', async () => {
+    const user = userEvent.setup()
+    const state = { doc: EMPTY_DOC, trash: [], shortcuts: [], schemaEpoch: 1 }
+    const records: Array<Record<string, unknown>> = []
+    let sequence = 99
+    nativeMocks.invoke.mockImplementation(async (command: string, input?: unknown) => {
+      if (command === 'event_store_storage_mode') return 'local'
+      if (command === 'event_store_identity') {
+        return { outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1' }
+      }
+      if (command === 'event_store_latest_checkpoint') return {
+        id: 'checkpoint-99', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        localSequence: 99, serverRevision: 0, stateJson: JSON.stringify(state),
+        integrityHash: 'a'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z',
+      }
+      if (command === 'event_store_events_after') {
+        const after = (input as { localSequence: number }).localSequence
+        return records.filter((record) => Number(record.localSequence) > after)
+      }
+      if (command === 'event_store_append') {
+        sequence += 1
+        const event = (input as { event: { envelope: EventEnvelope } }).event.envelope
+        records.push({
+          localSequence: sequence, id: event.id, outlineId: event.outlineId,
+          baseRevision: event.baseRevision, serverRevision: null, envelope: event,
+          status: 'pending', supersededBy: null, createdAt: event.occurredAt,
+        })
+        return sequence
+      }
+      if (command === 'event_store_save_checkpoint') throw new Error('checkpoint disk unavailable')
+      return undefined
+    })
+    const { container } = await renderApp()
+    const editor = container.querySelector('.ProseMirror') as HTMLElement
+
+    await user.click(editor)
+    await user.keyboard('a')
+
+    expect(await screen.findByText(/checkpoint disk unavailable/)).toBeTruthy()
+    expect(screen.queryByText(/Outline not saved/i)).toBeNull()
+
+    await user.keyboard('b')
+    await waitFor(() => expect(records).toHaveLength(2))
+    expect(new Set(records.map((record) => record.id)).size).toBe(2)
   })
 
   it('serializes periodic synchronization behind pending persistence', async () => {

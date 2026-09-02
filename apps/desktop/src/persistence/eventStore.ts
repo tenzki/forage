@@ -33,6 +33,7 @@ export interface ReplayInput {
   checkpoint: StoredCheckpoint
   state: OutlineState
   events: EventEnvelope[]
+  latestLocalSequence?: number
 }
 
 export interface LocalIdentity {
@@ -114,6 +115,10 @@ export class NativeEventRepository {
     return {
       checkpoint,
       state,
+      latestLocalSequence: Math.max(
+        checkpoint.localSequence,
+        ...records.map((record) => record.localSequence),
+      ),
       events: records
         .filter((record) => !record.supersededBy)
         .map((record) => {

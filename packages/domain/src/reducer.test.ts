@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { EditorState } from '@tiptap/pm/state'
-import { captureStepBatch, createOutlineSchema } from '../../document/src'
+import { captureStepBatch, createOutlineSchema, createReplayOutlineSchema } from '../../document/src'
 import {
   createCheckpoint,
   createInitialOutlineState,
   canonicalJson,
   replayOutlineEvents,
+  OutlineReplayError,
   sha256HexSync,
   verifyCheckpoint,
   type EventEnvelope,
@@ -294,5 +295,58 @@ describe('deterministic outline replay', () => {
     }, 0)
 
     expect(() => replayOutlineEvents(initial, [event])).toThrow(/integrity mismatch after event event-1/)
+  })
+
+  it('reports the exact event where replay recovery stopped', () => {
+    const initial = createInitialOutlineState({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: 'item' }, content: [{ type: 'paragraph' }],
+      }] }],
+    })
+    const event = envelope('document.steps_applied', {
+      steps: [{ stepType: 'replace', from: 3, to: 3, slice: { content: [{ type: 'text', text: 'x' }] } }],
+      inverseSteps: [{ stepType: 'replace', from: 3, to: 4 }],
+      beforeHash: '0'.repeat(64),
+      afterHash: '0'.repeat(64),
+    }, 0)
+
+    try {
+      replayOutlineEvents(initial, [event])
+      expect.fail('replay should fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(OutlineReplayError)
+      expect(error).toMatchObject({ eventId: 'event-1', eventIndex: 0, schemaEpoch: 1 })
+      expect((error as Error).message).toMatch(/integrity mismatch before event event-1/i)
+    }
+  })
+
+  it('replays a legacy event whose temporary list-item shape is stricter than its final projection', () => {
+    const schema = createReplayOutlineSchema(1)
+    const document = schema.nodeFromJSON({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem',
+        attrs: { nodeId: 'date', systemRole: 'daily-note', dailyDate: '2026-08-14' },
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'August 14, 2026' }] },
+          { type: 'bulletList', content: [{
+            type: 'listItem', attrs: { nodeId: 'empty-child' }, content: [{ type: 'paragraph' }],
+          }] },
+        ],
+      }] }],
+    })
+    const transaction = EditorState.create({ schema, doc: document }).tr
+      .insert(19, schema.nodes.paragraph.create())
+      .delete(19, 21)
+    const hash = sha256HexSync(canonicalJson(document.toJSON()))
+    const event = envelope('document.steps_applied', {
+      ...captureStepBatch(document, transaction.steps),
+      beforeHash: hash,
+      afterHash: hash,
+    }, 0)
+
+    const replayed = replayOutlineEvents(createInitialOutlineState(document.toJSON()), [event])
+
+    expect(replayed.doc).toEqual(document.toJSON())
+    expect(() => createOutlineSchema().nodeFromJSON(replayed.doc).check()).not.toThrow()
   })
 })

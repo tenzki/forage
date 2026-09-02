@@ -41,6 +41,7 @@ describe('native event repository', () => {
     const loaded = await new NativeEventRepository().loadReplayInput('outline-1')
 
     expect(loaded?.checkpoint.localSequence).toBe(3)
+    expect(loaded?.latestLocalSequence).toBe(4)
     expect(loaded?.events[0].type).toBe('shortcut.deleted')
     expect(loaded?.events[0].revision).toBe(3)
   })

@@ -361,7 +361,7 @@ impl EventStore {
                     server_revision, state_json, integrity_hash, created_at
              FROM outline_checkpoints
              WHERE outline_id = ?1 AND document_version = ?2 AND schema_epoch = ?3
-             ORDER BY local_sequence DESC",
+             ORDER BY local_sequence DESC, julianday(created_at) DESC, created_at DESC",
         )?;
         let rows =
             statement.query_map(params![outline_id, document_version, schema_epoch], |row| {
@@ -377,13 +377,173 @@ impl EventStore {
                     created_at: row.get(8)?,
                 })
             })?;
-        for checkpoint in rows {
-            let checkpoint = checkpoint?;
-            if Self::checkpoint_hash(&checkpoint.state_json) == checkpoint.integrity_hash {
-                return Ok(Some(checkpoint));
+        let checkpoints = rows.collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        let verified = checkpoints
+            .into_iter()
+            .filter(|checkpoint| {
+                Self::checkpoint_hash(&checkpoint.state_json) == checkpoint.integrity_hash
+            })
+            .collect::<Vec<_>>();
+        let Some(selected) = verified.first().cloned() else {
+            return Ok(None);
+        };
+        if selected.local_sequence == 0 {
+            return Ok(Some(selected));
+        }
+
+        // Older "Start Empty" builds wrote a valid replacement snapshot at
+        // sequence zero even when an event log already existed. Recover one only
+        // when its timestamp produces an unambiguous barrier and its document
+        // exactly matches the next retained document event's before-hash.
+        let newest_reset = verified
+            .into_iter()
+            .filter(|checkpoint| checkpoint.local_sequence == 0)
+            .next();
+        let Some(mut checkpoint) = newest_reset else {
+            return Ok(Some(selected));
+        };
+        let Some(barrier) = Self::legacy_reset_barrier(&connection, &checkpoint, &selected)? else {
+            return Ok(Some(selected));
+        };
+        checkpoint.local_sequence = barrier;
+        Ok(Some(checkpoint))
+    }
+
+    fn legacy_reset_barrier(
+        connection: &Connection,
+        checkpoint: &CheckpointRecord,
+        selected: &CheckpointRecord,
+    ) -> StoreResult<Option<i64>> {
+        let reset_is_later: Option<i64> = connection.query_row(
+            "SELECT CASE
+               WHEN julianday(?1) IS NULL OR julianday(?2) IS NULL THEN NULL
+               ELSE julianday(?1) > julianday(?2)
+             END",
+            params![checkpoint.created_at, selected.created_at],
+            |row| row.get(0),
+        )?;
+        if reset_is_later != Some(1) {
+            return Ok(None);
+        }
+
+        let state: Value = match serde_json::from_str(&checkpoint.state_json) {
+            Ok(state) => state,
+            Err(_) => return Ok(None),
+        };
+        let empty_domain_state = state
+            .get("trash")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+            && state
+                .get("shortcuts")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty);
+        let Some(document) = state.get("doc") else {
+            return Ok(None);
+        };
+        if !empty_domain_state {
+            return Ok(None);
+        }
+
+        let chronology_violations: i64 = connection.query_row(
+            "WITH ordered AS (
+               SELECT julianday(created_at) AS stamp,
+                      LAG(julianday(created_at)) OVER (ORDER BY local_sequence) AS previous_stamp
+               FROM outline_events WHERE outline_id = ?1
+             )
+             SELECT COUNT(*) FROM ordered
+             WHERE stamp IS NULL OR (previous_stamp IS NOT NULL AND stamp < previous_stamp)",
+            [checkpoint.outline_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if chronology_violations != 0 {
+            return Ok(None);
+        }
+
+        let ambiguous_timestamp_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM outline_events
+             WHERE outline_id = ?1 AND julianday(created_at) = julianday(?2)",
+            params![checkpoint.outline_id, checkpoint.created_at],
+            |row| row.get(0),
+        )?;
+        if ambiguous_timestamp_count != 0 {
+            return Ok(None);
+        }
+        let barrier: i64 = connection.query_row(
+            "SELECT COALESCE(MAX(local_sequence), 0) FROM outline_events
+             WHERE outline_id = ?1 AND julianday(created_at) < julianday(?2)",
+            params![checkpoint.outline_id, checkpoint.created_at],
+            |row| row.get(0),
+        )?;
+        if barrier < selected.local_sequence {
+            return Ok(None);
+        }
+
+        let next_envelope: Option<String> = connection
+            .query_row(
+                "SELECT envelope_json FROM outline_events
+                 WHERE outline_id = ?1 AND local_sequence > ?2 AND superseded_by IS NULL
+                 ORDER BY local_sequence LIMIT 1",
+                params![checkpoint.outline_id, barrier],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(next_envelope) = next_envelope else {
+            return Ok(None);
+        };
+        let next_event: Value = match serde_json::from_str(&next_envelope) {
+            Ok(event) => event,
+            Err(_) => return Ok(None),
+        };
+        let is_document_event = matches!(
+            next_event.get("type").and_then(Value::as_str),
+            Some("document.steps_applied" | "document.undo_applied" | "document.redo_applied")
+        );
+        let expected_before_hash = next_event
+            .pointer("/payload/beforeHash")
+            .and_then(Value::as_str);
+        let document_hash = format!(
+            "{:x}",
+            Sha256::digest(Self::canonical_json(document).as_bytes())
+        );
+        if !is_document_event || expected_before_hash != Some(document_hash.as_str()) {
+            return Ok(None);
+        }
+        Ok(Some(barrier))
+    }
+
+    fn canonical_json(value: &Value) -> String {
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                serde_json::to_string(value).expect("JSON scalar serialization cannot fail")
+            }
+            Value::Array(values) => format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(Self::canonical_json)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            Value::Object(values) => {
+                let mut entries = values.iter().collect::<Vec<_>>();
+                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                format!(
+                    "{{{}}}",
+                    entries
+                        .into_iter()
+                        .map(|(key, child)| format!(
+                            "{}:{}",
+                            serde_json::to_string(key)
+                                .expect("JSON object key serialization cannot fail"),
+                            Self::canonical_json(child)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
             }
         }
-        Ok(None)
     }
 
     pub fn checkpoint_hash(state_json: &str) -> String {

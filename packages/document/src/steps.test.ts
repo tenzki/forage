@@ -4,6 +4,7 @@ import {
   applySerializedSteps,
   captureStepBatch,
   createOutlineSchema,
+  createReplayOutlineSchema,
   documentChangeSteps,
   normalizeStableBulletIds,
   rebaseSerializedSteps,
@@ -34,6 +35,29 @@ describe('shared outline document', () => {
     const state = EditorState.create({ schema, doc: before })
     const after = state.apply(state.tr.insertText('remote', 3)).doc
     expect(applySerializedSteps(before, documentChangeSteps(before, after)).eq(after)).toBe(true)
+  })
+
+  it('falls back to a closed document replacement when a structural diff has inconsistent open depths', () => {
+    const schema = createReplayOutlineSchema(1)
+    const before = schema.nodeFromJSON({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: 'date' }, content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'August 14, 2026' }] },
+          { type: 'paragraph' },
+        ],
+      }] }],
+    })
+    const after = schema.nodeFromJSON({
+      type: 'doc', content: [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: 'date' }, content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'August 14, 2026' }] },
+        ],
+      }] }],
+    })
+
+    const steps = documentChangeSteps(before, after)
+
+    expect(applySerializedSteps(before, steps).eq(after)).toBe(true)
   })
   it('captures serializable forward and inverse steps from the same pre-change document', () => {
     const schema = createOutlineSchema()

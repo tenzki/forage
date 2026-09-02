@@ -49,7 +49,7 @@ import {
   SYSTEM_NODE_REJECTION_EVENT,
   SYSTEM_NODE_REJECTION_MESSAGE,
 } from './editor/systemNodeGuards'
-import { findSystemNode } from '@forage/document'
+import { createOutlineSchema, findSystemNode } from '@forage/document'
 import { focusFirstChildOrCreate } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
@@ -93,6 +93,7 @@ export default function App() {
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
@@ -194,11 +195,15 @@ export default function App() {
         activeIdentity.deviceId,
       )
       let state: OutlineState
+      let sealRecoveredCheckpoint = false
       if (replay) {
         state = replayOutlineEvents(replay.state, replay.events)
-        localSequence.current = replay.events.length > 0
-          ? replay.checkpoint.localSequence + replay.events.length
-          : replay.checkpoint.localSequence
+        localSequence.current = Math.max(
+          replay.checkpoint.localSequence,
+          ...allRecords.map((record) => record.localSequence),
+        )
+        sealRecoveredCheckpoint = mode === 'local'
+          && localSequence.current > replay.checkpoint.localSequence
         serverRevision.current = replay.checkpoint.serverRevision
       } else {
         state = createInitialOutlineState(normalizeOutlinerDoc(EMPTY_DOC) as Record<string, unknown>)
@@ -228,6 +233,21 @@ export default function App() {
         localSequence.current = await repository.current.append(systemNodeMigration.event)
         state = systemNodeMigration.state
         persistentHistory.current = { undo: [], redo: [] }
+        sealRecoveredCheckpoint = mode === 'local'
+      }
+      if (sealRecoveredCheckpoint) {
+        const stateJson = JSON.stringify(state)
+        await repository.current.saveCheckpoint({
+          id: crypto.randomUUID(),
+          outlineId: activeIdentity.outlineId,
+          documentVersion: 1,
+          schemaEpoch: state.schemaEpoch,
+          localSequence: localSequence.current,
+          serverRevision: serverRevision.current,
+          stateJson,
+          integrityHash: await sha256Hex(stateJson),
+          createdAt: new Date().toISOString(),
+        })
       }
       const doc = state.doc as JsonValue
       setInitialContent(doc)
@@ -268,8 +288,23 @@ export default function App() {
           if (disposed || engine.state.kind !== 'up-to-date' || !identity.current) return
           const replay = await repository.current.loadReplayInput(identity.current.outlineId)
           if (!replay) return
-          const projected = replayOutlineEvents(replay.state, replay.events)
+          let projected = replayOutlineEvents(replay.state, replay.events)
+          const normalizedDoc = normalizeOutlinerDoc(
+            projected.doc as JsonValue,
+            newNodeId,
+          ) as Record<string, unknown>
+          const synchronizedRepair = await buildDocumentRepairEvent(projected, normalizedDoc, {
+            ...identity.current,
+            baseRevision: engine.state.revision,
+            nextEventId: () => crypto.randomUUID(),
+          })
+          if (synchronizedRepair) {
+            localSequence.current = await repository.current.append(synchronizedRepair.event)
+            projected = synchronizedRepair.state
+            engine.historyInvalidated = true
+          }
           const nextDoc = projected.doc as JsonValue
+          createOutlineSchema().nodeFromJSON(nextDoc as object).check()
           const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
           if (documentChanged) {
             const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
@@ -327,29 +362,43 @@ export default function App() {
 
   const handleDocChange = useCallback((doc: JsonValue) => { liveDoc.current = doc }, [])
 
-  const persistEventNow = useCallback(async (event: EventEnvelope) => {
-    localSequence.current = await repository.current.append(event)
-    if (localSequence.current > 0 && localSequence.current % 100 === 0 && !checkpointInProgress.current) {
-      // A server-mode checkpoint may only contain acknowledged events. Including
-      // pending edits would make the pre-rebase document impossible to recover.
-      if (await repository.current.storageMode() === 'server') return
-      checkpointInProgress.current = true
-      try {
-        const replay = await repository.current.loadReplayInput(event.outlineId)
-        if (replay) {
-          const state = replayOutlineEvents(replay.state, replay.events)
-          const stateJson = JSON.stringify(state)
-          await repository.current.saveCheckpoint({
-            id: crypto.randomUUID(), outlineId: event.outlineId,
-            documentVersion: 1, schemaEpoch: state.schemaEpoch,
-            localSequence: localSequence.current,
-            serverRevision: Math.max(replay.checkpoint.serverRevision, ...replay.events.map((candidate) => candidate.revision ?? 0)),
-            stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
-          })
-        }
-      } finally { checkpointInProgress.current = false }
+  const refreshRecoveryCheckpoint = useCallback(async (outlineId: string) => {
+    // A server-mode checkpoint may only contain acknowledged events. Including
+    // pending edits would make the pre-rebase document impossible to recover.
+    if (await repository.current.storageMode() === 'server' || checkpointInProgress.current) return
+    checkpointInProgress.current = true
+    try {
+      const replay = await repository.current.loadReplayInput(outlineId)
+      if (!replay) return
+      const state = replayOutlineEvents(replay.state, replay.events)
+      const sequence = replay.latestLocalSequence ?? replay.checkpoint.localSequence
+      const stateJson = JSON.stringify(state)
+      await repository.current.saveCheckpoint({
+        id: crypto.randomUUID(), outlineId,
+        documentVersion: 1, schemaEpoch: state.schemaEpoch,
+        localSequence: sequence,
+        serverRevision: Math.max(
+          replay.checkpoint.serverRevision,
+          ...replay.events.map((candidate) => candidate.revision ?? 0),
+        ),
+        stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
+      })
+    } finally {
+      checkpointInProgress.current = false
     }
   }, [])
+
+  const persistEventNow = useCallback(async (event: EventEnvelope) => {
+    localSequence.current = await repository.current.append(event)
+    if (localSequence.current > 0 && localSequence.current % 100 === 0) {
+      try {
+        await refreshRecoveryCheckpoint(event.outlineId)
+        setMaintenanceError(null)
+      } catch (error) {
+        setMaintenanceError(errorMessage(error))
+      }
+    }
+  }, [refreshRecoveryCheckpoint])
 
   const enqueueOperation = useCallback((operation: () => Promise<void>) => {
     appendQueue.current = appendQueue.current.then(async () => {
@@ -492,15 +541,31 @@ export default function App() {
     await retryOperation
   }
 
+  async function retryCheckpoint() {
+    if (!identity.current) return
+    const outlineId = identity.current.outlineId
+    const retry = appendQueue.current.then(() => refreshRecoveryCheckpoint(outlineId))
+    appendQueue.current = retry.catch(() => undefined)
+    try {
+      await retry
+      setMaintenanceError(null)
+    } catch (error) {
+      setMaintenanceError(errorMessage(error))
+    }
+  }
+
   async function startEmpty() {
     const currentIdentity = identity.current ?? await repository.current.identity()
     identity.current = currentIdentity
+    const existingRecords = await repository.current.eventsAfter(currentIdentity.outlineId, 0) ?? []
+    const resetSequence = Math.max(0, ...existingRecords.map((record) => record.localSequence))
+    localSequence.current = resetSequence
     const doc = normalizeOutlinerDoc(EMPTY_DOC)
     const state = createInitialOutlineState(doc as Record<string, unknown>)
     const stateJson = JSON.stringify(state)
     await repository.current.saveCheckpoint({
       id: crypto.randomUUID(), outlineId: currentIdentity.outlineId,
-      documentVersion: 1, schemaEpoch: 1, localSequence: 0, serverRevision: 0,
+      documentVersion: 1, schemaEpoch: 1, localSequence: resetSequence, serverRevision: 0,
       stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
     })
     setInitialContent(doc)
@@ -564,6 +629,13 @@ export default function App() {
           <span><strong>Outline not saved.</strong> {saveError}</span>
           <button onClick={() => void retrySave()}>Retry</button>
           <button onClick={() => setSaveError(null)}>Dismiss</button>
+        </div>
+      )}
+      {maintenanceError && (
+        <div className="persistence-warning" role="alert">
+          <span><strong>Outline saved, but its recovery checkpoint could not be refreshed.</strong> {maintenanceError}</span>
+          <button onClick={() => void retryCheckpoint()}>Retry checkpoint</button>
+          <button onClick={() => setMaintenanceError(null)}>Dismiss</button>
         </div>
       )}
       <div

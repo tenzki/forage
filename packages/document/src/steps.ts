@@ -1,4 +1,4 @@
-import type { Node as ProseMirrorNode, Schema } from '@tiptap/pm/model'
+import { Slice, type Node as ProseMirrorNode, type Schema } from '@tiptap/pm/model'
 import { ReplaceStep, Step, Transform } from '@tiptap/pm/transform'
 
 export type SerializedStep = Record<string, unknown>
@@ -56,11 +56,18 @@ export function documentChangeSteps(
   const end = before.content.findDiffEnd(after.content)
   if (!end) return []
   const step = new ReplaceStep(start, end.a, after.slice(start, end.b))
-  const result = step.apply(before)
-  if (result.failed || !result.doc?.eq(after)) {
-    throw new Error(`Cannot derive a safe document change step: ${result.failed ?? 'result differs'}`)
+  const serialized = step.toJSON() as SerializedStep
+  try {
+    if (applySerializedSteps(before, [serialized]).eq(after)) return [serialized]
+  } catch {
+    // Some structural slices only retain their open depths in memory. A
+    // serialized migration must instead use a closed document replacement.
   }
-  return [step.toJSON() as SerializedStep]
+  const replacement = new ReplaceStep(0, before.content.size, new Slice(after.content, 0, 0))
+  const replacementJson = replacement.toJSON() as SerializedStep
+  const result = applySerializedSteps(before, [replacementJson])
+  if (!result.eq(after)) throw new Error('Cannot derive a safe document change step: result differs')
+  return [replacementJson]
 }
 
 /** Rebase unaccepted local steps over accepted remote steps using ProseMirror mappings. */

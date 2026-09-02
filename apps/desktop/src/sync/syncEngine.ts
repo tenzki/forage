@@ -10,7 +10,7 @@ import {
 } from '@forage/domain'
 import {
   captureStepBatch,
-  createOutlineSchema,
+  createReplayOutlineSchema,
   documentChangeSteps,
   repairSystemNodes,
   rebaseSerializedSteps,
@@ -252,7 +252,7 @@ export class DesktopSyncEngine {
         })
         return replacementBase
       }
-      const schema = createOutlineSchema()
+      const schema = createReplayOutlineSchema(originalState.schemaEpoch)
       const originalDocument = schema.nodeFromJSON(originalState.doc)
       const remoteDocument = schema.nodeFromJSON(rebasedState.doc)
       let rebasingEvent: EventEnvelope

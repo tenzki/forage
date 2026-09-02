@@ -214,6 +214,175 @@ fn skips_a_corrupted_newest_checkpoint_and_uses_the_latest_verified_compatible_o
 }
 
 #[test]
+fn upcasts_a_legacy_zero_sequence_reset_checkpoint_to_its_event_barrier() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    let mut first = event("event-1", 0);
+    first.created_at = "2026-08-30T12:00:00.000Z".to_string();
+    let mut second = event("event-2", 0);
+    second.created_at = "2026-08-30T12:01:00.000Z".to_string();
+    let mut after_reset = event("event-3", 0);
+    after_reset.created_at = "2026-08-30T12:03:00.000Z".to_string();
+    after_reset.envelope = json!({
+        "type": "document.steps_applied",
+        "payload": {
+            "beforeHash": EventStore::checkpoint_hash("{\"type\":\"doc\"}")
+        }
+    });
+    store.append(&first).expect("append first");
+    store.append(&second).expect("append second");
+    store.append(&after_reset).expect("append after reset");
+
+    let old = CheckpointRecord {
+        id: "checkpoint-old".to_string(),
+        outline_id: "outline-1".to_string(),
+        document_version: 1,
+        schema_epoch: 1,
+        local_sequence: 2,
+        server_revision: 0,
+        state_json: "{\"doc\":\"old\"}".to_string(),
+        integrity_hash: EventStore::checkpoint_hash("{\"doc\":\"old\"}"),
+        created_at: "2026-08-30T12:01:30.000Z".to_string(),
+    };
+    let reset = CheckpointRecord {
+        id: "checkpoint-reset".to_string(),
+        local_sequence: 0,
+        state_json: "{\"doc\":{\"type\":\"doc\"},\"trash\":[],\"shortcuts\":[],\"schemaEpoch\":1}"
+            .to_string(),
+        integrity_hash: EventStore::checkpoint_hash(
+            "{\"doc\":{\"type\":\"doc\"},\"trash\":[],\"shortcuts\":[],\"schemaEpoch\":1}",
+        ),
+        created_at: "2026-08-30T12:02:00.000Z".to_string(),
+        ..old.clone()
+    };
+    store.save_checkpoint(&old).expect("old checkpoint");
+    store
+        .save_checkpoint(&reset)
+        .expect("legacy reset checkpoint");
+
+    let selected = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("select checkpoint")
+        .expect("checkpoint exists");
+
+    assert_eq!(selected.id, "checkpoint-reset");
+    assert_eq!(selected.local_sequence, 2);
+    assert_eq!(
+        store
+            .events_after_sequence("outline-1", selected.local_sequence)
+            .expect("events after reset")
+            .iter()
+            .map(|stored| stored.id.as_str())
+            .collect::<Vec<_>>(),
+        ["event-3"]
+    );
+}
+
+#[test]
+fn does_not_infer_a_legacy_reset_barrier_without_a_matching_next_document_event() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    let mut before_reset = event("event-before", 0);
+    before_reset.created_at = "2026-08-30T12:00:00.000Z".to_string();
+    let mut ambiguous = event("event-ambiguous", 0);
+    ambiguous.created_at = "2026-08-30T12:03:00.000Z".to_string();
+    ambiguous.envelope = json!({ "type": "shortcut.created", "payload": {} });
+    store.append(&before_reset).expect("append before reset");
+    store.append(&ambiguous).expect("append ambiguous event");
+
+    let old = CheckpointRecord {
+        id: "checkpoint-old".to_string(),
+        outline_id: "outline-1".to_string(),
+        document_version: 1,
+        schema_epoch: 1,
+        local_sequence: 1,
+        server_revision: 0,
+        state_json: "{\"doc\":\"old\"}".to_string(),
+        integrity_hash: EventStore::checkpoint_hash("{\"doc\":\"old\"}"),
+        created_at: "2026-08-30T12:01:00.000Z".to_string(),
+    };
+    let reset_state =
+        "{\"doc\":{\"type\":\"doc\"},\"trash\":[],\"shortcuts\":[],\"schemaEpoch\":1}";
+    let reset = CheckpointRecord {
+        id: "checkpoint-reset".to_string(),
+        local_sequence: 0,
+        state_json: reset_state.to_string(),
+        integrity_hash: EventStore::checkpoint_hash(reset_state),
+        created_at: "2026-08-30T12:02:00.000Z".to_string(),
+        ..old.clone()
+    };
+    store.save_checkpoint(&old).expect("old checkpoint");
+    store.save_checkpoint(&reset).expect("reset checkpoint");
+
+    let selected = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("select checkpoint")
+        .expect("checkpoint exists");
+
+    assert_eq!(selected.id, "checkpoint-old");
+    assert_eq!(selected.local_sequence, 1);
+}
+
+#[test]
+fn does_not_fall_back_to_an_older_reset_when_the_newest_reset_is_ambiguous() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    let mut before_reset = event("event-before", 0);
+    before_reset.created_at = "2026-08-30T12:00:00.000Z".to_string();
+    let mut after_first_reset = event("event-after-first-reset", 0);
+    after_first_reset.created_at = "2026-08-30T12:03:00.000Z".to_string();
+    after_first_reset.envelope = json!({
+        "type": "document.steps_applied",
+        "payload": {
+            "beforeHash": EventStore::checkpoint_hash("{\"reset\":1,\"type\":\"doc\"}")
+        }
+    });
+    store.append(&before_reset).expect("append before reset");
+    store
+        .append(&after_first_reset)
+        .expect("append after first reset");
+
+    let old = CheckpointRecord {
+        id: "checkpoint-old".to_string(),
+        outline_id: "outline-1".to_string(),
+        document_version: 1,
+        schema_epoch: 1,
+        local_sequence: 1,
+        server_revision: 0,
+        state_json: "{\"doc\":\"old\"}".to_string(),
+        integrity_hash: EventStore::checkpoint_hash("{\"doc\":\"old\"}"),
+        created_at: "2026-08-30T12:01:00.000Z".to_string(),
+    };
+    let first_state =
+        "{\"doc\":{\"type\":\"doc\",\"reset\":1},\"trash\":[],\"shortcuts\":[],\"schemaEpoch\":1}";
+    let first_reset = CheckpointRecord {
+        id: "checkpoint-reset-1".to_string(),
+        local_sequence: 0,
+        state_json: first_state.to_string(),
+        integrity_hash: EventStore::checkpoint_hash(first_state),
+        created_at: "2026-08-30T12:02:00.000Z".to_string(),
+        ..old.clone()
+    };
+    let newest_state =
+        "{\"doc\":{\"type\":\"doc\",\"reset\":2},\"trash\":[],\"shortcuts\":[],\"schemaEpoch\":1}";
+    let newest_reset = CheckpointRecord {
+        id: "checkpoint-reset-2".to_string(),
+        state_json: newest_state.to_string(),
+        integrity_hash: EventStore::checkpoint_hash(newest_state),
+        created_at: "2026-08-30T12:04:00.000Z".to_string(),
+        ..first_reset.clone()
+    };
+    store.save_checkpoint(&old).expect("old checkpoint");
+    store.save_checkpoint(&first_reset).expect("first reset");
+    store.save_checkpoint(&newest_reset).expect("newest reset");
+
+    let selected = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("select checkpoint")
+        .expect("checkpoint exists");
+
+    assert_eq!(selected.id, "checkpoint-old");
+    assert_eq!(selected.local_sequence, 1);
+}
+
+#[test]
 fn persists_explicit_local_or_server_mode() {
     let store = EventStore::open_in_memory().expect("open event store");
     assert_eq!(

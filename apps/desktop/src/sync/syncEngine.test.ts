@@ -6,6 +6,7 @@ import { EditorState } from '@tiptap/pm/state'
 import {
   captureStepBatch,
   createOutlineSchema,
+  createReplayOutlineSchema,
   deserializeStep,
   documentChangeSteps,
   repairSystemNodes,
@@ -594,5 +595,109 @@ describe('desktop synchronization state machine', () => {
     expect(replayedDocument.childCount).toBe(1)
     expect(replayedDocument.textContent).toContain('InboxR')
     expect(replayedDocument.textContent).toContain('Nikola B!')
+  })
+
+  it('rebases a legacy batch whose intermediate list-item shape is invalid under the current editor schema', async () => {
+    const repo = repository('server')
+    const schema = createReplayOutlineSchema(1)
+    const state: OutlineState = {
+      doc: {
+        type: 'doc', content: [{ type: 'bulletList', content: [
+          {
+            type: 'listItem', attrs: { nodeId: 'inbox' },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+          },
+          {
+            type: 'listItem', attrs: { nodeId: 'daily', systemRole: 'daily-notes' },
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Daily Notes' }] },
+              { type: 'bulletList', content: [{
+                type: 'listItem', attrs: {
+                  nodeId: 'date', systemRole: 'daily-note', dailyDate: '2026-08-14',
+                },
+                content: [
+                  { type: 'paragraph', content: [{ type: 'text', text: 'August 14, 2026' }] },
+                  { type: 'bulletList', content: [{
+                    type: 'listItem', attrs: { nodeId: 'child' }, content: [{ type: 'paragraph' }],
+                  }] },
+                ],
+              }] },
+            ],
+          },
+        ] }],
+      },
+      trash: [], shortcuts: [], schemaEpoch: 1,
+    }
+    const base = schema.nodeFromJSON(state.doc)
+    let datePos = -1
+    let childTitle = -1
+    let inboxEnd = -1
+    base.descendants((node, pos) => {
+      if (node.type.name !== 'listItem') return
+      if (node.attrs.nodeId === 'date') datePos = pos
+      if (node.attrs.nodeId === 'child') childTitle = pos + 2
+      if (node.attrs.nodeId === 'inbox') inboxEnd = pos + 2 + node.firstChild!.content.size
+    })
+    const temporaryParagraphPos = datePos + 1 + base.nodeAt(datePos)!.firstChild!.nodeSize
+    const localTransaction = EditorState.create({ schema, doc: base }).tr
+      .insert(temporaryParagraphPos, schema.nodes.paragraph.create())
+      .delete(temporaryParagraphPos, temporaryParagraphPos + 2)
+      .insertText('L', childTitle)
+    const remoteTransaction = EditorState.create({ schema, doc: base }).tr.insertText('R', inboxEnd)
+    const documentEvent = (
+      id: string,
+      transaction: typeof localTransaction,
+      origin: EventEnvelope['origin'],
+      revision?: number,
+    ): EventEnvelope => ({
+      id, outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1',
+      type: 'document.steps_applied', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+      baseRevision: 0, revision, origin, occurredAt: '2026-08-30T12:00:00.000Z',
+      payload: {
+        ...captureStepBatch(base, transaction.steps),
+        beforeHash: sha256HexSync(canonicalJson(base.toJSON())),
+        afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
+      },
+    })
+    const local = documentEvent('local-legacy', localTransaction, 'desktop')
+    const remote = documentEvent('remote-edit', remoteTransaction, 'server', 1)
+    repo.loadReplayInput = async () => ({
+      checkpoint: { id: 'checkpoint-local', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, localSequence: 0, serverRevision: 0, stateJson: JSON.stringify(state),
+        integrityHash: 'a'.repeat(64), createdAt: '2026-08-30T12:00:00.000Z' },
+      state, events: [],
+    })
+    repo.pending = async () => [{
+      localSequence: 1, id: local.id, outlineId: local.outlineId, baseRevision: 0,
+      serverRevision: null, envelope: local, status: 'pending', supersededBy: null,
+      createdAt: local.occurredAt,
+    }]
+    let pushes = 0
+    let replacements: EventEnvelope[] = []
+    const transport: SyncTransport = {
+      status: async () => ({ ...status, eventVersions: { 'document.steps_applied': [1] } }),
+      checkpoint: async () => ({ checkpoint: { id: 'checkpoint', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, revision: 0, integrityHash: await sha256Hex(canonicalJson(state)), state } }),
+      pull: async () => ({ events: [remote], currentRevision: 1, nextAfterRevision: null }),
+      push: async (_base, events) => {
+        pushes += 1
+        if (pushes === 1) return { status: 'rebase_required', currentRevision: 1, pullAfterRevision: 0 }
+        replacements = events
+        return {
+          status: 'accepted', currentRevision: 2,
+          acknowledgements: events.map((event) => ({ eventId: event.id, revision: 2 })),
+        }
+      },
+    }
+
+    const engine = new DesktopSyncEngine(repo, transport)
+    await engine.sync()
+
+    expect(engine.state.kind).toBe('up-to-date')
+    const replayed = replayOutlineEvents(state, [remote, ...replacements])
+    const document = createOutlineSchema().nodeFromJSON(replayed.doc)
+    document.check()
+    expect(document.textContent).toContain('InboxR')
+    expect(document.textContent).toContain('L')
   })
 })

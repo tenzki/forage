@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createOutlineSchema } from '../../document/src'
-import { buildSystemNodeRepairEvent } from './systemNodeMigration'
+import { buildDocumentRepairEvent, buildSystemNodeRepairEvent } from './systemNodeMigration'
 import { createInitialOutlineState, reduceOutlineEvent } from './reducer'
 
 const legacyDoc = {
@@ -97,5 +97,47 @@ describe('system-node event migration', () => {
     })
 
     expect(result).toBeNull()
+  })
+
+  it('builds a strict repair from a legacy list item with a second paragraph', async () => {
+    const state = createInitialOutlineState({
+      type: 'doc', content: [{ type: 'bulletList', content: [
+        {
+          type: 'listItem', attrs: { nodeId: 'inbox', systemRole: 'inbox' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+        },
+        {
+          type: 'listItem', attrs: { nodeId: 'daily', systemRole: 'daily-notes' },
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Daily Notes' }] },
+            { type: 'bulletList', content: [{
+              type: 'listItem', attrs: {
+                nodeId: 'date', systemRole: 'daily-note', dailyDate: '2026-08-14',
+              },
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'August 14, 2026' }] },
+                { type: 'paragraph' },
+              ],
+            }] },
+          ],
+        },
+      ] }],
+    })
+    const repaired = structuredClone(state.doc)
+    const rootList = (repaired.content as Array<Record<string, unknown>>)[0]
+    const daily = (rootList.content as Array<Record<string, unknown>>)[1]
+    const childList = (daily.content as Array<Record<string, unknown>>)[1]
+    const item = (childList.content as Array<Record<string, unknown>>)[0]
+    item.content = (item.content as unknown[]).slice(0, 1)
+
+    const migration = await buildDocumentRepairEvent(state, repaired, {
+      outlineId: 'outline', actorId: 'owner', deviceId: 'device', baseRevision: 4,
+      nextEventId: () => 'migration-event', now: () => '2026-08-30T12:00:00.000Z',
+    })
+
+    const canonicalRepair = createOutlineSchema().nodeFromJSON(repaired).toJSON()
+    expect(migration?.state.doc).toEqual(canonicalRepair)
+    expect(reduceOutlineEvent(state, migration!.event).doc).toEqual(canonicalRepair)
+    expect(() => createOutlineSchema().nodeFromJSON(repaired).check()).not.toThrow()
   })
 })
