@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { BulletAttributes, OutlinerKeymap, setEditorMutationLocked } from './extensions'
 import { BulletNote, focusOrCreateBulletNote, hasBulletNote } from './bulletNote'
 import { openOrCreateDailyNote } from './dailyNotes'
@@ -20,12 +22,15 @@ import {
   updateBulletText,
 } from './outlineModel'
 import {
+  getOutlinerUiState,
   OutlinerUi,
   setAgentActivity,
   setHideCompleted,
   setZoom,
   toggleCollapsed,
 } from './outlinerUi'
+
+const desktopStyles = readFileSync(resolve(process.cwd(), 'apps/desktop/src/style.css'), 'utf8')
 
 function item(id: string, text: string, children: object[] = []) {
   return {
@@ -920,6 +925,71 @@ describe('Workflowy-style outline interactions', () => {
     const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')
     expect(alpha?.node.attrs.collapsed).toBe(true)
     expect(collectBullets(editor.state.doc).some((entry) => entry.id === 'alpha-child')).toBe(true)
+  })
+
+  it('renders a collapse control when a leaf gains its first child', () => {
+    const rowBefore = editor.view.dom.querySelector('[data-node-id="bravo"]')
+    expect(rowBefore?.querySelector(':scope > .bullet-controls .bullet-collapse')).toBeNull()
+
+    const bravo = collectBullets(editor.state.doc).find((entry) => entry.id === 'bravo')!
+    const child = editor.schema.nodes.listItem.create(
+      { nodeId: 'bravo-child', nodeType: 'ai' },
+      editor.schema.nodes.paragraph.create(null, editor.schema.text('Generated child')),
+    )
+    const childList = editor.schema.nodes.bulletList.create(null, child)
+    editor.view.dispatch(editor.state.tr.insert(bravo.pos + bravo.node.nodeSize - 1, childList))
+
+    const rowAfter = editor.view.dom.querySelector('[data-node-id="bravo"]')
+    expect(rowAfter?.querySelector(':scope > .bullet-controls .bullet-collapse')).toBeTruthy()
+  })
+
+  it('reserves enough left space to show the menu for top-level bullets', () => {
+    expect(desktopStyles).toContain('padding-left: var(--outline-control-width);')
+  })
+
+  it('shows a collapsed branch after its bullet is clicked to zoom', async () => {
+    const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(alpha.pos, undefined, {
+      ...alpha.node.attrs,
+      collapsed: true,
+    }))
+    const styles = document.createElement('style')
+    styles.textContent = desktopStyles
+    document.head.append(styles)
+    const host = document.createElement('div')
+    host.className = 'outliner-editor'
+    host.append(editor.view.dom)
+    document.body.append(host)
+    const row = editor.view.dom.querySelector<HTMLElement>('[data-node-id="alpha"]')!
+    const childList = row.querySelector<HTMLElement>(':scope > ul')!
+    const dot = editor.view.dom.querySelector<HTMLButtonElement>('[data-node-id="alpha"] > .bullet-controls .bullet-dot')!
+    try {
+      expect(row.classList.contains('is-collapsed')).toBe(true)
+      expect(getComputedStyle(childList).display).toBe('none')
+
+      dot.dispatchEvent(new MouseEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+      }))
+      document.dispatchEvent(new MouseEvent('pointerup', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+      }))
+
+      expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
+      expect(row.classList.contains('zoom-root')).toBe(true)
+      expect(row.classList.contains('is-collapsed')).toBe(false)
+      expect(getComputedStyle(childList).display).not.toBe('none')
+    } finally {
+      host.remove()
+      styles.remove()
+    }
   })
 
   it('hoists a branch while retaining the single document', () => {

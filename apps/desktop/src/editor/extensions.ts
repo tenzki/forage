@@ -9,10 +9,16 @@
 //   - OutlinerKeymap: Tab / Shift-Tab to nest / un-nest, Workflowy-style.
 
 import { Extension, type Editor } from '@tiptap/core'
-import { Fragment, Slice } from '@tiptap/pm/model'
+import { Fragment, Slice, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { newNodeId } from '../types/tree'
-import { collectBullets, currentBulletId, moveCurrentBullet, toggleCurrentBulletCompleted } from './outlineModel'
+import {
+  collectBullets,
+  currentBulletId,
+  moveCurrentBullet,
+  toggleCurrentBulletCompleted,
+  type BulletEntry,
+} from './outlineModel'
 import { StableBulletAttributes } from '@forage/document'
 import {
   SYSTEM_NODE_TRASH_META,
@@ -162,6 +168,87 @@ function removeEmptySystemChild(editor: Editor): boolean {
   return true
 }
 
+function bulletHasChildren(node: ProseMirrorNode): boolean {
+  for (let index = 0; index < node.childCount; index += 1) {
+    if (node.child(index).type.name === 'bulletList') return true
+  }
+  return false
+}
+
+/**
+ * The bullet rendered directly above `entries[index]`: the previous sibling's
+ * deepest visible descendant, else the previous sibling, else the parent.
+ * Bullets inside a collapsed branch are skipped — they are not on screen.
+ */
+function previousVisibleBullet(entries: BulletEntry[], index: number): BulletEntry | null {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]))
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = entries[cursor]
+    const hidden = candidate.ancestorIds.some((id) => byId.get(id)?.node.attrs.collapsed)
+    if (!hidden) return candidate
+  }
+  return null
+}
+
+/** Delete the bullet, taking its wrapping bulletList with it when it is the only child. */
+function bulletRemovalRange(editor: Editor, entry: BulletEntry): { from: number; to: number } {
+  const list = editor.state.doc.nodeAt(entry.parentListPos)
+  const isOnlyChild = list?.type === editor.state.schema.nodes.bulletList && list.childCount === 1
+  return isOnlyChild
+    ? { from: entry.parentListPos, to: entry.parentListPos + list.nodeSize }
+    : { from: entry.pos, to: entry.pos + entry.node.nodeSize }
+}
+
+/**
+ * Backspace at the very start of a bullet (BSP-01..BSP-05 in
+ * docs/outline-structure-rules.md). Backspace removes or merges a bullet; it
+ * never changes a bullet's depth, which is what ProseMirror's default list
+ * joinBackward does. Returning true swallows the key so the default cannot run.
+ */
+function handleStructuralBackspace(editor: Editor): boolean {
+  const { state, view } = editor
+  const { $from, empty } = state.selection
+  // BSP-08: a text selection is deleted by the default handler, never a bullet.
+  if (!empty) return false
+  if ($from.parent.type !== state.schema.nodes.paragraph || $from.parentOffset !== 0) return false
+
+  const entries = collectBullets(state.doc)
+  const currentId = currentBulletId(editor)
+  const index = entries.findIndex((entry) => entry.id === currentId)
+  const entry = entries[index]
+  if (!entry) return false
+  // BSP-07 / BSP-02 / BSP-04: never delete a system node, a bullet with
+  // children, or a bullet whose note would silently disappear with it.
+  if (entry.systemRole || entry.noteText || bulletHasChildren(entry.node)) return true
+
+  const previous = previousVisibleBullet(entries, index)
+  // BSP-05: nothing above to merge into.
+  if (!previous) return true
+
+  const transaction = state.tr
+  const range = bulletRemovalRange(editor, entry)
+  if (entry.text) {
+    // BSP-03: merge upward only into a plain, childless bullet. A parent, a
+    // collapsed branch, or a system title keeps its shape instead.
+    if (previous.systemRole || previous.noteText || bulletHasChildren(previous.node)) return true
+    const joinAt = previous.pos + 2 + (previous.node.firstChild?.content.size ?? 0)
+    transaction.delete(range.from, range.to)
+    transaction.insert(joinAt, entry.node.firstChild?.content ?? Fragment.empty)
+    transaction.setSelection(TextSelection.create(transaction.doc, joinAt))
+  } else {
+    // BSP-01: delete the empty bullet and land at the end of the bullet above.
+    transaction.delete(range.from, range.to)
+    const landing = collectBullets(transaction.doc).find((item) => item.id === previous.id)
+    if (!landing) return true
+    transaction.setSelection(TextSelection.create(
+      transaction.doc,
+      landing.pos + 2 + (landing.node.firstChild?.content.size ?? 0),
+    ))
+  }
+  view.dispatch(transaction.scrollIntoView())
+  return true
+}
+
 function freshBullet(editor: Editor, paragraph = editor.state.schema.nodes.paragraph.create()) {
   return editor.state.schema.nodes.listItem.create({
     nodeId: newNodeId(),
@@ -249,7 +336,9 @@ export const OutlinerKeymap = Extension.create({
 
   addKeyboardShortcuts() {
     return {
-      Backspace: () => removeEmptySystemChild(this.editor) || preserveEmptyOutline(this.editor),
+      Backspace: () => removeEmptySystemChild(this.editor)
+        || preserveEmptyOutline(this.editor)
+        || handleStructuralBackspace(this.editor),
       Delete: () => preserveEmptyOutline(this.editor),
       Enter: () => {
         if (getEmptySystemChild(this.editor)) return true

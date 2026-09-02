@@ -496,6 +496,7 @@ body {
   max-width: 760px;
   margin: 0 auto;
   padding: 20px 32px 24px;
+  padding-left: var(--outline-control-width);
 }
 
 .outliner-editor .ProseMirror {

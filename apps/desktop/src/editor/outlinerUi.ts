@@ -274,11 +274,13 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
       }
       const targetId = state.targetId
       const placement = state.placement
-      if (state.started) button.dataset.suppressZoom = 'true'
+      const shouldZoom = !state.started && !cancelled
+      if (state.started || shouldZoom) button.dataset.suppressZoom = 'true'
       clearPointerDrag(state, button)
       document.removeEventListener('pointermove', move)
       document.removeEventListener('pointerup', finish)
       document.removeEventListener('pointercancel', cancel)
+      if (shouldZoom) setZoom(editor, nodeId)
       if (state.started && !cancelled && targetId) reorderBullet(editor, nodeId, targetId, placement)
       window.setTimeout(() => delete button.dataset.suppressZoom, 0)
     }
@@ -402,7 +404,7 @@ function nodeClasses(
   ui: OutlinerUiState,
 ): string[] {
   const classes: string[] = []
-  if (entry.node.attrs.collapsed) classes.push('is-collapsed')
+  if (entry.node.attrs.collapsed && entry.id !== ui.zoomId) classes.push('is-collapsed')
   if (entry.bulletKind === 'todo') classes.push('is-todo')
   if (entry.completed) classes.push('is-completed')
   if (!ui.zoomId) return classes
@@ -544,7 +546,7 @@ function buildDecorations(editor: Editor): DecorationSet {
     }
     decorations.push(
       Decoration.widget(entry.pos + 1, () => createControls(editor, entry.node), {
-        key: `controls-${entry.id}-${Boolean(entry.node.attrs.collapsed)}`,
+        key: `controls-${entry.id}-${Boolean(entry.node.attrs.collapsed)}-${hasChildList(entry.node)}`,
         side: -1,
       }),
     )
