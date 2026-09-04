@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/react'
 import type { Transaction } from '@tiptap/pm/state'
 import { OutlinerEditor } from './editor/OutlinerEditor'
@@ -15,32 +15,16 @@ import { TagMenu } from './components/Outliner/TagMenu'
 import { ActivitySidebar, type ActivityCall, type ActivityEntry } from './components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './agent/activity'
 import {
-  NativeEventRepository,
-  type LocalIdentity,
-} from './persistence/eventStore'
-import {
   captureDocumentEvent,
   DOMAIN_MUTATION_META,
-  finalizeDocumentEvent,
 } from './editor/eventCapture'
 import {
   dispatchPersistentRedo,
   dispatchPersistentUndo,
-  rebuildPersistentHistory,
   recordDocumentChange,
   type PersistentHistoryState,
 } from './editor/persistentHistory'
-import { createAssetReferenceEvents, createDomainEvents } from './persistence/domainEvents'
-import { DesktopSyncEngine, NativeSyncTransport, type SyncState } from './sync/syncEngine'
-import { EMPTY_DOC, normalizeOutlinerDoc } from './editor/emptyDoc'
-import {
-  createInitialOutlineState,
-  buildDocumentRepairEvent,
-  replayOutlineEvents,
-  sha256Hex,
-  type EventEnvelope,
-  type OutlineState,
-} from '@forage/domain'
+import { createDomainEvents } from './persistence/domainEvents'
 import { useSettingsStore } from './store/settingsStore'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 import { newNodeId } from './types/tree'
@@ -54,9 +38,9 @@ import { focusFirstChildOrCreate } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
+import { OutlineSession } from './application/OutlineSession'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
-type StorageBackend = { kind: 'local' } | { kind: 'server'; origin: string }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -92,27 +76,17 @@ export default function App() {
   const [view, setView] = useState<View>('outliner')
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [maintenanceError, setMaintenanceError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
-  const [syncState, setSyncState] = useState<SyncState>({ kind: 'offline' })
-  const [storageBackend, setStorageBackend] = useState<StorageBackend>({ kind: 'local' })
   const loadSettings = useSettingsStore((state) => state.load)
-  const repository = useRef(new NativeEventRepository())
-  const identity = useRef<LocalIdentity | null>(null)
-  const localSequence = useRef(0)
-  const serverRevision = useRef(0)
-  const appendQueue = useRef<Promise<void>>(Promise.resolve())
-  const failedOperations = useRef<Array<() => Promise<void>>>([])
-  const persistenceBlocked = useRef(false)
+  const [session] = useState(() => new OutlineSession())
+  const sessionStatus = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const persistentHistory = useRef<PersistentHistoryState>({ undo: [], redo: [] })
   const activeChangeGroup = useRef<{ id: string; at: number; key: string } | null>(null)
   const activeAgentCalls = useRef(new Set<string>())
   const syncInProgress = useRef(false)
-  const checkpointInProgress = useRef(false)
 
   const handleActivity = useCallback((event: ActivityEvent) => {
     if (!event.callId) {
@@ -170,86 +144,9 @@ export default function App() {
   const readOutline = useCallback(async () => {
     setLoadError(null)
     try {
-      await repository.current.interruptUnfinishedAgentRuns(new Date().toISOString())
-      const mode = await repository.current.storageMode()
-      if (mode === 'server') {
-        await new DesktopSyncEngine(repository.current, new NativeSyncTransport(), (state) => {
-          setSyncState(state)
-          if (state.kind === 'up-to-date') serverRevision.current = state.revision
-        }).sync()
-      } else {
-        setSyncState({ kind: 'local-only' })
-      }
-      const localIdentity = await repository.current.identity()
-      const connection = mode === 'server' ? await repository.current.serverConnection() : null
-      setStorageBackend(connection
-        ? { kind: 'server', origin: connection.origin }
-        : { kind: 'local' })
-      const activeIdentity = connection ? { ...localIdentity, outlineId: connection.outlineId } : localIdentity
-      identity.current = activeIdentity
-      const replay = await repository.current.loadReplayInput(activeIdentity.outlineId)
-      const allRecords = await repository.current.eventsAfter(activeIdentity.outlineId, 0) ?? []
-      persistentHistory.current = rebuildPersistentHistory(
-        allRecords
-          .filter((record) => !record.supersededBy)
-          .map((record) => record.envelope as EventEnvelope),
-        activeIdentity.deviceId,
-      )
-      let state: OutlineState
-      let sealRecoveredCheckpoint = false
-      if (replay) {
-        state = replayOutlineEvents(replay.state, replay.events)
-        localSequence.current = Math.max(
-          replay.checkpoint.localSequence,
-          ...allRecords.map((record) => record.localSequence),
-        )
-        sealRecoveredCheckpoint = mode === 'local'
-          && localSequence.current > replay.checkpoint.localSequence
-        serverRevision.current = replay.checkpoint.serverRevision
-      } else {
-        state = createInitialOutlineState(normalizeOutlinerDoc(EMPTY_DOC) as Record<string, unknown>)
-        const stateJson = JSON.stringify(state)
-        await repository.current.saveCheckpoint({
-          id: crypto.randomUUID(),
-          outlineId: activeIdentity.outlineId,
-          documentVersion: 1,
-          schemaEpoch: 1,
-          localSequence: 0,
-          serverRevision: 0,
-          stateJson,
-          integrityHash: await sha256Hex(stateJson),
-          createdAt: new Date().toISOString(),
-        })
-      }
-      const normalizedDoc = normalizeOutlinerDoc(
-        state.doc as JsonValue,
-        () => crypto.randomUUID(),
-      ) as Record<string, unknown>
-      const systemNodeMigration = await buildDocumentRepairEvent(state, normalizedDoc, {
-        ...activeIdentity,
-        baseRevision: serverRevision.current,
-        nextEventId: () => crypto.randomUUID(),
-      })
-      if (systemNodeMigration) {
-        localSequence.current = await repository.current.append(systemNodeMigration.event)
-        state = systemNodeMigration.state
-        persistentHistory.current = { undo: [], redo: [] }
-        sealRecoveredCheckpoint = mode === 'local'
-      }
-      if (sealRecoveredCheckpoint) {
-        const stateJson = JSON.stringify(state)
-        await repository.current.saveCheckpoint({
-          id: crypto.randomUUID(),
-          outlineId: activeIdentity.outlineId,
-          documentVersion: 1,
-          schemaEpoch: state.schemaEpoch,
-          localSequence: localSequence.current,
-          serverRevision: serverRevision.current,
-          stateJson,
-          integrityHash: await sha256Hex(stateJson),
-          createdAt: new Date().toISOString(),
-        })
-      }
+      const opened = await session.open()
+      const { state } = opened
+      persistentHistory.current = opened.history
       const doc = state.doc as JsonValue
       setInitialContent(doc)
       liveDoc.current = doc
@@ -259,7 +156,7 @@ export default function App() {
     } catch (error) {
       setLoadError(errorMessage(error))
     }
-  }, [])
+  }, [session])
 
   useEffect(() => {
     void readOutline()
@@ -267,7 +164,7 @@ export default function App() {
   }, [loadSettings, readOutline])
 
   useEffect(() => {
-    if (!editor || !identity.current) return
+    if (!editor || !session.context()) return
     let disposed = false
     const synchronize = () => {
       if (syncInProgress.current || activeAgentCalls.current.size > 0) return
@@ -279,55 +176,32 @@ export default function App() {
       if (application) application.inert = true
       const run = async () => {
         try {
-          if (disposed || persistenceBlocked.current) return
-          const engine = new DesktopSyncEngine(repository.current, new NativeSyncTransport(), (state) => {
+          if (disposed) return
+          await session.synchronize(({ state: projected, historyInvalidated }) => {
             if (disposed) return
-            setSyncState(state)
-            if (state.kind === 'up-to-date') serverRevision.current = state.revision
-          })
-          await engine.sync()
-          if (disposed || engine.state.kind !== 'up-to-date' || !identity.current) return
-          const replay = await repository.current.loadReplayInput(identity.current.outlineId)
-          if (!replay) return
-          let projected = replayOutlineEvents(replay.state, replay.events)
-          const normalizedDoc = normalizeOutlinerDoc(
-            projected.doc as JsonValue,
-            newNodeId,
-          ) as Record<string, unknown>
-          const synchronizedRepair = await buildDocumentRepairEvent(projected, normalizedDoc, {
-            ...identity.current,
-            baseRevision: engine.state.revision,
-            nextEventId: () => crypto.randomUUID(),
-          })
-          if (synchronizedRepair) {
-            localSequence.current = await repository.current.append(synchronizedRepair.event)
-            projected = synchronizedRepair.state
-            engine.historyInvalidated = true
-          }
-          const nextDoc = projected.doc as JsonValue
-          createOutlineSchema().nodeFromJSON(nextDoc as object).check()
-          const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
-          if (documentChanged) {
-            const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
-            const transaction = editor.state.tr
-              .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
-              .setMeta('forageRemote', true)
-              .setMeta('preventUpdate', true)
-              .setMeta('addToHistory', false)
-            editor.view.dispatch(transaction)
-            if (!editor.state.doc.eq(projectedDoc)) {
-              throw new Error('The synchronized outline projection could not be applied.')
+            const nextDoc = projected.doc as JsonValue
+            createOutlineSchema().nodeFromJSON(nextDoc as object).check()
+            const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
+            if (documentChanged) {
+              const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
+              const transaction = editor.state.tr
+                .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
+                .setMeta('forageRemote', true)
+                .setMeta('preventUpdate', true)
+                .setMeta('addToHistory', false)
+              editor.view.dispatch(transaction)
+              if (!editor.state.doc.eq(projectedDoc)) {
+                throw new Error('The synchronized outline projection could not be applied.')
+              }
             }
-          }
-          liveDoc.current = nextDoc
-          if (documentChanged || engine.historyInvalidated) {
-            activeChangeGroup.current = null
-            persistentHistory.current = { undo: [], redo: [] }
-          }
-          setTrash(projected.trash as unknown as TrashEntry[])
-          setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
-        } catch (error) {
-          if (!disposed) setSyncState({ kind: 'server-unavailable', message: errorMessage(error) })
+            liveDoc.current = nextDoc
+            if (documentChanged || historyInvalidated) {
+              activeChangeGroup.current = null
+              persistentHistory.current = { undo: [], redo: [] }
+            }
+            setTrash(projected.trash as unknown as TrashEntry[])
+            setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
+          })
         } finally {
           syncInProgress.current = false
           setEditorMutationLocked(editor, false)
@@ -335,11 +209,11 @@ export default function App() {
           if (application) application.inert = false
         }
       }
-      appendQueue.current = appendQueue.current.then(run)
+      void run()
     }
     const timer = window.setInterval(synchronize, 15_000)
     return () => { disposed = true; window.clearInterval(timer) }
-  }, [editor])
+  }, [editor, session])
 
   useEffect(() => {
     const handleSystemNodeRejection = (event: Event) => {
@@ -363,71 +237,12 @@ export default function App() {
 
   const handleDocChange = useCallback((doc: JsonValue) => { liveDoc.current = doc }, [])
 
-  const refreshRecoveryCheckpoint = useCallback(async (outlineId: string) => {
-    // A server-mode checkpoint may only contain acknowledged events. Including
-    // pending edits would make the pre-rebase document impossible to recover.
-    if (await repository.current.storageMode() === 'server' || checkpointInProgress.current) return
-    checkpointInProgress.current = true
-    try {
-      const replay = await repository.current.loadReplayInput(outlineId)
-      if (!replay) return
-      const state = replayOutlineEvents(replay.state, replay.events)
-      const sequence = replay.latestLocalSequence ?? replay.checkpoint.localSequence
-      const stateJson = JSON.stringify(state)
-      await repository.current.saveCheckpoint({
-        id: crypto.randomUUID(), outlineId,
-        documentVersion: 1, schemaEpoch: state.schemaEpoch,
-        localSequence: sequence,
-        serverRevision: Math.max(
-          replay.checkpoint.serverRevision,
-          ...replay.events.map((candidate) => candidate.revision ?? 0),
-        ),
-        stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
-      })
-    } finally {
-      checkpointInProgress.current = false
-    }
-  }, [])
-
-  const persistEventNow = useCallback(async (event: EventEnvelope) => {
-    localSequence.current = await repository.current.append(event)
-    if (localSequence.current > 0 && localSequence.current % 100 === 0) {
-      try {
-        await refreshRecoveryCheckpoint(event.outlineId)
-        setMaintenanceError(null)
-      } catch (error) {
-        setMaintenanceError(errorMessage(error))
-      }
-    }
-  }, [refreshRecoveryCheckpoint])
-
-  const enqueueOperation = useCallback((operation: () => Promise<void>) => {
-    appendQueue.current = appendQueue.current.then(async () => {
-      if (persistenceBlocked.current) {
-        failedOperations.current.push(operation)
-        return
-      }
-      try {
-        await operation()
-        setSaveError(null)
-      } catch (error) {
-        persistenceBlocked.current = true
-        failedOperations.current.push(operation)
-        setSaveError(errorMessage(error))
-      }
-    })
-  }, [])
-
-  const appendEvent = useCallback((event: EventEnvelope) => {
-    enqueueOperation(() => persistEventNow(event))
-  }, [enqueueOperation, persistEventNow])
-
   const handleEditorTransaction = useCallback((
     transaction: Parameters<typeof captureDocumentEvent>[0],
     appendedTransactions: Parameters<typeof captureDocumentEvent>[1],
   ) => {
-    const currentIdentity = identity.current
-    if (!currentIdentity) return
+    const context = session.context()
+    if (!context) return
     const systemMaintenance = transaction.getMeta(SYSTEM_MAINTENANCE_META) === true
     const transactionOrigin = String(transaction.getMeta('forageOrigin') ?? 'desktop')
     const compensation = transaction.getMeta('forageCompensation')
@@ -451,9 +266,7 @@ export default function App() {
       ? null
       : { id: changeGroupId, at: now, key: historyKey }
     const captured = captureDocumentEvent(transaction, appendedTransactions, {
-      ...currentIdentity,
-      baseRevision: serverRevision.current,
-      nextEventId: () => crypto.randomUUID(),
+      ...context,
       nextChangeGroupId: () => changeGroupId,
     })
     if (!captured) return
@@ -467,16 +280,8 @@ export default function App() {
       // An untracked document rewrite invalidates positional inverse steps.
       persistentHistory.current = { undo: [], redo: [] }
     }
-    enqueueOperation(async () => {
-      const event = await finalizeDocumentEvent(captured)
-      await persistEventNow(event)
-      if (event.type === 'document.steps_applied') {
-        for (const reference of createAssetReferenceEvents(event, () => crypto.randomUUID())) {
-          await persistEventNow(reference)
-        }
-      }
-    })
-  }, [enqueueOperation, persistEventNow])
+    void session.persistCaptured(captured)
+  }, [session])
 
   const handleUndo = useCallback((currentEditor: Editor): boolean => {
     activeChangeGroup.current = null
@@ -489,26 +294,20 @@ export default function App() {
   }, [])
 
   const domainContext = useCallback(() => {
-    const currentIdentity = identity.current
-    if (!currentIdentity) return null
-    return {
-      ...currentIdentity,
-      baseRevision: serverRevision.current,
-      nextEventId: () => crypto.randomUUID(),
-    }
-  }, [])
+    return session.context()
+  }, [session])
 
   const handleShortcutsChange = useCallback((next: OutlineShortcut[]) => {
     setShortcuts((current) => {
       const context = domainContext()
       if (context) {
         for (const event of createDomainEvents({ type: 'shortcuts', before: current, after: next }, context)) {
-          appendEvent(event)
+          void session.append(event)
         }
       }
       return next
     })
-  }, [appendEvent, domainContext])
+  }, [domainContext, session])
 
   const handleTrashChange = useCallback((next: TrashEntry[]) => {
     setTrash(next)
@@ -517,64 +316,22 @@ export default function App() {
   const removeTrashEntry = useCallback((operation: 'restore' | 'purge', entry: TrashEntry) => {
     const context = operation === 'purge' ? domainContext() : null
     if (context && operation === 'purge') {
-      for (const event of createDomainEvents({ type: 'trash', operation, entry }, context)) appendEvent(event)
+      for (const event of createDomainEvents({ type: 'trash', operation, entry }, context)) {
+        void session.append(event)
+      }
     }
     setTrash((current) => current.filter((candidate) => candidate.id !== entry.id))
-  }, [appendEvent, domainContext])
-
-  async function retrySave() {
-    const retryOperation = appendQueue.current.then(async () => {
-      const retry = failedOperations.current.splice(0)
-      persistenceBlocked.current = false
-      for (let index = 0; index < retry.length; index += 1) {
-        try {
-          await retry[index]()
-        } catch (error) {
-          persistenceBlocked.current = true
-          failedOperations.current.push(...retry.slice(index))
-          setSaveError(errorMessage(error))
-          return
-        }
-      }
-      setSaveError(null)
-    })
-    appendQueue.current = retryOperation
-    await retryOperation
-  }
-
-  async function retryCheckpoint() {
-    if (!identity.current) return
-    const outlineId = identity.current.outlineId
-    const retry = appendQueue.current.then(() => refreshRecoveryCheckpoint(outlineId))
-    appendQueue.current = retry.catch(() => undefined)
-    try {
-      await retry
-      setMaintenanceError(null)
-    } catch (error) {
-      setMaintenanceError(errorMessage(error))
-    }
-  }
+  }, [domainContext, session])
 
   async function startEmpty() {
-    const currentIdentity = identity.current ?? await repository.current.identity()
-    identity.current = currentIdentity
-    const existingRecords = await repository.current.eventsAfter(currentIdentity.outlineId, 0) ?? []
-    const resetSequence = Math.max(0, ...existingRecords.map((record) => record.localSequence))
-    localSequence.current = resetSequence
-    const doc = normalizeOutlinerDoc(EMPTY_DOC)
-    const state = createInitialOutlineState(doc as Record<string, unknown>)
-    const stateJson = JSON.stringify(state)
-    await repository.current.saveCheckpoint({
-      id: crypto.randomUUID(), outlineId: currentIdentity.outlineId,
-      documentVersion: 1, schemaEpoch: 1, localSequence: resetSequence, serverRevision: 0,
-      stateJson, integrityHash: await sha256Hex(stateJson), createdAt: new Date().toISOString(),
-    })
+    const opened = await session.startEmpty()
+    const doc = opened.state.doc as JsonValue
     setInitialContent(doc)
     liveDoc.current = doc
     activeChangeGroup.current = null
-    persistentHistory.current = { undo: [], redo: [] }
-    setTrash([])
-    setShortcuts([])
+    persistentHistory.current = opened.history
+    setTrash(opened.state.trash as unknown as TrashEntry[])
+    setShortcuts(opened.state.shortcuts as unknown as OutlineShortcut[])
     setLoadError(null)
     setLoaded(true)
   }
@@ -594,6 +351,7 @@ export default function App() {
     )
   }
 
+  const { saveError, maintenanceError, syncState, storageBackend } = sessionStatus
   const storageBackendLabel = storageBackend.kind === 'server'
     ? `server: ${storageBackend.origin}`
     : 'local'
@@ -628,15 +386,15 @@ export default function App() {
       {saveError && (
         <div className="persistence-error" role="alert">
           <span><strong>Outline not saved.</strong> {saveError}</span>
-          <button onClick={() => void retrySave()}>Retry</button>
-          <button onClick={() => setSaveError(null)}>Dismiss</button>
+          <button onClick={() => void session.retrySave()}>Retry</button>
+          <button onClick={() => session.dismissSaveError()}>Dismiss</button>
         </div>
       )}
       {maintenanceError && (
         <div className="persistence-warning" role="alert">
           <span><strong>Outline saved, but its recovery checkpoint could not be refreshed.</strong> {maintenanceError}</span>
-          <button onClick={() => void retryCheckpoint()}>Retry checkpoint</button>
-          <button onClick={() => setMaintenanceError(null)}>Dismiss</button>
+          <button onClick={() => void session.retryCheckpoint()}>Retry checkpoint</button>
+          <button onClick={() => session.dismissMaintenanceError()}>Dismiss</button>
         </div>
       )}
       <div
