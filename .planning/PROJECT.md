@@ -1,71 +1,74 @@
-# AI Chat — Tree-Based Note-Taking with AI Agent
+# Forage — Outliner with Agent Support
 
 ## What This Is
 
-A Workflowy-style infinite outliner with an embedded AI agent that can generate and organize notes within any branch of the tree. Built as a Tauri desktop app with a Rust backend, local-first storage with iCloud sync. The tree structure serves as a universal primitive — notes today, chat conversations tomorrow.
+Forage is a local-first, Workflowy-style infinite outliner with agents that can research, generate, and organize material inside any branch. The outline is the product's primary workspace: user notes, captured material, and agent results all become part of one editable document rather than separate chat sessions.
 
 ## Core Value
 
-The tree is the universal data structure — every note, conversation, and piece of generated content lives as a node in an infinite nested tree, and an AI agent can operate on any branch using configurable skills.
+One durable outline serves as a shared working surface for the user and explicitly invoked or automated agents. Agents receive bounded, visible context and return structured outline content that participates in normal editing, persistence, synchronization, provenance, and undo.
 
-## Requirements
+## Product Capabilities
 
-### Validated
+- Infinite nested bullet-point outline with stable node identity
+- Zoom, breadcrumbs, expand/collapse, keyboard restructuring, drag/reorder, tags, and search
+- Rich editing with durable undo and redo
+- Slash-command skills that operate on branch-local and explicitly referenced context
+- Configurable agents, skills, model selection, and bounded tool allowlists
+- Local agent execution through an isolated Pi SDK sidecar
+- Local-first SQLite persistence with checkpoints and crash-safe replay
+- Optional self-hosted multi-device synchronization
+- Plain-text capture into Inbox through a scoped server API
+- Optional durable server agents and capture automation
+- Content-addressed generated-image storage and transfer
 
-(None yet — ship to validate)
+## Current Boundaries
 
-### Active
+- **Desktop:** Tauri v2 with React, TypeScript, TipTap, and one ProseMirror document for the whole outline.
+- **Native layer:** Custom bounded Rust commands own SQLite, local asset bytes, OS credential storage, and authenticated origin-pinned server transport.
+- **Local persistence:** SQLite is authoritative in local mode. Immutable document operations and semantic events reconstruct the outline; checkpoints bound startup work.
+- **Server persistence:** In optional server mode, PostgreSQL is authoritative while desktop SQLite remains the offline cache and pending outbox.
+- **Local agents:** A Node.js sidecar embeds the Pi SDK and communicates with the frontend using bounded JSONL. It creates in-memory sessions and exposes only application-authorized context and tools.
+- **Server agents:** A portable runtime executes durable PostgreSQL-backed jobs using enrolled encrypted credentials and commits results to the same event stream.
+- **Model access:** Users provide an OpenAI API key or authorize a ChatGPT account. Forage does not operate hosted inference or silently upload desktop credentials to the optional server.
+- **Assets:** Raster bytes live in content-addressed stores; documents and events contain verified SHA-256 references.
 
-- [ ] Infinite nested bullet-point tree (Workflowy-style)
-- [ ] Zoom into any node (node becomes the "root" view)
-- [ ] Keyboard-driven navigation and editing
-- [ ] Search across all nodes
-- [ ] Expand/collapse branches
-- [ ] Slash commands within notes to trigger agent actions
-- [ ] Agent generates child notes using branch context
-- [ ] Agent generates inline data on current note
-- [ ] Configurable LLM agent skills (research, design/brand guidelines, etc.)
-- [ ] User provides their own API keys (OpenAI, Anthropic, etc.)
-- [ ] Local-first data storage
-- [ ] iCloud sync
+## Product Rules
 
-### Out of Scope
+- The ProseMirror document is the only authoritative outline model; persistence must not introduce a competing per-node representation.
+- Stable bullet identity survives editing, movement, replay, synchronization, and internal links.
+- Agent context is selected by the application from command placement and explicit stable-ID references, then bounded before execution.
+- Agent output is validated structured content inserted through normal document transactions.
+- Tool access is deny-by-default and is the intersection of global, agent, and skill policy.
+- Local mode works without an account or network connection.
+- Server mode is optional, self-hosted, and one-owner; synchronization conflicts are explicit rather than silently overwritten.
+- Secrets remain behind native or server credential boundaries and never enter document events, prompts, URLs, or logs.
 
-- Web app — deferred to post-v1
-- Team collaboration / multi-user — deferred to post-v1
-- Standalone chat app mode — deferred; v1 sends the selected outline branch to a stateless Pi run
-- Managed cloud service — deferred, iCloud sync first
-- Local/on-device LLM support — user API keys only for v1
-- Mobile app — not planned
+## Out of Scope
 
-## Context
-
-- Inspired by Workflowy's outliner UX and Pi agent's tree-based work organization
-- TipTap remains the source of truth. A slash command starts a no-session Pi run using its full ancestor path and complete parent branch, excluding the command subtree and unrelated higher-level sibling branches, plus explicitly linked branches from stable internal references.
-- Persisted skills are slash-command workflows assigned to persisted agent profiles. Context selection is an application rule determined by command placement and visible references; agents define instructions, model overrides, and tool allowlists.
-- Slash commands (e.g., `/research concurrent companies for LambdaWorks`) are the primary agent interaction model, triggered from any node
-
-## Constraints
-
-- **Tech stack**: Tauri v2 shell (desktop target) with a TypeScript/React frontend. **No custom Rust backend in v1** — only official Tauri plugins. Agent work runs in a Pi JSONL RPC subprocess launched through the shell plugin; subscription images use Codex app-server, and production must bundle pinned Pi and Codex runtimes.
-- **Data**: Local-first. Tree persisted as a single JSON file placed in the iCloud Drive folder; macOS handles sync. No custom sync engine.
-- **Editor**: One ProseMirror/TipTap document for the whole outliner with a custom bullet node — not one editor per node. Chosen for undo/keyboard correctness.
-- **LLM access**: User-owned ChatGPT subscription or OpenAI API key, no hosted inference. Credentials are passed to the local Pi process through its environment.
-- **Target user**: Personal tool first, small team second. v1 ships as a shareable signed macOS .dmg.
+- Multi-user workspaces and shared editing
+- Real-time collaborative cursors
+- Managed Forage cloud hosting
+- A standalone chat-session data model
+- Mobile and web clients
+- Automatic installation of untrusted third-party Pi packages or extensions
+- Storing the live SQLite database or outline JSON in iCloud
 
 ## Key Decisions
 
-| Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| Tauri for desktop | Lightweight vs Electron; desktop is the real target | — Kept |
-| Local-first + iCloud sync | Place JSON file in iCloud Drive folder; macOS syncs it. No custom code | — Kept (simplified) |
-| Tree as universal primitive | Enables reuse for chat app later without architectural rework | — Kept |
-| Slash commands for agent | Inline UX keeps user in flow, no context switching to a chat panel | — Kept |
-| User-provided API keys | No billing/auth infrastructure needed for v1; users paste own key | — Kept |
-| Pi RPC subprocess as agent runtime | The old sidecar failed because agent work also crossed custom Rust IPC, SQLite, and a second session model. The re-platformed app can connect React directly to standard Pi RPC while keeping TipTap as the source of truth | — Adopted in ADR-0008; built-in tools/resources disabled and one app bridge extension explicitly loaded |
-| ~~Custom Rust backend (SQLite + tauri-specta IPC)~~ | IPC type-drift, debounce-vs-IPC undo races. Only justified by a future shared server that v1 doesn't have | — **REVERSED**: logic moves to TypeScript; storage = single JSON file via plugin-fs |
-| ~~1:1 tree mapping with Pi sessions~~ | Coupled the data model to Pi's session abstraction | — **REVERSED**: tree is plain data; agent context is the command's ancestor path and parent branch plus explicit stable-ID references resolved from TipTap at call time |
-| Single-document editor | One ProseMirror doc with bullet nodes (Workflowy model). ProseMirror's native history fixes undo in one layer instead of Rust history + Zustand wrapper + disabled TipTap history | — New |
+| Decision | Current outcome |
+| --- | --- |
+| Desktop platform | Tauri and React/TipTap retained; see ADR-0011 |
+| Outline model | One ProseMirror document with embedded stable identities; see ADR-0002 and ADR-0003 |
+| Durability | Immutable local SQLite event stream, checkpoints, and optional PostgreSQL authority; see ADR-0012 |
+| Synchronization | Optional self-hosted server with PostgreSQL authority and a durable desktop outbox |
+| Local agent runtime | Pi SDK embedded in an isolated Node.js sidecar; see ADR-0013 |
+| Agent context and tools | Explicit branch-local context and bounded declarative tools; see ADR-0006 and ADR-0007 |
+| Subscription images | Isolated Codex app-server bridge retained; see ADR-0009 |
+| Agent document integration | Stateless runs return structured nodes to the same ProseMirror document; no Pi session tree mapping |
+
+The canonical component and authority map is [docs/architecture.md](../docs/architecture.md). Historical changes remain recorded in [docs/ADRs](../docs/ADRs).
 
 ---
-*Last updated: 2026-08-17 — Pi RPC agents, configurable skills, and bounded bridge tools*
+
+*Last updated: 2026-09-04 — event store, optional server, durable agents, and embedded Pi SDK sidecar*

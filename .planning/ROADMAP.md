@@ -1,149 +1,67 @@
-# Roadmap: Forage — Tree-Based Note-Taking with AI Agent
+# Forage Roadmap
 
-> **RENAMED 2026:** the project was renamed from AI Chat to **Forage** (bundle id `com.forage.app`). Data migrated one-time from the legacy `AIChat` iCloud folder and `com.ai-chat.app` settings; see `docs/ADRs/ADR-0010-rename-to-forage.md`.
+This roadmap tracks the current product and operational workstreams. It intentionally avoids preserving obsolete implementation phases; architectural history belongs in the ADRs.
 
-> **RE-PLATFORM 2026-06-08; AGENT RUNTIME UPDATE 2026-08-17.** The custom Rust/SQLite/session stack remains abandoned. The editor stays a single TipTap document persisted as JSON, but agent work now runs in a Pi RPC subprocess connected directly from React through the official shell plugin (ADR-0008). Phases 1-6 detail below is superseded.
+## 1. Core outliner quality
 
-## Active Roadmap (3 phases)
+**Foundation implemented:** one ProseMirror document, stable bullet identity, keyboard editing, structural operations, zoom, search, tags, internal links, rich content, and document-native undo.
 
-- [ ] **Phase A — Outliner (Tauri + single-doc TipTap)**: React + Vite + Zustand. One TipTap document with a custom bullet node. Keyboard nav (Tab/Shift-Tab/Enter/Alt-Arrow/Delete), drag-reorder, zoom/hoist, search, native ProseMirror undo. Persist whole tree as one JSON file via `@tauri-apps/plugin-fs` to `~/Library/Mobile Documents/com~apple~CloudDocs/Forage/tree.json` (originally `AIChat`; migrated, see ADR-0010). Covers TREE-*, EDIT-*, INFR-02/03/04. ~5-7 days.
-- [ ] **Phase B — Agent (Pi RPC subprocess)**: Pi RPC streams agent and tool events through a bundled bridge extension. Slash commands invoke persisted, configurable agent and skill definitions; context is always the command's full ancestor path and complete parent branch (excluding its subtree and unrelated ancestor siblings) plus explicit stable-ID references, with distinct in-editor previews and a fixed blocking safety budget. `emit_outline` returns structured child nodes under the trigger. The bridge provides bounded web tools and approved custom HTTP GET tools under global and per-agent allowlists. Subscription image generation delegates to Codex app-server. Production Pi/Codex runtime bundling and trusted third-party Pi packages remain follow-up work. Covers AGNT-01/02/03/04/05, EDIT-04.
-- [ ] **Phase C — Polish & Distribute**: Settings panel for paste-in API key via `@tauri-apps/plugin-store` (INFR-01). Error states, empty states, macOS code-sign + notarize → shareable .dmg. ~3 days.
+**Current direction:**
 
-**Deferred to v2:** Trusted third-party Pi package installation and extension discovery.
+- Keep the outliner fast and predictable as document size and structural depth grow.
+- Close interaction and accessibility gaps in keyboard navigation, selection, drag/reorder, search, and command composition.
+- Keep user and agent changes understandable through provenance, activity, and reliable undo/redo.
 
----
+## 2. Local durability and upgrade safety
 
-## Original Overview (superseded)
+**Foundation implemented:** SQLite event storage, deterministic replay, checkpoints, hash verification, persistent history, crash-recovery coverage, event versions, upcasters, and schema-epoch machinery.
 
-Six phases building from the ground up: a stable storage foundation first, then the full outliner experience, then editing completeness with undo, then the agent infrastructure, then user-facing AI skills, and finally iCloud sync completion and distribution. The order is non-negotiable — the storage schema and iCloud file placement cannot be retrofitted, undo must exist before AI generates content, and the agent sidecar must exist before the slash command UI.
+**Current direction:**
 
-## Phases
+- Exercise backup and restore from a clean application-data directory.
+- Implement and verify the first real document-schema epoch migration before an incompatible schema change ships.
+- Define retention and permanent-erasure behavior for immutable history and unreferenced assets.
+- Keep replay fixtures representative across supported application versions.
 
-**Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+## 3. Optional synchronization and server operation
 
-Decimal phases appear between their surrounding integers in numeric order.
+**Foundation implemented:** PostgreSQL authority, device enrollment, authenticated pull/push, offline outbox, step rebase, explicit conflict state, scoped capture tokens, and content-addressed asset transfer.
 
-- [x] **Phase 1: Storage Foundation** - SQLite schema, UUID node identity, Tauri IPC layer, iCloud file placement (completed 2026-03-24)
-- [x] **Phase 2: Core Outliner** - Infinite nested tree, zoom/hoist, keyboard navigation, drag-to-reorder (completed 2026-03-24)
-- [ ] **Phase 3: Search and Editing** - Global search, undo/redo, Markdown formatting, hashtags, AI content styling (UAT gap closure in progress)
-- [ ] **Phase 4: Agent Infrastructure** - API key management, Node.js sidecar, LLM streaming, slash command core
-- [ ] **Phase 5: Skills and Agent UI** - Built-in research skill, custom skill configuration, slash command overlay
-- [ ] **Phase 6: iCloud Sync and Distribution** - Sync status, conflict resolution, macOS entitlements, notarization
+**Current direction:**
 
-## Phase Details
+- Complete an operator-tested PostgreSQL and asset backup/restore procedure.
+- Improve conflict diagnosis and recovery without introducing silent last-writer-wins behavior.
+- Test multi-device outage, reconnect, credential rotation, and server-upgrade paths.
+- Add operational visibility needed for a self-hosted one-owner deployment.
 
-### Phase 1: Storage Foundation
-**Goal**: A stable, corruption-safe local data layer that the entire app can build on
-**Depends on**: Nothing (first phase)
-**Requirements**: INFR-02, INFR-04
-**Success Criteria** (what must be TRUE):
-  1. App stores nodes in SQLite and they survive app restarts with all content and hierarchy intact
-  2. Node identity uses stable UUIDs with fractional indexing — no positional IDs that break on reorder
-  3. SQLite file is placed in the iCloud Drive folder so iCloud handles sync automatically
-  4. Data model includes a `node_type` column distinguishing user notes from agent responses, compatible with Pi's tree session structure (1:1 mapping between outliner nodes and Pi session branches)
-  5. All IPC commands are typed end-to-end via tauri-specta — no runtime type mismatches at the IPC boundary
-**Plans:** 2/2 plans complete
+The server remains optional; local mode must continue to work independently.
 
-Plans:
-- [x] 01-01-PLAN.md — Scaffold Tauri v2 project, SQLite schema, Rust models, DB initialization
-- [x] 01-02-PLAN.md — IPC command handlers, tauri-specta bindings, integration tests
+## 4. Agent workflows
 
-### Phase 2: Core Outliner
-**Goal**: Users can work in a fast, fully keyboard-driven infinite outliner that feels like Workflowy
-**Depends on**: Phase 1
-**Requirements**: TREE-01, TREE-02, TREE-03, TREE-04, TREE-06
-**Success Criteria** (what must be TRUE):
-  1. User can create nodes nested to any depth and the tree renders without performance degradation at 1000+ nodes
-  2. User can zoom into any node so it becomes the root view, with a breadcrumb trail showing the path back
-  3. User can navigate and restructure the entire tree without touching the mouse: Tab/Shift-Tab to indent, Enter for new sibling, Alt+Arrow to move, Delete to remove
-  4. User can expand and collapse any branch and that state persists across app restarts
-  5. User can drag a node to reorder it or re-nest it under a different parent
-**Plans:** 3/3 plans complete
+**Foundation implemented:** configurable agents and skills, explicit context construction, bounded tools, local Pi SDK execution, durable server execution, activity reporting, cancellation, structured outline insertion, Inbox automation, and webpage/X/YouTube ingestion adapters.
 
-Plans:
-- [ ] 02-01-PLAN.md — React setup, move_node backend IPC, Vitest, tree helper utilities with tests
-- [ ] 02-02-PLAN.md — Zustand store, OutlinerView, NodeRow, Bullet, Breadcrumb, expand/collapse, zoom/hoist
-- [ ] 02-03-PLAN.md — TipTap NodeEditor, keyboard shortcuts, drag-and-drop
+**Current direction:**
 
-### Phase 3: Search and Editing
-**Goal**: Users can find any node instantly and have a complete, undo-safe editing experience
-**Depends on**: Phase 2
-**Requirements**: TREE-05, EDIT-01, EDIT-02, EDIT-03, EDIT-04
-**Success Criteria** (what must be TRUE):
-  1. User can search across all nodes and see results with surrounding context, navigable without leaving keyboard
-  2. User can undo and redo any structural operation (indent, move, delete) and any text edit as a single action
-  3. User can use bold, italic, and inline code Markdown formatting within node text
-  4. User can tag nodes with #hashtags by typing them inline, and tagged nodes are visually distinguished
-  5. AI-generated content is visually styled differently from user-written content so the user always knows what the agent wrote
-**Plans:** 7 plans (6 executed, 1 gap closure pending)
+- Make one end-to-end research and organization workflow exceptionally clear and reliable.
+- Preserve equivalent run, activity, result, policy, and provenance contracts across local and server executors.
+- Improve failure recovery, retry, cancellation, and credential reauthorization UX.
+- Keep external material labelled untrusted and tool access deny-by-default.
 
-Plans:
-- [x] 03-01-PLAN.md — Database migration (FTS5, undo, tags), Rust search backend, Cmd+K overlay
-- [x] 03-02-PLAN.md — Persistent undo/redo Rust backend + Zustand store wrapper
-- [x] 03-03-PLAN.md — Hashtag TipTap extension, autocomplete, tag sidebar
-- [x] 03-04-PLAN.md — Markdown formatting CSS, AI sparkle icon, context menu
-- [x] 03-05-PLAN.md — [GAP] FTS5 backfill + undo double-fire and pending group fixes
-- [x] 03-06-PLAN.md — [GAP] Rich text rendering for non-editing nodes + hashtag autocomplete fixes
-- [ ] 03-07-PLAN.md — [GAP] Fix undo/redo snapshot format + Rust binary rebuild
+## 5. Distribution and production readiness
 
-### Phase 4: Agent Infrastructure
-**Goal**: Pi agent SDK embedded as Node.js sidecar, wired to Tauri IPC — slash commands trigger Pi skills that stream results into the tree
-**Depends on**: Phase 3
-**Requirements**: INFR-01, AGNT-01, AGNT-02, AGNT-03
-**Tech decision**: Pi agent SDK (`@mariozechner/pi-coding-agent`) replaces custom Vercel AI SDK + sidecar. Pi provides multi-model support (15+ providers), streaming, skills, and tree-structured sessions out of the box.
-**Success Criteria** (what must be TRUE):
-  1. Pi agent SDK runs as a Node.js sidecar within Tauri, communicating via RPC (JSON over stdin/stdout)
-  2. Outliner tree nodes map 1:1 to Pi session branches — slash command from a node creates/continues a Pi session branch at that position
-  3. User can configure API keys through Pi's built-in model configuration
-  4. User can type a slash command in any node and it triggers a Pi skill without false positives on slashes mid-sentence
-  5. Agent generates structured child notes under the triggered node using ancestors as Pi session context
-  6. Agent-generated content streams into the tree in real time with a ghost/placeholder node visible during generation
-  7. User can cancel an in-progress generation cleanly
-**Plans:** 3/4 plans executed
+**Current direction:**
 
-Plans:
-- [ ] 04-01-PLAN.md — Node.js sidecar scaffold, Rust bridge commands, encrypted keystore, Tauri shell capabilities
-- [ ] 04-02-PLAN.md — Settings page UI with API key management and gear icon navigation
-- [ ] 04-03-PLAN.md — Slash command TipTap extension, agent store, context building from ancestors
-- [ ] 04-04-PLAN.md — Sidecar skill dispatch, streaming into tree, cancellation, inline generation mode
+- Bundle and pin the required Node.js, sidecar, and Codex runtimes for signed macOS distribution.
+- Verify hardened-runtime, signing, notarization, first-launch, upgrade, and runtime-diagnostic behavior.
+- Document supported macOS and dependency versions.
+- Treat production durability as incomplete until restore procedures have been exercised successfully.
 
-### Phase 5: Skills and Agent UI
-**Goal**: Users can run the built-in research skill out of the box and configure their own custom skills using Pi's skill/extension system
-**Depends on**: Phase 4
-**Requirements**: AGNT-04, AGNT-05
-**Success Criteria** (what must be TRUE):
-  1. User can type `/research [topic]` in any node and receive structured research findings as child nodes without any configuration
-  2. User can create a custom skill using Pi's skill format (instructions + tools) — it then appears in the slash command menu
-  3. User can edit or delete custom skills from a skills configuration panel
-  4. Agent can generate inline content on the current node (not just child notes) when the skill calls for it
-**Plans**: TBD
+## Architectural history
 
-### Phase 6: iCloud Sync and Distribution
-**Goal**: The app syncs reliably across the user's devices by placing data in the iCloud Drive folder, and can be distributed as a signed, notarized macOS app
-**Depends on**: Phase 5
-**Requirements**: INFR-03
-**Success Criteria** (what must be TRUE):
-  1. SQLite database stored in iCloud Drive folder — iCloud handles file sync automatically
-  2. Changes made on one Mac appear on a second Mac after iCloud sync completes
-  3. App passes macOS notarization with hardened runtime enabled, including the Node.js sidecar binary
-**Plans**: TBD
-
-## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Storage Foundation | 2/2 | Complete   | 2026-03-24 |
-| 2. Core Outliner | 3/3 | Complete   | 2026-03-24 |
-| 3. Search and Editing | 6/7 | In Progress|  |
-| 4. Agent Infrastructure | 3/4 | In Progress|  |
-| 5. Skills and Agent UI | 0/TBD | Not started | - |
-| 6. iCloud Sync and Distribution | 0/TBD | Not started | - |
+- ADR-0001's thin-shell restriction and ADR-0004's iCloud JSON persistence were superseded by [ADR-0012](../docs/ADRs/ADR-0012-event-store-and-optional-server.md).
+- ADR-0008's `pi --mode rpc` process was superseded by the embedded SDK sidecar in [ADR-0013](../docs/ADRs/ADR-0013-embedded-pi-sdk-sidecar.md).
+- The current system map and authority rules live in [docs/architecture.md](../docs/architecture.md).
 
 ---
-*Roadmap created: 2026-03-24*
+
+*Last updated: 2026-09-04*

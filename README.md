@@ -39,7 +39,9 @@ Agent execution runs on [Pi](https://pi.dev): Forage embeds the Pi SDK in an iso
 
 ## Architecture, briefly
 
+See [Forage Architecture](docs/architecture.md) for the current component, authority, storage-mode, and agent-execution map.
+
 - **Editor:** one TipTap document; bullets are ProseMirror `listItem`s, agent output is marked and styled separately, images are dedicated nodes.
 - **Identity:** each bullet gets a stable UUID via a ProseMirror plugin, so links and references survive reordering.
 - **Persistence:** SQLite stores immutable events, verified checkpoints, sync state, and the durable pending outbox. In optional server mode, PostgreSQL is authoritative while SQLite remains the offline cache.
-- **Agent:** local mode uses an isolated Node.js sidecar; server mode uses the same portable validated model/tool loop with PostgreSQL leases and executor-owned credentials. Execution follows storage authority and never silently falls back between modes.
+- **Agent:** local mode uses an isolated Pi SDK sidecar; server mode uses a portable model/tool runtime with PostgreSQL leases and executor-owned credentials. Both honor shared validated run/result contracts. Execution follows storage authority and never silently falls back between modes.

@@ -1,10 +1,10 @@
 # ADR-0008: Run Agent Work in a Pi RPC Subprocess
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-17
 - **Deciders:** AI Chat project team
 - **Supersedes:** ADR-0005
-- **Superseded by:** None
+- **Superseded by:** ADR-0013
 
 ## Context
 

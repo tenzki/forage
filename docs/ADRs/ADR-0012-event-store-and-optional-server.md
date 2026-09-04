@@ -23,6 +23,15 @@ The desktop has explicit modes:
 
 Shared TypeScript packages own runtime event/protocol validation, deterministic reduction, the canonical ProseMirror schema, step inversion, and rebase behavior. Rust owns the narrow privileged boundary: SQLite, local asset bytes, OS credential storage, and origin-pinned authenticated transport. Generated images are referenced by verified SHA-256 IDs; bytes are stored separately.
 
+The event stream intentionally contains two kinds of records:
+
+- semantic domain events, such as `note.created` and shortcut lifecycle events, for changes originating outside the editor or naturally expressed in domain terms;
+- durable document operations, such as `document.steps_applied`, which preserve serialized ProseMirror steps and their inverses for exact editing fidelity, persistent undo/redo, and synchronization.
+
+`document.steps_applied` is not intended to be a technology-independent domain fact. ProseMirror is the authoritative document model, so translating every editor transaction into a parallel semantic mutation vocabulary would create a second document model and lose the native operations needed for inversion and rebase. External semantic events are deterministically projected into that same ProseMirror document rather than defining an alternative representation.
+
+Persisted ProseMirror operations therefore carry an explicit compatibility obligation. A schema epoch is an immutable replay contract: events from an epoch are replayed with that epoch's retained schema, and an incompatible document-schema change starts a new epoch from verified pre-migration and post-migration checkpoints. Event payload evolution within an epoch uses versioned upcasters. The system does not assume that historical steps can be replayed directly against every future editor schema.
+
 The initial server has one owner. Scoped, revocable tokens authorize either device synchronization or `POST /api/v1/notes`. Multi-user access, rich external editing, active iCloud synchronization, and production backup automation are outside this decision.
 
 ## Consequences
@@ -45,6 +54,7 @@ The initial server has one owner. Scoped, revocable tokens authorize either devi
 ### Risks and Mitigations
 
 - **Projection drift:** replay the same fixtures in desktop-compatible and Node runtimes and hash checkpoints.
+- **Editor/schema coupling:** retain replay schemas by epoch, verify checkpoint migrations across epochs, and upcast versioned event payloads rather than interpreting historical steps with the current editor schema.
 - **Silent overwrite:** reject stale pushes, transform only safe changes, preserve superseded pending events, and expose conflicts.
 - **Credential exfiltration:** use OS credential storage, a non-null CSP, pinned origins, no redirects, and narrow native commands.
 - **Missing image bytes:** verify hashes and signatures at both boundaries and never accept references to incomplete server assets.

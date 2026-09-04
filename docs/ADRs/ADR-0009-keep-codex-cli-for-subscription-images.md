@@ -8,7 +8,7 @@
 
 ## Context
 
-After replacing the `pi --mode rpc` CLI sidecar with an in-process Pi SDK (`ADR-0008` → `piSdkClient.ts`), the only remaining CLI dependency is `codex`, used exclusively for subscription-mode image generation. In subscription mode, `generate_image` spends the user's ChatGPT Plus/Pro image quota instead of billing the OpenAI platform API key.
+After replacing the `pi --mode rpc` CLI sidecar with the embedded Pi SDK sidecar documented in ADR-0013, the only remaining CLI dependency is `codex`, used exclusively for subscription-mode image generation. In subscription mode, `generate_image` spends the user's ChatGPT Plus/Pro image quota instead of billing the OpenAI platform API key.
 
 We investigated whether `codex` could be removed by calling the internal ChatGPT image-generation endpoint directly, the way API-key mode already calls the public `https://api.openai.com/v1/images/generations`.
 
@@ -115,6 +115,6 @@ No code change. This ADR documents a deliberate non-change so future contributor
 
 ## References
 
-- `ADR-0008` — Pi RPC subprocess architecture (now superseded by the SDK sidecar).
+- `ADR-0013` — current embedded Pi SDK sidecar architecture.
 - `src-tauri/resources/pi/sidecar/codex-image-generation.ts` — isolated Codex app-server image bridge.
 - `src-tauri/resources/pi/sidecar/tools.ts` — `generate_image` tool and provider switch.

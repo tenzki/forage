@@ -1,5 +1,7 @@
 # GPUix Client Migration Assessment
 
+> **Historical architecture snapshot:** implementation details in this assessment predate ADR-0012. The decision to retain Tauri and TipTap remains current through ADR-0011; use the [current architecture map](architecture.md) for present boundaries and persistence.
+
 **Assessment date:** 2026-08-30  
 **Decision:** Do not migrate the production Forage client now. Retain Tauri + TipTap/ProseMirror and revisit only on the evidence-based triggers below.  
 **Related decision:** [ADR-0011](ADRs/ADR-0011-retain-tauri-tiptap-over-gpuix.md)

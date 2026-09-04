@@ -7,10 +7,10 @@ pub mod sync_commands;
 
 // The privileged Rust boundary owns local durability and native integrations.
 // It also registers the remaining official Tauri plugins used by the frontend:
-//   - plugin-store: persist the user's Codex credentials and settings
+//   - plugin-store: persist settings and non-secret credential metadata
 //   - plugin-http:   stream OpenAI requests without webview CORS restrictions
 //   - plugin-opener: open the ChatGPT subscription login page
-//   - plugin-shell:  run the Pi agent as an isolated JSONL RPC subprocess
+//   - plugin-shell:  run the embedded Pi SDK in an isolated Node.js sidecar
 
 pub fn run() {
     tauri::Builder::default()

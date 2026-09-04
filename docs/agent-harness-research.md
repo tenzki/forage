@@ -1,5 +1,7 @@
 # Agent harness research: practices from Pi, Flue, and production agent systems
 
+> **Historical research snapshot:** descriptions of the then-current application predate the event store, optional server, and embedded Pi SDK sidecar. Use the [current architecture map](architecture.md) for the implemented system.
+
 **Research date:** 2026-08-14  
 **Target:** the current `ai-chat` Tauri outliner  
 **Scope:** agent-harness architecture, context, tools, sessions, durability, security, observability, and evaluation. Sources are primarily official Pi, Flue, Anthropic, and OpenAI documentation.

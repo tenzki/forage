@@ -1,5 +1,7 @@
 # Workflowy UX and Feature Comparison
 
+> **Historical source audit:** feature and implementation details reflect the repository at the time of this comparison and may have been superseded. Use the [current architecture map](architecture.md) for present persistence, synchronization, and agent boundaries.
+
 ## Scope and method
 
 This is a source-level audit of the current app against Workflowy's public help documentation.

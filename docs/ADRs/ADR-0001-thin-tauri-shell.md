@@ -1,10 +1,10 @@
 # ADR-0001: Keep Tauri as a Thin Desktop Shell
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-14
 - **Deciders:** AI Chat project team
 - **Supersedes:** None (replaces an undocumented custom Rust/SQLite/Node-sidecar architecture)
-- **Superseded by:** None
+- **Superseded by:** ADR-0012
 
 ## Context
 

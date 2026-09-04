@@ -1,10 +1,10 @@
 # ADR-0004: Persist a Versioned Whole-Document JSON File in iCloud Drive
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-14
 - **Deciders:** AI Chat project team
 - **Supersedes:** None (replaces an undocumented SQLite persistence design)
-- **Superseded by:** None
+- **Superseded by:** ADR-0012
 
 > **Note:** the persistence folder moved from `AIChat` to `Forage` during the project rename; the one-time migration is documented in ADR-0010. The envelope design itself is unchanged.
 

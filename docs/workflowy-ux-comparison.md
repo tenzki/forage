@@ -1,5 +1,7 @@
 # Workflowy UX research and comparison
 
+> **Historical research snapshot:** descriptions of the then-current application predate the event store, optional server, and embedded Pi SDK sidecar. Use the [current architecture map](architecture.md) for the implemented system.
+
 **Research date:** 2026-08-14  
 **Compared product:** the current `ai-chat` repository implementation  
 **Scope:** Workflowy's public product site and official help documentation. This is a heuristic/product analysis, not an authenticated usability test.
