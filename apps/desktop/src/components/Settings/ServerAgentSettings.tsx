@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
 import type { CredentialMetadata } from '@forage/protocol'
 import { TauriServerAgentTransport } from '../../agent/serverExecutor'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -26,7 +25,6 @@ export function ServerAgentSettings() {
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [revision, setRevision] = useState(0)
   const [credential, setCredential] = useState<CredentialMetadata | null>(null)
-  const [apiKey, setApiKey] = useState('')
   const [policyOrder, setPolicyOrder] = useState<LinkPolicyId[]>(['youtube', 'x', 'web'])
   const [policySkills, setPolicySkills] = useState<Record<LinkPolicyId, string>>({
     youtube: skills[0]?.id ?? '', x: skills[0]?.id ?? '', web: skills[0]?.id ?? '',
@@ -52,35 +50,6 @@ export function ServerAgentSettings() {
       try { setRuns((await transport.runs(undefined, 20)).runs) } catch { /* history is optional while offline */ }
     }).catch((error) => setStatus(message(error)))
   }, [])
-
-  async function enrollApiKey() {
-    setBusy(true); setStatus(null)
-    try {
-      const enrolled = await transport.enrollApiKey({ provider: 'openai', apiKey: apiKey.trim() })
-      setCredential(enrolled); setApiKey(''); setStatus('Server API key enrolled securely.')
-    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
-  }
-
-  async function connectChatGpt() {
-    setBusy(true); setStatus(null)
-    try {
-      const authorization = await transport.startDeviceAuthorization()
-      await openUrl(authorization.verificationUri)
-      setStatus(`Enter ${authorization.userCode} in the browser, then click Check ChatGPT login.`)
-      sessionStorage.setItem('forage-server-authorization', authorization.authorizationId)
-    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
-  }
-
-  async function checkChatGpt() {
-    const authorizationId = sessionStorage.getItem('forage-server-authorization')
-    if (!authorizationId) return setStatus('Start ChatGPT login first.')
-    setBusy(true)
-    try {
-      const result = await transport.pollDeviceAuthorization(authorizationId)
-      if (result.credential) setCredential(result.credential)
-      setStatus(result.state === 'connected' ? 'Server ChatGPT credential connected.' : `ChatGPT login: ${result.state}`)
-    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
-  }
 
   async function publishConfiguration() {
     if (!credential || credential.status !== 'connected') return setStatus('Connect a server credential before publishing.')
@@ -183,15 +152,10 @@ export function ServerAgentSettings() {
       <strong>Server agent executor</strong>
       <p className="settings-hint">Runs continue on {connection.origin} while this app is closed. Server mode never falls back to local execution.</p>
       <p className="settings-hint">Configuration revision: {revision || 'not published'} · Credential: {credential?.status ?? 'not enrolled'}</p>
-      <label htmlFor="server-openai-key">Server OpenAI API key</label>
-      <input id="server-openai-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" />
       <div className="settings-actions">
-        <button className="settings-save" disabled={busy || apiKey.trim().length < 20} onClick={() => void enrollApiKey()}>Enroll API key</button>
-        <button className="settings-secondary" disabled={busy} onClick={() => void connectChatGpt()}>Connect ChatGPT</button>
-        <button className="settings-secondary" disabled={busy} onClick={() => void checkChatGpt()}>Check ChatGPT login</button>
+        <button className="settings-save" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>Republish agents and skills</button>
         {credential?.status === 'connected' && <button className="settings-secondary" disabled={busy} onClick={() => void disconnectCredential()}>Disconnect credential</button>}
       </div>
-      <button className="settings-save" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>Publish agents and skills</button>
       <hr />
       <strong>Ordered link policies</strong>
       <ol data-testid="automation-policy-order">{policyOrder.map((kind, index) => {

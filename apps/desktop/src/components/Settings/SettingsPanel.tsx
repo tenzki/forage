@@ -21,7 +21,7 @@ import {
   type CodexAuthMode,
 } from '../../store/settingsStore'
 import { SecondaryViewHeader } from '../SecondaryViewHeader'
-import { StorageBackendSettings } from './StorageBackendSettings'
+import { ComputeSettings } from './ComputeSettings'
 import { ServerAgentSettings } from './ServerAgentSettings'
 
 function describeError(error: unknown): string {
@@ -225,8 +225,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         </nav>
 
         <section hidden={activeView !== 'connection'} className="settings-section" aria-labelledby="connection-heading">
-        <h2 id="connection-heading">Storage</h2>
-        <StorageBackendSettings />
+        <h2 id="connection-heading">Compute</h2>
+        <ComputeSettings />
         <ServerAgentSettings />
         <h2>Codex</h2>
         <div className="auth-mode" role="group" aria-label="Codex authentication method">

@@ -15,6 +15,7 @@
     "dev:down": "podman compose down",
     "server:migrate": "cross-env DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test FORAGE_INSTANCE_ID=local-development FORAGE_ASSET_DIR=../../.local/forage-assets npm run db:migrate --workspace @forage/server",
     "server:bootstrap": "npm run dev:infra && cross-env DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test FORAGE_INSTANCE_ID=local-development FORAGE_ASSET_DIR=../../.local/forage-assets FORAGE_OWNER_EMAIL=owner@example.invalid npm run bootstrap --workspace @forage/server",
+    "server:tokens": "cross-env DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test npm run tokens --workspace @forage/server --",
     "tauri": "npm run tauri --workspace @forage/desktop --",
     "build": "turbo run build",
     "test": "vitest run --reporter=verbose",

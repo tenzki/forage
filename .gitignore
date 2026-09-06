@@ -6,3 +6,8 @@ node_modules/
 .turbo/
 .local/
 .ant-colony/
+
+# Local secrets and machine-specific settings; .env.example is the tracked template.
+.env
+.env.*
+!.env.example

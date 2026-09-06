@@ -12,6 +12,7 @@ npm run dev              # PostgreSQL + migrations, then API + real Tauri app vi
 npm run dev:desktop      # Real local-only Tauri app; no PostgreSQL or API
 npm run dev:server       # PostgreSQL + migrations + API only
 npm run server:bootstrap # One-time local owner, outline, and credential creation
+npm run server:tokens -- list  # List, create, or revoke server credentials
 npm run dev:down         # Stop local compose infrastructure
 npm run dev:web --workspace @forage/desktop   # Browser-only Vite frontend on :1420
 npm run build            # Turbo build/typecheck for desktop and server
@@ -63,7 +64,7 @@ Agents and slash-command skills are typed definitions in `apps/desktop/src/agent
 
 ### Persistence and server checks
 
-`cargo test` under `apps/desktop/src-tauri/` covers SQLite, native origin pinning, and local assets. Server unit/API tests run with the root Vitest suite. PostgreSQL contract tests require `podman compose up -d postgres` and access to `127.0.0.1:55437`.
+`cargo test` under `apps/desktop/src-tauri/` covers SQLite, native origin pinning, and local assets. Server unit/API tests run with the root Vitest suite. PostgreSQL contract tests require `podman compose up -d postgres` and access to `127.0.0.1:55437`. They run only when `TEST_DATABASE_URL` is set (root `.env` is loaded by `vitest.config.ts`), and they `TRUNCATE` every table before each test, so it must point at `forage_contract_test` rather than the development database `forage_test`. `postgres.test.ts` refuses to run when the two URLs match.
 
 ## Planning workflow (GSD)
 

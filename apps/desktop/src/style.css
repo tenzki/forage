@@ -2381,6 +2381,39 @@ kbd {
   color: #6a4ce0;
   transform: translateY(-50%);
 }
+.compute-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.compute-wizard-steps {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.compute-wizard-steps li {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #f1f1f1;
+  color: #999;
+  text-align: center;
+}
+.compute-wizard-steps li.done {
+  background: #eeeaff;
+  color: #6a4ce0;
+}
+.compute-wizard-steps li.active {
+  background: #6a4ce0;
+  color: #fff;
+  font-weight: 600;
+}
+.compute-wizard-actions {
+  margin-top: 4px;
+}
 .auth-card {
   display: flex;
   flex-direction: column;

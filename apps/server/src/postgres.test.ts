@@ -7,7 +7,17 @@ import { parseEventEnvelope } from '@forage/domain'
 import { PostgresProviderCredentialStore } from './postgresCredentialStore'
 import { ServerCredentialService } from './credentialService'
 
-const connectionString = process.env.TEST_DATABASE_URL ?? 'postgres://forage:forage@127.0.0.1:55437/forage_test'
+const connectionString = process.env.TEST_DATABASE_URL ?? 'postgres://forage:forage@127.0.0.1:55437/forage_contract_test'
+
+// Every test truncates every table, so pointing this at the development database would
+// destroy local outlines, owners, and credentials. Refuse rather than wipe them.
+if (process.env.TEST_DATABASE_URL && process.env.TEST_DATABASE_URL === process.env.DATABASE_URL) {
+  throw new Error(
+    'TEST_DATABASE_URL must not equal DATABASE_URL: these tests TRUNCATE every table. '
+    + 'Point TEST_DATABASE_URL at a dedicated database such as forage_contract_test.',
+  )
+}
+
 const pool = new Pool({ connectionString })
 const describePostgres = process.env.TEST_DATABASE_URL ? describe : describe.skip
 
