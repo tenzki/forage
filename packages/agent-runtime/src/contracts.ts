@@ -111,6 +111,8 @@ export const activityEventSchema = z.object({
   kind: z.enum(['thinking', 'tool', 'output', 'status', 'error']),
   label: z.string().trim().min(1).max(200),
   detail: z.string().trim().min(1).max(2_000).optional(),
+  /** Outline bullet this event points at, so the activity sidebar can navigate to it. */
+  nodeId: runtimeIdSchema.optional(),
   status: z.enum(['pending', 'running', 'success', 'error', 'cancelled']).optional(),
   durationMs: z.number().int().nonnegative().max(86_400_000).optional(),
   createdAt: z.iso.datetime({ offset: true }).optional(),

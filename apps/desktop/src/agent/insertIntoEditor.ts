@@ -378,12 +378,13 @@ function createAiOutlineItem(editor: Editor, node: StoredOutlineNode, nodeId: st
   return [schema.nodes.listItem.create({ nodeId, nodeType: 'ai' }, content)]
 }
 
+/** Insert an agent result under its invocation bullet. Returns the new top-level bullet ids. */
 export function commitStructuredAgentResult(
   editor: Editor,
   invocationNodeId: string,
   skillLabel: string,
   result: StructuredResult,
-): void {
+): string[] {
   let invocation: { pos: number; node: ProseMirrorNode } | null = null
   editor.state.doc.descendants((node, pos) => {
     if (invocation || node.type.name !== 'listItem' || node.attrs.nodeId !== invocationNodeId) return
@@ -409,6 +410,9 @@ export function commitStructuredAgentResult(
   transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
   transaction.setMeta('forageOrigin', 'agent')
   editor.view.dispatch(transaction)
+  return items
+    .map((item) => item.attrs.nodeId)
+    .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
 }
 
 function structuredToStored(node: StructuredResultNode): StoredOutlineNode {

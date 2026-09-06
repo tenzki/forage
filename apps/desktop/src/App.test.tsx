@@ -566,8 +566,10 @@ describe('App view switching', () => {
     await user.click(editor)
     await user.keyboard('/todo{Enter}')
 
-    expect(screen.getAllByText('/todo')).toHaveLength(2)
-    expect(screen.getByRole('list', { name: 'Execution timeline for /todo' })).toBeTruthy()
+    // An outline command is a single activity: one call header, no sub-events.
+    expect(screen.getAllByText('/todo')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Collapse execution for /todo' })).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Execution timeline for /todo' })).toBeNull()
   })
 
   it('fully hides the activity sidebar from the header toggle', async () => {

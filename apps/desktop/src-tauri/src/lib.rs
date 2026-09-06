@@ -1,6 +1,5 @@
 pub mod assets;
 pub mod commands;
-pub mod credential_vault;
 pub mod persistence;
 pub mod server_transport;
 pub mod sync_commands;
@@ -30,7 +29,6 @@ pub fn run() {
             app.manage(commands::NativeState {
                 event_store,
                 asset_store,
-                credential_vault: credential_vault::CredentialVault::default(),
                 http_client,
             });
             Ok(())
@@ -54,6 +52,8 @@ pub fn run() {
             commands::agent_run_begin_attempt,
             commands::agent_run_append_activity,
             commands::agent_run_activity_after,
+            commands::agent_run_recent,
+            commands::agent_runs_clear,
             commands::agent_run_cancel,
             commands::agent_run_settle,
             commands::agent_run_retry,

@@ -232,6 +232,13 @@ body {
   width: 100%;
   min-width: 0;
   align-items: center;
+}
+
+.activity-call-open,
+.activity-call-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: 7px;
   padding: 9px 8px;
   border: 0;
@@ -242,17 +249,47 @@ body {
   text-align: left;
 }
 
-.activity-call-header:hover {
+.activity-call-open {
+  flex: 1 1 auto;
+}
+
+.activity-call-toggle {
+  flex: 0 0 auto;
+  padding-left: 0;
+  color: #8a8195;
+}
+
+.activity-call-open:disabled {
+  cursor: default;
+}
+
+.activity-call-open:hover:not(:disabled),
+.activity-call-toggle:hover {
   background: #faf8ff;
 }
 
-.activity-call-header .activity-entry-main {
-  cursor: pointer;
+.activity-call-toggle .activity-detail-chevron {
+  transition: transform 120ms ease;
 }
 
-.activity-call-header .activity-duration {
+.activity-call-toggle .activity-detail-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+.activity-call-open .activity-entry-main {
+  cursor: inherit;
+}
+
+.activity-call-open .activity-duration {
   position: static;
   margin-left: auto;
+}
+
+.activity-timeline-label.is-navigable strong {
+  color: #6a4fd0;
+  text-decoration: underline;
+  text-decoration-color: #d9d0f5;
+  text-underline-offset: 2px;
 }
 
 .activity-timeline {
@@ -1017,7 +1054,7 @@ body.is-dragging-outline .bullet-collapse {
 .sidebar-system {
   display: grid;
   gap: 2px;
-  padding: 0 8px 8px;
+  padding: 0 0 8px;
 }
 
 .sidebar-settings,
@@ -1124,7 +1161,7 @@ svg.sidebar-primary-icon {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 18px 8px 6px;
+  margin: 18px 9px 6px;
 }
 
 .sidebar-section-heading h2 {
@@ -1260,7 +1297,7 @@ svg.sidebar-primary-icon {
 }
 
 .sidebar-empty {
-  padding: 8px;
+  padding: 8px 9px;
   color: #aaa;
   font-size: 12px;
   line-height: 1.4;
@@ -1351,7 +1388,7 @@ body.is-dragging-shortcut * {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 6px 9px;
   text-align: left;
 }
@@ -1368,8 +1405,10 @@ body.is-dragging-shortcut * {
 }
 
 .sidebar-shortcut-icon {
-  width: 12px;
+  display: grid;
+  width: 16px;
   flex: 0 0 auto;
+  place-items: center;
   color: #7659d6;
   font-weight: 600;
   text-align: center;

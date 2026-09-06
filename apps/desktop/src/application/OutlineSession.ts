@@ -13,6 +13,7 @@ import {
   type PersistentHistoryState,
 } from '../editor/persistentHistory'
 import type {
+  LocalAgentRunHistory,
   LocalIdentity,
   ServerConnectionInfo,
 } from '../persistence/eventStore'
@@ -33,6 +34,8 @@ export interface OutlineSessionRepository extends SyncRepository {
   identity(): Promise<LocalIdentity>
   serverConnection(): Promise<ServerConnectionInfo | null>
   interruptUnfinishedAgentRuns(interruptedAt: string): Promise<number>
+  recentAgentRuns(outlineId: string, limit?: number): Promise<LocalAgentRunHistory[]>
+  clearAgentRuns(outlineId: string): Promise<number>
 }
 
 export interface OutlineSessionStatus {
@@ -117,6 +120,20 @@ export class OutlineSession {
       nextEventId: this.nextId,
       now: this.now,
     }
+  }
+
+  /** Persisted agent runs for the open outline, newest first. */
+  async agentRunHistory(limit = 25): Promise<LocalAgentRunHistory[]> {
+    const outlineId = this.identityValue?.outlineId
+    if (!outlineId) return []
+    return this.repository.recentAgentRuns(outlineId, limit)
+  }
+
+  /** Forget persisted agent runs for the open outline. */
+  async clearAgentRunHistory(): Promise<void> {
+    const outlineId = this.identityValue?.outlineId
+    if (!outlineId) return
+    await this.repository.clearAgentRuns(outlineId)
   }
 
   async open(): Promise<OpenedOutline> {

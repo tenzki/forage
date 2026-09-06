@@ -33,7 +33,7 @@ Anything touching custom native persistence/sync commands or `plugin-store` only
 
 ## Architecture
 
-Tauri v2 desktop shell around a TypeScript/React frontend, with narrow custom Rust commands for SQLite durability, content-addressed assets, OS credentials, and pinned server transport. Shared domain/document/protocol behavior lives in TypeScript packages and the optional Node.js server uses PostgreSQL.
+Tauri v2 desktop shell around a TypeScript/React frontend, with narrow custom Rust commands for SQLite durability, content-addressed assets, local credential storage, and pinned server transport. Shared domain/document/protocol behavior lives in TypeScript packages and the optional Node.js server uses PostgreSQL.
 
 Four things carry the design:
 
@@ -41,11 +41,11 @@ Four things carry the design:
 
 **Bullet identity comes from a ProseMirror plugin, not from the store.** `apps/desktop/src/editor/extensions.ts` `BulletAttributes` adds `nodeId`/`nodeType` global attributes to `listItem` and assigns a UUID to any listItem lacking one (or holding a duplicate) via `appendTransaction`, so ids land in the same history step as the edit that created them. `nodeType: 'ai'` marks agent-written bullets (styled via `data-node-type` in `apps/desktop/src/style.css`).
 
-**Persistence is an SQLite event store in application data.** `apps/desktop/src-tauri/src/persistence.rs` owns immediate transactional append, checkpoints, the pending outbox, acknowledgements, and explicit local/server mode. Local mode is single-device. In server mode, PostgreSQL is authoritative and SQLite remains the offline cache/outbox. iCloud persistence and legacy migration were removed; see ADR-0012.
+**Persistence is an SQLite event store in application data.** `apps/desktop/src-tauri/src/persistence.rs` owns immediate transactional append, checkpoints, the pending outbox, acknowledgements, explicit local/server mode, and local credentials (ADR-0014; the OS keychain is not used). Local mode is single-device. In server mode, PostgreSQL is authoritative and SQLite remains the offline cache/outbox. iCloud persistence and legacy migration were removed; see ADR-0012.
 
 **Generated images are content-addressed assets.** Documents store `assetId` plus alt text, never data URLs or paths. Rust verifies and caches local bytes. Server mode uploads/downloads through authenticated native commands; the server verifies signature, size, hash, ownership, and completion before accepting a referencing event.
 
-**Agent work runs in a Node.js SDK sidecar.** `apps/desktop/src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `apps/desktop/src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `apps/desktop/src-tauri/resources/pi/sidecar/tools.ts` registers all tools (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, `search_outline`, custom HTTP); `apps/desktop/src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Secrets loaded through the native local credential vault are passed through the child environment, never process arguments. `plugin-store` retains only settings and non-secret credential metadata. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
+**Agent work runs in a Node.js SDK sidecar.** `apps/desktop/src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `apps/desktop/src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `apps/desktop/src-tauri/resources/pi/sidecar/tools.ts` registers all tools (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, `search_outline`, custom HTTP); `apps/desktop/src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Secrets loaded from the SQLite credential store are passed through the child environment, never process arguments. `plugin-store` retains only settings and non-secret credential metadata. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
 
 This replaced the earlier `pi --mode rpc` + bridge extension design (`piRpcClient.ts`, `ai-chat-bridge.ts` — still on disk, only referenced by tests). The SDK sidecar removes the `pi` CLI dependency; the only runtime requirement is Node.js 18+.
 

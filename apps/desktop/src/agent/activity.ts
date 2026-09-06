@@ -9,6 +9,8 @@ export interface ActivityEvent {
   kind: ActivityKind
   label: string
   detail?: string
+  /** Outline bullet this event points at, used for sidebar navigation. */
+  nodeId?: string
   status?: ActivityStatus
   durationMs?: number
 }

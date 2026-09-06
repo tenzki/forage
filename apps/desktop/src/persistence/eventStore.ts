@@ -91,6 +91,11 @@ export interface LocalAgentRun {
   updatedAt: string
 }
 
+export interface LocalAgentRunHistory {
+  run: LocalAgentRun
+  activity: LocalAgentActivity[]
+}
+
 export interface LocalAgentActivity {
   runId: string
   sequence: number
@@ -218,6 +223,18 @@ export class NativeEventRepository {
   async agentActivityAfter(runId: string, afterSequence: number, limit = 100): Promise<LocalAgentActivity[]> {
     const records = await invoke<LocalAgentActivity[]>('agent_run_activity_after', { runId, afterSequence, limit })
     return records.map((record) => ({ ...record, event: activityEventSchema.parse(record.event) }))
+  }
+
+  async recentAgentRuns(outlineId: string, limit = 25): Promise<LocalAgentRunHistory[]> {
+    const history = await invoke<LocalAgentRunHistory[]>('agent_run_recent', { outlineId, limit })
+    return history.map(({ run, activity }) => ({
+      run: { ...run, status: runStatusSchema.parse(run.status) },
+      activity: activity.map((record) => ({ ...record, event: activityEventSchema.parse(record.event) })),
+    }))
+  }
+
+  async clearAgentRuns(outlineId: string): Promise<number> {
+    return invoke('agent_runs_clear', { outlineId })
   }
 
   async cancelAgentRun(runId: string, cancelledAt: string): Promise<void> {

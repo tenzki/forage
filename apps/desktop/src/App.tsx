@@ -12,8 +12,9 @@ import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
 import { TrashPanel } from './components/Outliner/TrashPanel'
 import { TasksPanel } from './components/Outliner/TasksPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
-import { ActivitySidebar, type ActivityCall, type ActivityEntry } from './components/Agent/ActivitySidebar'
+import { ActivitySidebar, type ActivityCall } from './components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './agent/activity'
+import { applyActivityEvent, callsFromHistory } from './agent/activityCalls'
 import {
   captureDocumentEvent,
   DOMAIN_MUTATION_META,
@@ -34,7 +35,7 @@ import {
   SYSTEM_NODE_REJECTION_MESSAGE,
 } from './editor/systemNodeGuards'
 import { createOutlineSchema, findSystemNode } from '@forage/document'
-import { focusFirstChildOrCreate } from './editor/outlineModel'
+import { focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
@@ -95,51 +96,21 @@ export default function App() {
         activeAgentCalls.current.delete(event.id)
       }
     }
-    setActivityCalls((current) => {
-      const status = event.status ?? (
-        event.phase === 'start' ? 'running' :
-          event.phase === 'error' ? 'error' :
-            event.phase === 'cancelled' ? 'cancelled' : 'complete'
-      )
-      const callId = event.callId ?? event.id
-      const existingCall = current.find((call) => call.id === callId)
-      const existingEvent = existingCall?.events.find((entry) => entry.id === event.id)
-      const nextEvent: ActivityEntry = {
-        id: event.id,
-        kind: event.kind,
-        label: event.label,
-        detail: event.detail,
-        status,
-        timestamp: existingEvent?.timestamp ?? Date.now(),
-        durationMs: event.durationMs,
-      }
-      if (!existingCall) {
-        return [...current, {
-          id: callId,
-          label: event.callId ? 'Agent execution' : event.label,
-          detail: event.callId ? undefined : event.detail,
-          status: event.callId ? 'running' : status,
-          timestamp: Date.now(),
-          durationMs: event.callId ? undefined : event.durationMs,
-          events: [nextEvent],
-        }].slice(-100)
-      }
-      const events = existingEvent
-        ? existingCall.events.map((entry) => entry.id === event.id ? { ...entry, ...nextEvent, detail: event.detail ?? entry.detail } : entry)
-        : [...existingCall.events, nextEvent]
-      const isCallEvent = event.id === callId
-      return current.map((call) => call.id === callId
-        ? {
-            ...call,
-            label: isCallEvent ? event.label : call.label,
-            detail: isCallEvent ? event.detail ?? call.detail : call.detail,
-            status: isCallEvent ? status : call.status,
-            durationMs: isCallEvent ? event.durationMs ?? call.durationMs : call.durationMs,
-            events,
-          }
-        : call)
-    })
+    setActivityCalls((current) => applyActivityEvent(current, event))
   }, [])
+
+  const openActivityNode = useCallback((nodeId: string, contextNodeId?: string) => {
+    if (!editor) return
+    setViewError(null)
+    setView('outliner')
+    setZoom(editor, contextNodeId ?? nodeId)
+    selectBullet(editor, nodeId)
+  }, [editor])
+
+  const clearActivity = useCallback(() => {
+    setActivityCalls([])
+    void session.clearAgentRunHistory().catch(() => undefined)
+  }, [session])
 
   const readOutline = useCallback(async () => {
     setLoadError(null)
@@ -162,6 +133,17 @@ export default function App() {
     void readOutline()
     void loadSettings()
   }, [loadSettings, readOutline])
+
+  // Persisted runs rehydrate the sidebar so agent activity survives a restart.
+  useEffect(() => {
+    if (!loaded) return
+    let disposed = false
+    void session.agentRunHistory().then((history) => {
+      if (disposed || !history.length) return
+      setActivityCalls((current) => current.length ? current : callsFromHistory(history))
+    }).catch(() => undefined)
+    return () => { disposed = true }
+  }, [loaded, session])
 
   useEffect(() => {
     if (!editor || !session.context()) return
@@ -482,7 +464,8 @@ export default function App() {
         <ActivitySidebar
           calls={activityCalls}
           collapsed={activitySidebarCollapsed}
-          onClear={() => setActivityCalls([])}
+          onClear={clearActivity}
+          onOpenNode={openActivityNode}
         />
       </main>
     </div>

@@ -25,6 +25,7 @@ import {
 } from '../../editor/outlineModel'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ActivityReporter } from '../../agent/activity'
+import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
 import {
   nativeLocalCredentialVault,
   resolveLocalCredential,
@@ -259,12 +260,15 @@ export function SlashMenu({
     setCompletedCommand(null)
     if (command.outlineCommand) {
       const activityId = `command-${Date.now()}`
-      onActivity?.({ id: activityId, phase: 'start', kind: 'command', label: `/${command.outlineCommand.label}` })
+      const commandNodeId = currentListItemId(editor)
+      const commandLabel = `/${command.outlineCommand.label}`
+      const nodeId = commandNodeId ? { nodeId: commandNodeId } : {}
+      onActivity?.({ id: activityId, phase: 'start', kind: 'command', label: commandLabel, ...nodeId })
       clearSkillContext(editor)
       setCurrentBulletText(editor, prompt)
       setMenu(null)
       runOutlineCommand(editor, command.outlineCommand)
-      onActivity?.({ id: activityId, phase: 'complete', kind: 'command', label: `/${command.outlineCommand.label}` })
+      onActivity?.({ id: activityId, phase: 'complete', kind: 'command', label: commandLabel, ...nodeId })
       return
     }
     const skill = command.skill
@@ -282,6 +286,18 @@ export function SlashMenu({
     }
     const contextSnapshot = resolveAgentContext(editor.state.doc, invocationNodeId)
     const repository = new NativeEventRepository()
+    // One call id per run keeps every event of this invocation in a single sidebar group.
+    const runId = crypto.randomUUID()
+    const startedAt = Date.now()
+    const callLabel = runActivityLabel(skill.label, prompt)
+    onActivity?.({
+      id: runId,
+      phase: 'start',
+      kind: 'skill',
+      label: callLabel,
+      nodeId: invocationNodeId,
+      ...(prompt ? { detail: prompt } : {}),
+    })
     void (async () => {
       const mode = await repository.storageMode()
       if (mode === 'server') {
@@ -304,7 +320,7 @@ export function SlashMenu({
           executorSupportedToolIds: published.configuration.globallyEnabledToolIds,
         })
         const input: RunInput = {
-          version: 1, runId: crypto.randomUUID(), executionMode: 'server', outlineId: connection.outlineId,
+          version: 1, runId, executionMode: 'server', outlineId: connection.outlineId,
           source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
           baseRevision: sync.lastPulledRevision, configurationRevision: published.configuration.revision,
           credentialRef: serverAgent.credentialRef, agent: serverAgent, skill: serverSkill,
@@ -312,9 +328,10 @@ export function SlashMenu({
           customTools: published.configuration.customTools,
         }
         const handle = await new ServerAgentExecutor(transport).invoke(input, {
-          onActivity: (event) => onActivity?.(desktopActivity(event)),
+          onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
         })
         await handle.completion
+        onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
         return
       }
 
@@ -330,7 +347,7 @@ export function SlashMenu({
         executorSupportedToolIds: [...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id), ...customTools.map((tool) => tool.id)],
       })
       const input: RunInput = {
-        version: 1, runId: crypto.randomUUID(), executionMode: 'local', outlineId: identity.outlineId,
+        version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
         source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
         baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
         agent, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
@@ -344,12 +361,23 @@ export function SlashMenu({
         },
       })
       const handle = await new LocalAgentExecutor(repository, runner).invoke(input, {
-        onActivity: (event) => onActivity?.(desktopActivity(event)),
+        onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
       })
       const result = await handle.completion
-      commitStructuredAgentResult(editor, invocationNodeId, skill.label, result)
+      const [resultNodeId] = commitStructuredAgentResult(editor, invocationNodeId, skill.label, result)
+      if (resultNodeId) await recordResultActivity(repository, runId, resultNodeId, onActivity)
+      onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
     })().catch((error: unknown) => {
       const detail = error instanceof Error ? error.message : String(error)
+      onActivity?.({
+        id: runId,
+        phase: 'error',
+        kind: 'skill',
+        label: callLabel,
+        detail,
+        nodeId: invocationNodeId,
+        durationMs: Date.now() - startedAt,
+      })
       onError(detail)
       showSkillContextError(editor, invocationNodeId, detail)
       setContextError(detail)
@@ -385,19 +413,26 @@ export function SlashMenu({
   )
 }
 
-function desktopActivity(event: RuntimeActivityEvent): Parameters<ActivityReporter>[0] {
-  return {
-    id: event.id,
-    ...(event.callId ? { callId: event.callId } : {}),
-    phase: event.phase === 'progress' ? 'start' : event.phase,
-    kind: event.kind === 'status' ? 'thinking' : event.kind,
-    label: event.label,
-    ...(event.detail ? { detail: event.detail } : {}),
-    ...(event.status ? {
-      status: event.status === 'success' ? 'complete'
-        : event.status === 'pending' ? 'running'
-          : event.status,
-    } : {}),
-    ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+/**
+ * Persist a pointer to the bullets an agent wrote so the sidebar can still open them
+ * after a restart, and surface it live in the current session.
+ */
+async function recordResultActivity(
+  repository: NativeEventRepository,
+  runId: string,
+  resultNodeId: string,
+  onActivity?: ActivityReporter,
+): Promise<void> {
+  const event: RuntimeActivityEvent = {
+    id: `result-${runId}`,
+    sequence: (await repository.agentActivityAfter(runId, 0, 200)).length + 1,
+    callId: runId,
+    phase: 'complete',
+    kind: 'output',
+    label: 'Open result',
+    nodeId: resultNodeId,
+    status: 'success',
   }
+  await repository.appendAgentActivity(runId, event, new Date().toISOString())
+  onActivity?.(fromRuntimeEvent(event, runId))
 }

@@ -12,7 +12,7 @@ flowchart LR
     APP --> IPC[Bounded Tauri commands]
     IPC --> SQLITE[(Local SQLite event store)]
     IPC --> ASSETS[(Local content-addressed assets)]
-    IPC --> VAULT[OS credential storage]
+    IPC --> VAULT[Local credential storage in SQLite]
     IPC --> TRANSPORT[Origin-pinned server transport]
     APP --> SIDECAR[Local Node.js Pi SDK sidecar]
     SIDECAR --> MODELS[User-selected model provider]
@@ -33,7 +33,7 @@ Responsibilities are divided by capability:
 | --- | --- |
 | React/TypeScript desktop | Editor behavior, application orchestration, event capture, deterministic projection, synchronization policy, agent context and tool policy, and UI state |
 | Shared TypeScript packages | ProseMirror schema and operations, event envelopes and reduction, protocol validation, rebase behavior, agent configuration, run inputs, activity, and structured-result contracts |
-| Tauri/Rust boundary | SQLite durability, checkpoints and outbox state, local content-addressed asset bytes, OS credential access, and origin-pinned authenticated server transport |
+| Tauri/Rust boundary | SQLite durability, checkpoints and outbox state, local content-addressed asset bytes, local credential storage, and origin-pinned authenticated server transport |
 | Local Node.js sidecar | In-memory Pi SDK sessions, local model/tool execution, streaming lifecycle events, structured output, cancellation, and process cleanup |
 | Optional server | Authentication, global event sequencing, authoritative server-mode projection, Notes API, asset transfer, agent configuration, and durable agent work |
 | PostgreSQL | Authoritative server-mode events, revisions, projections, credentials, automation policy, durable agent queues, leases, activity, and result identity |

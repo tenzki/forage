@@ -71,8 +71,8 @@ pub async fn server_enroll(
 
     let credential_reference = format!("device_{}", uuid::Uuid::new_v4());
     state
-        .credential_vault
-        .store(&credential_reference, &device_token)
+        .event_store
+        .store_credential(&credential_reference, &device_token)
         .map_err(|error| error.to_string())?;
     let configuration = ServerConfiguration {
         origin: pinned.origin().as_str().trim_end_matches('/').to_string(),
@@ -81,7 +81,7 @@ pub async fn server_enroll(
         outline_id,
     };
     if let Err(error) = state.event_store.set_server_configuration(&configuration) {
-        let _ = state.credential_vault.remove(&credential_reference);
+        let _ = state.event_store.remove_credential(&credential_reference);
         return Err(error.to_string());
     }
     state
@@ -213,8 +213,8 @@ pub fn server_disconnect(state: State<'_, NativeState>) -> Result<(), String> {
         .map_err(|error| error.to_string())?
     {
         state
-            .credential_vault
-            .remove(&configuration.credential_reference)
+            .event_store
+            .remove_credential(&configuration.credential_reference)
             .map_err(|error| error.to_string())?;
     }
     state
@@ -566,8 +566,8 @@ fn connection(
     let pinned = PinnedServer::parse(&configuration.origin, &configuration.instance_id)
         .map_err(|error| error.to_string())?;
     let token = state
-        .credential_vault
-        .load(&configuration.credential_reference)
+        .event_store
+        .load_credential(&configuration.credential_reference)
         .map_err(|error| error.to_string())?;
     Ok((configuration, pinned, token))
 }

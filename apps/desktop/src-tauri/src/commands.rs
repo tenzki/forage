@@ -1,7 +1,7 @@
 use crate::assets::{AssetMetadata, AssetStore, MAX_ASSET_BYTES};
 use crate::persistence::{
-    AgentActivityRecord, AgentRunRecord, CheckpointRecord, EventRecord, EventStore, StorageMode,
-    StoredEvent, SyncState,
+    AgentActivityRecord, AgentRunHistoryRecord, AgentRunRecord, CheckpointRecord, EventRecord,
+    EventStore, StorageMode, StoredEvent, SyncState,
 };
 use base64::Engine;
 use tauri::State;
@@ -9,7 +9,6 @@ use tauri::State;
 pub struct NativeState {
     pub event_store: EventStore,
     pub asset_store: AssetStore,
-    pub credential_vault: crate::credential_vault::CredentialVault,
     pub http_client: reqwest::Client,
 }
 
@@ -299,6 +298,26 @@ pub fn agent_run_activity_after(
 }
 
 #[tauri::command]
+pub fn agent_run_recent(
+    state: State<'_, NativeState>,
+    outline_id: String,
+    limit: i64,
+) -> Result<Vec<AgentRunHistoryRecord>, String> {
+    state
+        .event_store
+        .recent_agent_runs(&outline_id, limit)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn agent_runs_clear(state: State<'_, NativeState>, outline_id: String) -> Result<usize, String> {
+    state
+        .event_store
+        .clear_agent_runs(&outline_id)
+        .map_err(command_error)
+}
+
+#[tauri::command]
 pub fn agent_run_cancel(
     state: State<'_, NativeState>,
     run_id: String,
@@ -367,8 +386,8 @@ pub fn local_credential_store(
         return Err("invalid local credential secret".to_string());
     }
     state
-        .credential_vault
-        .store(&reference, &secret)
+        .event_store
+        .store_credential(&reference, &secret)
         .map_err(command_error)
 }
 
@@ -379,8 +398,8 @@ pub fn local_credential_load(
 ) -> Result<String, String> {
     validate_local_credential_reference(&reference)?;
     state
-        .credential_vault
-        .load(&reference)
+        .event_store
+        .load_credential(&reference)
         .map_err(command_error)
 }
 
@@ -391,7 +410,7 @@ pub fn local_credential_remove(
 ) -> Result<(), String> {
     validate_local_credential_reference(&reference)?;
     state
-        .credential_vault
-        .remove(&reference)
+        .event_store
+        .remove_credential(&reference)
         .map_err(command_error)
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ActivitySidebar, type ActivityCall } from './ActivitySidebar'
 
 describe('activity sidebar', () => {
@@ -35,5 +35,31 @@ describe('activity sidebar', () => {
 
     expect(screen.getByText('No activity yet')).toBeTruthy()
     expect(screen.getByText('Run a skill to see its work here.')).toBeTruthy()
+  })
+
+  it('opens the invocation bullet from the header and the result bullet from its event', () => {
+    const onOpenNode = vi.fn()
+    const calls: ActivityCall[] = [
+      {
+        id: 'run-1',
+        label: 'Run /research tauri',
+        status: 'complete',
+        timestamp: 1,
+        nodeId: 'bullet-1',
+        events: [
+          { id: 'result-run-1', kind: 'output', label: 'Open result', status: 'complete', timestamp: 2, nodeId: 'bullet-9' },
+        ],
+      },
+    ]
+
+    render(<ActivitySidebar calls={calls} onClear={() => undefined} onOpenNode={onOpenNode} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open outline bullet for Run /research tauri' }))
+    expect(onOpenNode).toHaveBeenCalledWith('bullet-1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open outline result for Open result' }))
+    expect(onOpenNode).toHaveBeenLastCalledWith('bullet-9', 'bullet-1')
+
+    expect(screen.getByRole('button', { name: 'Collapse execution for Run /research tauri' })).toBeTruthy()
   })
 })

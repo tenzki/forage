@@ -543,3 +543,52 @@ fn cancellation_retry_and_startup_interruption_preserve_history() {
         "interrupted"
     );
 }
+
+#[test]
+fn returns_recent_agent_runs_with_activity_and_clears_them_per_outline() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    let mut older = agent_run("run-old", "queued");
+    older.created_at = "2026-08-31T09:00:00.000Z".to_string();
+    store.admit_agent_run(&older).expect("admit older run");
+    store
+        .admit_agent_run(&agent_run("run-new", "queued"))
+        .expect("admit newer run");
+    let mut other_outline = agent_run("run-other", "queued");
+    other_outline.outline_id = "outline-2".to_string();
+    store
+        .admit_agent_run(&other_outline)
+        .expect("admit other outline run");
+    store
+        .append_agent_activity(
+            "run-new",
+            &json!({ "id": "thinking-1", "sequence": 1, "kind": "thinking", "label": "Thinking" }),
+            "2026-08-31T10:00:01.000Z",
+        )
+        .expect("append activity");
+
+    let history = store
+        .recent_agent_runs("outline-1", 10)
+        .expect("recent runs");
+    assert_eq!(
+        history
+            .iter()
+            .map(|entry| entry.run.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["run-new", "run-old"]
+    );
+    assert_eq!(history[0].activity.len(), 1);
+    assert_eq!(history[0].activity[0].event["label"], json!("Thinking"));
+    assert!(history[1].activity.is_empty());
+
+    let removed = store.clear_agent_runs("outline-1").expect("clear runs");
+    assert_eq!(removed, 2);
+    assert!(store
+        .recent_agent_runs("outline-1", 10)
+        .expect("recent runs after clear")
+        .is_empty());
+    assert!(store.agent_run("run-other").expect("other run").is_some());
+    assert!(store
+        .agent_activity_after("run-new", 0, 100)
+        .expect("activity after clear")
+        .is_empty());
+}

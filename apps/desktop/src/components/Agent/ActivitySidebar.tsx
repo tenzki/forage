@@ -12,15 +12,20 @@ export interface ActivityEntry {
   status: ActivityStatus
   timestamp: number
   durationMs?: number
+  /** Outline bullet this event produced, if any. */
+  nodeId?: string
 }
 
 export interface ActivityCall {
   id: string
+  kind?: ActivityKind
   label: string
   detail?: string
   status: ActivityStatus
   timestamp: number
   durationMs?: number
+  /** Bullet the skill was invoked from. */
+  nodeId?: string
   events: ActivityEntry[]
 }
 
@@ -49,10 +54,13 @@ function statusIcon(status: ActivityStatus) {
 export function ActivitySidebar({
   calls,
   onClear,
+  onOpenNode,
   collapsed = false,
 }: {
   calls: ActivityCall[]
   onClear: () => void
+  /** Reveal a bullet in the outline; `contextNodeId` is the branch it lives under. */
+  onOpenNode?: (nodeId: string, contextNodeId?: string) => void
   collapsed?: boolean
 }) {
   const [collapsedCalls, setCollapsedCalls] = useState<Set<string>>(new Set())
@@ -112,22 +120,33 @@ export function ActivitySidebar({
               const isCallCollapsed = collapsedCalls.has(call.id)
               return (
                 <section key={call.id} className={`activity-call is-${call.status}`}>
-                  <button
-                    type="button"
-                    className="activity-call-header"
-                    aria-expanded={!isCallCollapsed}
-                    aria-label={`${isCallCollapsed ? 'Expand' : 'Collapse'} execution for ${call.label}`}
-                    onClick={() => toggleCall(call.id)}
-                  >
-                    <span className={`activity-kind-icon is-${call.events[0]?.kind ?? 'skill'}`}>{kindIcon(call.events[0]?.kind ?? 'skill')}</span>
-                    <span className="activity-entry-main">
-                      <strong>{call.label}</strong>
-                      <small>{new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small>
-                    </span>
-                    {duration && <span className="activity-duration">{duration}</span>}
-                    <span className="activity-status-icon">{statusIcon(call.status)}</span>
-                  </button>
-                  {!isCallCollapsed && (
+                  <div className="activity-call-header">
+                    <button
+                      type="button"
+                      className="activity-call-open"
+                      aria-label={call.nodeId ? `Open outline bullet for ${call.label}` : call.label}
+                      disabled={!call.nodeId || !onOpenNode}
+                      onClick={() => call.nodeId && onOpenNode?.(call.nodeId)}
+                    >
+                      <span className={`activity-kind-icon is-${call.kind ?? call.events[0]?.kind ?? 'skill'}`}>{kindIcon(call.kind ?? call.events[0]?.kind ?? 'skill')}</span>
+                      <span className="activity-entry-main">
+                        <strong>{call.label}</strong>
+                        <small>{new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small>
+                      </span>
+                      {duration && <span className="activity-duration">{duration}</span>}
+                      <span className="activity-status-icon">{statusIcon(call.status)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="activity-call-toggle"
+                      aria-expanded={!isCallCollapsed}
+                      aria-label={`${isCallCollapsed ? 'Expand' : 'Collapse'} execution for ${call.label}`}
+                      onClick={() => toggleCall(call.id)}
+                    >
+                      <ChevronDown className={`activity-detail-chevron${isCallCollapsed ? '' : ' is-expanded'}`} aria-hidden="true" />
+                    </button>
+                  </div>
+                  {!isCallCollapsed && call.events.length > 0 && (
                     <ol className="activity-timeline" aria-label={`Execution timeline for ${call.label}`}>
                       {call.events.map((entry) => {
                         const isExpanded = expandedEvents.has(entry.id)
@@ -137,9 +156,13 @@ export function ActivitySidebar({
                             <div className="activity-timeline-content">
                               <button
                                 type="button"
-                                className="activity-timeline-label"
-                                onClick={() => entry.detail && toggleEvent(entry.id)}
-                                aria-expanded={entry.detail ? isExpanded : undefined}
+                                className={`activity-timeline-label${entry.nodeId ? ' is-navigable' : ''}`}
+                                aria-label={entry.nodeId ? `Open outline result for ${entry.label}` : undefined}
+                                onClick={() => {
+                                  if (entry.nodeId && onOpenNode) onOpenNode(entry.nodeId, call.nodeId)
+                                  else if (entry.detail) toggleEvent(entry.id)
+                                }}
+                                aria-expanded={entry.detail && !entry.nodeId ? isExpanded : undefined}
                               >
                                 <strong>{entry.label}</strong>
                                 <span className="activity-status-icon">{statusIcon(entry.status)}</span>

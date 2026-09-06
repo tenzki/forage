@@ -7,6 +7,7 @@ use std::sync::{Mutex, MutexGuard};
 
 const MIGRATION_0001: &str = include_str!("../migrations/0001_event_store.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_agent_executor.sql");
+const MIGRATION_0003: &str = include_str!("../migrations/0003_local_credentials.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -16,6 +17,8 @@ pub enum StoreError {
     Poisoned,
     #[error("event id {0} was reused with different content")]
     EventIdConflict(String),
+    #[error("stored credential is missing")]
+    CredentialMissing,
     #[error("invalid storage mode {0}")]
     InvalidStorageMode(String),
     #[error("agent run {0} conflicts with persisted history")]
@@ -119,6 +122,13 @@ pub struct AgentActivityRecord {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunHistoryRecord {
+    pub run: AgentRunRecord,
+    pub activity: Vec<AgentActivityRecord>,
+}
+
 impl StorageMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -134,8 +144,11 @@ pub struct EventStore {
 
 impl EventStore {
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
+        let path = path.as_ref();
         let connection = Connection::open(path)?;
-        Self::initialize(connection, true)
+        let store = Self::initialize(connection, true)?;
+        restrict_to_owner(path);
+        Ok(store)
     }
 
     pub fn open_in_memory() -> StoreResult<Self> {
@@ -151,6 +164,7 @@ impl EventStore {
         }
         connection.execute_batch(MIGRATION_0001)?;
         connection.execute_batch(MIGRATION_0002)?;
+        connection.execute_batch(MIGRATION_0003)?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -158,6 +172,41 @@ impl EventStore {
 
     fn connection(&self) -> StoreResult<MutexGuard<'_, Connection>> {
         self.connection.lock().map_err(|_| StoreError::Poisoned)
+    }
+
+    /// Store a local secret by reference, replacing any previous value.
+    pub fn store_credential(&self, reference: &str, secret: &str) -> StoreResult<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO local_credentials(reference, secret, created_at, updated_at)
+             VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(reference) DO UPDATE
+                 SET secret = excluded.secret, updated_at = excluded.updated_at",
+            params![reference, secret],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_credential(&self, reference: &str) -> StoreResult<String> {
+        let connection = self.connection()?;
+        connection
+            .query_row(
+                "SELECT secret FROM local_credentials WHERE reference = ?1",
+                [reference],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StoreError::CredentialMissing)
+    }
+
+    /// Removing an absent credential succeeds, so disconnect flows stay idempotent.
+    pub fn remove_credential(&self, reference: &str) -> StoreResult<()> {
+        let connection = self.connection()?;
+        connection.execute(
+            "DELETE FROM local_credentials WHERE reference = ?1",
+            [reference],
+        )?;
+        Ok(())
     }
 
     pub fn append(&self, event: &EventRecord) -> StoreResult<i64> {
@@ -785,6 +834,55 @@ impl EventStore {
             .map_err(StoreError::from)
     }
 
+    /// Most recent runs for an outline, newest first, each with its full activity trail
+    /// so the desktop activity sidebar survives a restart.
+    pub fn recent_agent_runs(
+        &self,
+        outline_id: &str,
+        limit: i64,
+    ) -> StoreResult<Vec<AgentRunHistoryRecord>> {
+        let connection = self.connection()?;
+        let runs = {
+            let mut statement = connection.prepare(
+                "SELECT id, outline_id, snapshot_json, status, attempt_count, result_identity,
+                        result_json, retry_of_run_id, cancel_requested_at, error_code, created_at, updated_at
+                 FROM local_agent_runs WHERE outline_id = ?1
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?2",
+            )?;
+            let rows = statement.query_map(params![outline_id, limit.clamp(1, 200)], row_to_agent_run)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut statement = connection.prepare(
+            "SELECT run_id, sequence, event_json, created_at
+             FROM local_agent_run_activity WHERE run_id = ?1
+             ORDER BY sequence ASC LIMIT 500",
+        )?;
+        let mut history = Vec::with_capacity(runs.len());
+        for run in runs {
+            let activity = statement
+                .query_map([run.id.as_str()], row_to_agent_activity)?
+                .collect::<Result<Vec<_>, _>>()?;
+            history.push(AgentRunHistoryRecord { run, activity });
+        }
+        Ok(history)
+    }
+
+    /// Forget every run for an outline. Attempts and activity cascade.
+    pub fn clear_agent_runs(&self, outline_id: &str) -> StoreResult<usize> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "UPDATE local_agent_runs SET retry_of_run_id = NULL WHERE outline_id = ?1",
+            [outline_id],
+        )?;
+        let removed = transaction.execute(
+            "DELETE FROM local_agent_runs WHERE outline_id = ?1",
+            [outline_id],
+        )?;
+        transaction.commit()?;
+        Ok(removed)
+    }
+
     pub fn cancel_agent_run(&self, run_id: &str, cancelled_at: &str) -> StoreResult<()> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -910,6 +1008,23 @@ impl EventStore {
         self.admit_agent_run(retry)
     }
 }
+
+/// Local secrets live in this database, so keep it readable only by its owner.
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    for suffix in ["", "-wal", "-shm"] {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        let _ = std::fs::set_permissions(
+            std::path::PathBuf::from(name),
+            std::fs::Permissions::from_mode(0o600),
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
 
 fn row_to_agent_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunRecord> {
     let snapshot_json: String = row.get(2)?;
