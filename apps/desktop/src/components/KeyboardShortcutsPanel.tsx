@@ -45,6 +45,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { label: 'Outdent bullet', keys: [['Shift', 'Tab']] },
       { label: 'Move branch up', keys: [['Alt', '↑']] },
       { label: 'Move branch down', keys: [['Alt', '↓']] },
+      { label: 'Move current branch to…', keys: [[PRIMARY_MODIFIER, 'M']] },
     ],
   },
   {

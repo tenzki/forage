@@ -13,6 +13,7 @@ import {
 } from '../../editor/generatedImage'
 import {
   collectBullets,
+  duplicateBullet,
   setBulletKind,
   toggleBulletCompleted,
   updateBulletText,
@@ -57,8 +58,21 @@ function makeEditor(): Editor {
 
 describe('outliner chrome', () => {
   let editor: Editor
+  let storageValues: Map<string, string>
 
   beforeEach(() => {
+    storageValues = new Map()
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storageValues.get(key) ?? null,
+        setItem: (key: string, value: string) => storageValues.set(key, value),
+        removeItem: (key: string) => storageValues.delete(key),
+        clear: () => storageValues.clear(),
+        key: (index: number) => [...storageValues.keys()][index] ?? null,
+        get length() { return storageValues.size },
+      },
+    })
     editor = makeEditor()
     document.body.appendChild(editor.view.dom)
   })
@@ -234,19 +248,61 @@ describe('outliner chrome', () => {
 
     expect(screen.getByRole('dialog', { name: 'Move bullet' })).toBeTruthy()
     expect(screen.queryByRole('option', { name: /Alpha note/ })).toBeNull()
-    expect((screen.getByRole('button', { name: 'Move here' }) as HTMLButtonElement).disabled).toBe(true)
+    const moveButton = screen.getByRole('button', { name: 'Move here' }) as HTMLButtonElement
+    expect(moveButton.disabled).toBe(true)
+    expect(moveButton.classList.contains('move-submit')).toBe(true)
+    expect(moveButton.classList.contains('primary-action')).toBe(false)
+    expect(moveButton.getAttribute('aria-keyshortcuts')).toBe('Meta+Enter Control+Enter')
+    expect(moveButton.textContent).toMatch(/Move here(?:⌘|Ctrl) ↵/u)
 
     const search = screen.getByLabelText('Search move destinations')
     await user.type(search, 'bravo')
     expect(screen.getByRole('option', { name: /Bravo note/ })).toBeTruthy()
-    await user.keyboard('{Enter}')
-
-    expect(screen.getByRole('option', { name: /Bravo note/ }).getAttribute('aria-selected')).toBe('true')
-    expect(screen.getByRole('group', { name: 'Move placement' })).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Move here' }))
+    expect(screen.getByRole('option', { name: /Bravo note/ }).getAttribute('aria-selected')).toBe('false')
+    expect(moveButton.disabled).toBe(false)
+    fireEvent.keyDown(search, { key: 'Enter', code: 'Enter', metaKey: true })
 
     expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')?.ancestorIds).toEqual(['bravo'])
+    expect(JSON.parse(window.localStorage.getItem('forage.move-recent-destinations') ?? '[]')[0]).toBe('bravo')
     expect(screen.queryByRole('dialog', { name: 'Move bullet' })).toBeNull()
+  })
+
+  it('opens Move To for the current bullet with Command+M', () => {
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+
+    fireEvent.keyDown(window, { key: 'm', code: 'KeyM', metaKey: true })
+
+    expect(screen.getByRole('dialog', { name: 'Move bullet' })).toBeTruthy()
+    expect(screen.getByLabelText('Search move destinations')).toBe(document.activeElement)
+    expect(screen.queryByRole('option', { name: /Alpha note/ })).toBeNull()
+  })
+
+  it('prioritizes recent destinations while preserving stronger search matches', async () => {
+    const user = userEvent.setup()
+    const originalIds = new Set(collectBullets(editor.state.doc).map((entry) => entry.id))
+    expect(duplicateBullet(editor, 'bravo')).toBe(true)
+    const recent = collectBullets(editor.state.doc).find((entry) => !originalIds.has(entry.id))!
+    updateBulletText(editor, recent.id, 'Archive note')
+
+    const existingIds = new Set(collectBullets(editor.state.doc).map((entry) => entry.id))
+    expect(duplicateBullet(editor, 'bravo')).toBe(true)
+    const exact = collectBullets(editor.state.doc).find((entry) => !existingIds.has(entry.id))!
+    updateBulletText(editor, exact.id, 'Bravo')
+    window.localStorage.setItem('forage.move-recent-destinations', JSON.stringify([recent.id]))
+
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    await user.click(editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to…' }))
+
+    let options = screen.getAllByRole('option')
+    expect(options[0].textContent).toContain('Archive note')
+    expect(options[0].textContent).toContain('Recent')
+
+    await user.type(screen.getByLabelText('Search move destinations'), 'bravo')
+    options = screen.getAllByRole('option')
+    expect(options[0].textContent).toContain('Bravo')
+    expect(options[0].textContent).not.toContain('Bravo note')
+    expect(options[1].textContent).toContain('Bravo note')
   })
 
   it('shows an empty state when no move destination matches', async () => {

@@ -215,7 +215,7 @@ The current editor loads TipTap StarterKit 3.20.5. It exposes common inline mark
 | Generic item actions via slash | Delete, duplicate, move, sort, share, export, etc. | Todo completion/opening and note actions are available; move/delete/share/export remain menu-only or absent | **Partial** |
 | Type/format slash actions | Todo, heading, paragraph, quote, code, board, table, etc. | `/todo`, `/done`, `/open`, `/bullet`, and `/note` are supported; richer block types remain absent | **Partial** |
 | Command palette | Search and execute the full action set from one palette | No command palette; Cmd+K is outline search | **Missing** |
-| Shortcut reference/help panel | In-app learnable keyboard shortcut panel | No shortcut help | **Missing** |
+| Shortcut reference/help panel | In-app learnable keyboard shortcut panel | Sidebar-accessible reference groups the implemented navigation, outlining, task, history, and formatting shortcuts | **Supported** |
 | Customizable hotkeys | Command palette exposes custom hotkey configuration | Hardcoded shortcuts only | **Missing** |
 
 ### 10. Sharing and collaboration

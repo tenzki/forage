@@ -46,7 +46,7 @@ export function DropdownMenuItem({
         {Icon ? <Icon size={14} strokeWidth={1.8} aria-hidden="true" className={danger ? 'text-red-400' : 'text-neutral-400'} /> : null}
         <span className="truncate">{children}</span>
       </span>
-      {shortcut ? <kbd className="shrink-0 font-mono text-[9px] text-neutral-400">{shortcut}</kbd> : null}
+      {shortcut ? <kbd aria-hidden="true" className="shrink-0 font-mono text-[9px] text-neutral-400">{shortcut}</kbd> : null}
     </button>
   )
 }

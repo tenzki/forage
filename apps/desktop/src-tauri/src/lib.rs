@@ -12,7 +12,7 @@ pub mod sync_commands;
 //   - plugin-shell:  run the embedded Pi SDK in an isolated Node.js sidecar
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .setup(|app| {
             use tauri::Manager;
             let app_data = app.path().app_data_dir()?;
@@ -91,7 +91,63 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_shell::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(|app| {
+            use tauri::menu::{
+                Menu, MenuItem, MenuItemKind, PredefinedMenuItem, WINDOW_SUBMENU_ID,
+            };
+
+            let menu = Menu::default(app)?;
+
+            // Command+M is normally consumed by macOS before the webview sees it.
+            // Keep Minimize available in the Window menu, but give its accelerator
+            // to Forage's Move Bullet command.
+            if let Some(MenuItemKind::Submenu(window_menu)) = menu.get(WINDOW_SUBMENU_ID) {
+                window_menu.remove_at(0)?;
+                let minimize = MenuItem::with_id(
+                    app,
+                    "forage-minimize-window",
+                    "Minimize",
+                    true,
+                    None::<&str>,
+                )?;
+                window_menu.insert(&minimize, 0)?;
+            }
+
+            let move_bullet = MenuItem::with_id(
+                app,
+                "forage-move-current-bullet",
+                "Move Bullet…",
+                true,
+                Some("CmdOrCtrl+M"),
+            )?;
+            for item in menu.items()? {
+                if let MenuItemKind::Submenu(submenu) = item {
+                    if submenu.text()? == "Edit" {
+                        submenu.append(&PredefinedMenuItem::separator(app)?)?;
+                        submenu.append(&move_bullet)?;
+                        break;
+                    }
+                }
+            }
+            Ok(menu)
+        })
+        .on_menu_event(|app, event| {
+            use tauri::{Emitter, Manager};
+
+            if event.id() == "forage-move-current-bullet" {
+                let _ = app.emit("forage-move-current-bullet", ());
+            } else if event.id() == "forage-minimize-window" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.minimize();
+                }
+            }
+        });
+
+    builder
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }

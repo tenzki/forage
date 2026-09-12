@@ -43,6 +43,7 @@ interface MenuPosition {
   nodeId: string
   top: number
   left: number
+  moveImmediately?: boolean
 }
 
 interface NodeActionsProps {
@@ -53,6 +54,56 @@ interface NodeActionsProps {
   onError: (message: string) => void
   isShortcut: boolean
   onToggleShortcut: () => void
+}
+
+interface MoveDestinationOption {
+  id: string
+  label: string
+  path: string
+  order: number
+}
+
+const MOVE_RECENTS_KEY = 'forage.move-recent-destinations'
+const MOVE_RECENTS_LIMIT = 8
+const IS_APPLE_PLATFORM = typeof navigator !== 'undefined'
+  && /Mac|iPhone|iPad|iPod/u.test(`${navigator.platform} ${navigator.userAgent}`)
+
+function readRecentMoveDestinations(): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(MOVE_RECENTS_KEY) ?? '[]')
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function rememberMoveDestination(targetId: string, recentIds: string[]): string[] {
+  const next = [targetId, ...recentIds.filter((id) => id !== targetId)].slice(0, MOVE_RECENTS_LIMIT)
+  try {
+    window.localStorage.setItem(MOVE_RECENTS_KEY, JSON.stringify(next))
+  } catch {
+    // Moving must keep working when local storage is unavailable.
+  }
+  return next
+}
+
+function moveDestinationScore(option: MoveDestinationOption, query: string, recentIndex: number): number | null {
+  const label = normalizeSearchText(option.label)
+  const path = normalizeSearchText(option.path)
+  const searchable = `${label} ${path}`
+  const terms = query.split(/\s+/u).filter(Boolean)
+  if (!terms.every((term) => searchable.includes(term))) return null
+
+  let score = 0
+  if (!query) score = option.id === 'root' ? 500 : 0
+  else if (label === query) score = 1_000
+  else if (label.startsWith(query)) score = 800
+  else if (label.split(/\s+/u).some((word) => word.startsWith(query))) score = 700
+  else if (label.includes(query)) score = 500
+  else if (path.includes(query)) score = 250
+
+  if (recentIndex >= 0) score += query ? 120 - recentIndex * 10 : 2_000 - recentIndex
+  return score
 }
 
 function hasChildren(editor: Editor, nodeId: string): boolean {
@@ -94,31 +145,40 @@ function MoveToDialog({
   const [targetId, setTargetId] = useState<string | null>(null)
   const [placement, setPlacement] = useState<MovePlacement>('inside')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [recentIds, setRecentIds] = useState(readRecentMoveDestinations)
 
   const destinationOptions = useMemo(() => {
     const byId = new Map(destinations.map((entry) => [entry.id, entry]))
     return [
-      { id: 'root', label: 'Home', path: 'Top level' },
-      ...destinations.map((entry) => ({
+      { id: 'root', label: 'Home', path: 'Top level', order: 0 },
+      ...destinations.map((entry, index) => ({
         id: entry.id,
         label: entry.text.trim() || 'Untitled',
         path: entry.ancestorIds
           .map((ancestorId) => byId.get(ancestorId)?.text.trim())
           .filter(Boolean)
           .join(' › ') || 'Home',
+        order: index + 1,
       })),
     ]
   }, [destinations])
 
   const filteredOptions = useMemo(() => {
     const normalizedQuery = normalizeSearchText(query.trim())
-    const matching = normalizedQuery
-      ? destinationOptions.filter((option) => normalizeSearchText(`${option.label} ${option.path}`).includes(normalizedQuery))
-      : destinationOptions
-    return matching.slice(0, 50)
-  }, [destinationOptions, query])
+    return destinationOptions
+      .map((option) => ({
+        option,
+        score: moveDestinationScore(option, normalizedQuery, recentIds.indexOf(option.id)),
+      }))
+      .filter((candidate): candidate is { option: MoveDestinationOption; score: number } => candidate.score !== null)
+      .sort((left, right) => right.score - left.score || left.option.order - right.option.order)
+      .slice(0, 50)
+      .map(({ option }) => option)
+  }, [destinationOptions, query, recentIds])
 
   const selectedOption = destinationOptions.find((option) => option.id === targetId)
+  const activeOption = filteredOptions[activeIndex] ?? filteredOptions[0]
+  const shortcutTargetId = targetId ?? (query.trim() ? activeOption?.id ?? null : null)
 
   useEffect(() => {
     setActiveIndex(0)
@@ -136,22 +196,39 @@ function MoveToDialog({
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       setActiveIndex((current) => filteredOptions.length ? (current - 1 + filteredOptions.length) % filteredOptions.length : 0)
-    } else if (event.key === 'Enter') {
+    } else if (event.key === 'Enter' && !(event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       selectActiveDestination()
     }
   }
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault()
-    if (!targetId) return
-    const target = targetId === 'root' ? null : targetId
+  function move(destinationId: string | null = targetId) {
+    if (!destinationId) return
+    const target = destinationId === 'root' ? null : destinationId
     if (!moveBulletTo(editor, sourceId, target, target ? placement : 'inside')) {
       onError('That branch cannot be moved to the selected destination.')
       return
     }
+    setRecentIds(rememberMoveDestination(destinationId, recentIds))
     onClose()
   }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    move(shortcutTargetId)
+  }
+
+  useEffect(() => {
+    const moveWithShortcut = (event: KeyboardEvent) => {
+      const isReturn = event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter'
+      if (!(event.metaKey || event.ctrlKey) || !isReturn) return
+      event.preventDefault()
+      event.stopPropagation()
+      move(shortcutTargetId)
+    }
+    window.addEventListener('keydown', moveWithShortcut, { capture: true })
+    return () => window.removeEventListener('keydown', moveWithShortcut, { capture: true })
+  }, [shortcutTargetId, placement, recentIds])
 
   return (
     <div className="search-backdrop" onMouseDown={onClose}>
@@ -180,6 +257,7 @@ function MoveToDialog({
           {filteredOptions.map((option, index) => {
             const selected = option.id === targetId
             const active = index === activeIndex
+            const recent = recentIds.includes(option.id)
             return (
               <li
                 id={`move-destination-${index}`}
@@ -197,7 +275,7 @@ function MoveToDialog({
                     {option.id === 'root' ? <Home size={15} /> : <FolderInput size={15} />}
                   </span>
                   <span className="move-destination-copy">
-                    <strong>{option.label}</strong>
+                    <span className="move-destination-title"><strong>{option.label}</strong>{recent ? <small>Recent</small> : null}</span>
                     <small>{option.path}</small>
                   </span>
                   {selected ? <Check className="move-destination-check" size={16} aria-hidden="true" /> : null}
@@ -227,7 +305,10 @@ function MoveToDialog({
         </div>
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary-action" type="submit" disabled={!targetId}>Move here</button>
+          <button className="move-submit" type="submit" disabled={!shortcutTargetId} aria-keyshortcuts="Meta+Enter Control+Enter">
+            <span>Move here</span>
+            <kbd aria-hidden="true">{IS_APPLE_PLATFORM ? '⌘' : 'Ctrl'} ↵</kbd>
+          </button>
         </div>
       </form>
     </div>
@@ -243,7 +324,7 @@ export function NodeActions({
   isShortcut,
   onToggleShortcut,
 }: NodeActionsProps) {
-  const [moving, setMoving] = useState(false)
+  const [moving, setMoving] = useState(request.moveImmediately === true)
   const menuRef = useRef<HTMLDivElement>(null)
   const entry = collectBullets(editor.state.doc).find((item) => item.id === request.nodeId)
   const children = hasChildren(editor, request.nodeId)
@@ -329,7 +410,7 @@ export function NodeActions({
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem icon={FolderInput} onClick={() => { if (allowed('move')) setMoving(true); else onClose() }}>Move to…</DropdownMenuItem>
+        <DropdownMenuItem icon={FolderInput} shortcut={IS_APPLE_PLATFORM ? '⌘M' : 'Ctrl M'} aria-keyshortcuts="Meta+M Control+M" onClick={() => { if (allowed('move')) setMoving(true); else onClose() }}>Move to…</DropdownMenuItem>
         <DropdownMenuItem icon={isShortcut ? PinOff : Pin} onClick={() => { onToggleShortcut(); onClose() }}>
           {isShortcut ? 'Remove from shortcuts' : 'Add to shortcuts'}
         </DropdownMenuItem>

@@ -36,6 +36,7 @@ export interface NodeMenuRequest {
   nodeId: string
   top: number
   left: number
+  moveImmediately?: boolean
 }
 
 interface AgentActivity {

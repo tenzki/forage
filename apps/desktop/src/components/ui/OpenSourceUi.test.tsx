@@ -22,6 +22,10 @@ describe('OpenSourceUI adaptations', () => {
     const input = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search notes' })
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
+    expect(input.autocomplete).toBe('off')
+    expect(input.getAttribute('autocorrect')).toBe('off')
+    expect(input.getAttribute('autocapitalize')).toBe('off')
+    expect(input.getAttribute('spellcheck')).toBe('false')
   })
 
   it('exposes controlled segmented state', async () => {

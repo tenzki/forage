@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
@@ -22,6 +22,7 @@ import type { Editor } from '@tiptap/react'
 import {
   breadcrumbFor,
   collectBullets,
+  currentBulletId,
   normalizeSearchText,
   searchBullets,
   searchText,
@@ -50,6 +51,7 @@ import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
 import { SearchInput } from '../ui/SearchInput'
 import { IconButton } from '../ui/IconButton'
+import { validateSystemNodeAction } from '../../editor/systemNodeGuards'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -506,6 +508,18 @@ export function OutlinerChrome({
   const [actionError, setActionError] = useState<string | null>(null)
   useDeepLinks(editor)
 
+  const openMoveForCurrentBullet = useCallback(() => {
+    if (!editor || document.querySelector('[role="dialog"]')) return
+    const nodeId = currentBulletId(editor)
+    if (!nodeId) return
+    const decision = validateSystemNodeAction(editor.state.doc, 'move', nodeId)
+    if (!decision.allowed) {
+      setActionError(decision.message)
+      return
+    }
+    setNodeMenu({ nodeId, top: 0, left: 0, moveImmediately: true })
+  }, [editor, setNodeMenu])
+
   function openSearch(query = '') {
     setSearchQueryText(query)
     setSearchOpen(true)
@@ -534,6 +548,9 @@ export function OutlinerChrome({
       if (event.key.toLocaleLowerCase() === 'k') {
         event.preventDefault()
         openSearch()
+      } else if (event.key.toLocaleLowerCase() === 'm' && !event.altKey && !event.shiftKey) {
+        event.preventDefault()
+        openMoveForCurrentBullet()
       } else if (editor && event.key === '[') {
         event.preventDefault()
         navigateBack(editor)
@@ -544,7 +561,23 @@ export function OutlinerChrome({
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
-  }, [editor])
+  }, [editor, openMoveForCurrentBullet])
+
+  useEffect(() => {
+    if (!editor || !('__TAURI_INTERNALS__' in window)) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('forage-move-current-bullet', openMoveForCurrentBullet))
+      .then((stopListening) => {
+        if (disposed) stopListening()
+        else unlisten = stopListening
+      })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [editor, openMoveForCurrentBullet])
 
   useEffect(() => {
     const openSavedSearch = (event: Event) => {

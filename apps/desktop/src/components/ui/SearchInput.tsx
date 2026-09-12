@@ -26,6 +26,10 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
   onValueChange,
   onClear,
   disabled,
+  autoComplete = 'off',
+  autoCorrect = 'off',
+  autoCapitalize = 'off',
+  spellCheck = false,
   ...props
 }, ref) {
   const generatedId = useId()
@@ -58,6 +62,10 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
         type="search"
         disabled={disabled}
         value={current}
+        autoComplete={autoComplete}
+        autoCorrect={autoCorrect}
+        autoCapitalize={autoCapitalize}
+        spellCheck={spellCheck}
         onChange={(event) => onValueChange?.(event.target.value, event)}
         className={cn(
           'h-11 w-full rounded-xl border border-neutral-200 bg-white py-2 pr-22 pl-10 text-sm text-neutral-900 outline-none transition-[border-color,box-shadow] duration-200 placeholder:text-neutral-400 focus:border-neutral-900 focus:shadow-[0_0_0_3px_rgba(23,23,23,0.06)] disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden',

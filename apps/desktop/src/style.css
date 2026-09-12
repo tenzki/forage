@@ -3482,6 +3482,31 @@ kbd {
     font-weight: 600;
   }
 
+  .move-destination-title {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .move-destination-title > strong {
+    min-width: 0;
+  }
+
+  .move-destination-title > small {
+    flex: 0 0 auto;
+    padding: 1px 5px;
+    border: 1px solid var(--osui-border);
+    border-radius: 999px;
+    background: var(--osui-subtle);
+    color: var(--osui-muted);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 13px;
+    text-transform: uppercase;
+  }
+
   .move-destination-copy small {
     color: var(--osui-muted);
     font-size: 10px;
@@ -3541,7 +3566,29 @@ kbd {
     border-top: 1px solid var(--osui-border);
   }
 
-  .move-dialog .primary-action:disabled {
+  .move-dialog .move-submit {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-color: var(--osui-ink) !important;
+    background: var(--osui-ink) !important;
+    color: white !important;
+    font-weight: 600;
+  }
+
+  .move-dialog .move-submit:hover:not(:disabled) {
+    background: #404040 !important;
+  }
+
+  .move-dialog .move-submit kbd {
+    border: 0;
+    background: transparent;
+    color: rgb(255 255 255 / 0.65);
+    box-shadow: none;
+    font-size: 9px;
+  }
+
+  .move-dialog .move-submit:disabled {
     border-color: #d4d4d4 !important;
     background: #d4d4d4 !important;
     box-shadow: none;

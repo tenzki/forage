@@ -673,6 +673,7 @@ describe('App view switching', () => {
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeTruthy()
     expect(screen.getByLabelText('Keyboard shortcut reference')).toBeTruthy()
     expect(screen.getByText('Move branch up')).toBeTruthy()
+    expect(screen.getByText('Move current branch to…')).toBeTruthy()
     expect(shortcutsNav.getAttribute('aria-expanded')).toBe('true')
     expect(container.querySelector('.outline-editor-view')?.hasAttribute('hidden')).toBe(false)
 
