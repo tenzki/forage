@@ -6,6 +6,7 @@ import {
   Hash,
   Home,
   Inbox,
+  Keyboard,
   ListTodo,
   Plus,
   Search as SearchIcon,
@@ -33,10 +34,12 @@ interface OutlinerSidebarProps {
   collapsed?: boolean
   trashCount?: number
   activeView?: 'outliner' | 'settings' | 'trash' | 'tasks'
+  shortcutsOpen?: boolean
   onChange: (shortcuts: OutlineShortcut[]) => void
   onOpenOutline?: () => void
   onOpenInbox?: () => void
   onOpenDailyNotes?: () => void
+  onOpenShortcuts?: () => void
   onOpenSettings?: () => void
   onOpenTrash?: () => void
   onOpenTasks?: () => void
@@ -117,10 +120,12 @@ export function OutlinerSidebar({
   collapsed = false,
   trashCount = 0,
   activeView = 'outliner',
+  shortcutsOpen = false,
   onChange,
   onOpenOutline = () => undefined,
   onOpenInbox,
   onOpenDailyNotes = () => undefined,
+  onOpenShortcuts = () => undefined,
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
   onOpenTasks = () => undefined,
@@ -373,6 +378,16 @@ export function OutlinerSidebar({
         </div>
       )}
       <nav className="sidebar-bottom" aria-label="Sidebar actions">
+        <button
+          className={`sidebar-keyboard-shortcuts${shortcutsOpen ? ' is-active' : ''}`}
+          aria-expanded={shortcutsOpen}
+          aria-keyshortcuts="Meta+Shift+/ Control+Shift+/"
+          onClick={onOpenShortcuts}
+          title="Keyboard shortcuts (⌘? / Ctrl+?)"
+        >
+          <Keyboard className="sidebar-primary-icon" aria-hidden="true" />
+          <span className="sidebar-primary-label">Keyboard shortcuts</span>
+        </button>
         <button
           className={`sidebar-settings${activeView === 'settings' ? ' is-active' : ''}`}
           aria-current={activeView === 'settings' ? 'page' : undefined}

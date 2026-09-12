@@ -41,6 +41,7 @@ import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
 import { OutlineSession } from './application/OutlineSession'
 import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
+import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -76,6 +77,7 @@ export default function App() {
   const [shortcuts, setShortcuts] = useState<OutlineShortcut[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [view, setView] = useState<View>('outliner')
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
@@ -112,6 +114,8 @@ export default function App() {
     setActivityCalls([])
     void session.clearAgentRunHistory().catch(() => undefined)
   }, [session])
+
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
 
   const readOutline = useCallback(async () => {
     setLoadError(null)
@@ -209,9 +213,14 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.metaKey && event.key === ',') {
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && event.key === ',') {
         event.preventDefault()
+        setShortcutsOpen(false)
         setView((current) => (current === 'settings' ? 'outliner' : 'settings'))
+      } else if (modifier && (event.key === '?' || (event.shiftKey && event.key === '/'))) {
+        event.preventDefault()
+        setShortcutsOpen((open) => !open)
       }
     }
     window.addEventListener('keydown', handler)
@@ -403,10 +412,12 @@ export default function App() {
           collapsed={sidebarCollapsed}
           trashCount={trash.length}
           activeView={view}
+          shortcutsOpen={shortcutsOpen}
           onChange={handleShortcutsChange}
           onOpenOutline={() => { setViewError(null); setView('outliner') }}
           onOpenInbox={openInbox}
           onOpenDailyNotes={openDailyNotes}
+          onOpenShortcuts={() => setShortcutsOpen(true)}
           onOpenSettings={() => { setViewError(null); setView('settings') }}
           onOpenTrash={() => { setViewError(null); setView('trash') }}
           onOpenTasks={openTasks}
@@ -467,6 +478,7 @@ export default function App() {
           onOpenNode={openActivityNode}
         />
       </main>
+      {shortcutsOpen && <KeyboardShortcutsPanel onClose={closeShortcuts} />}
     </div>
   )
 }

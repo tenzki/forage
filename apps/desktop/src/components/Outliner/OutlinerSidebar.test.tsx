@@ -131,9 +131,10 @@ describe('outliner sidebar', () => {
     expect(onChange).toHaveBeenCalledWith([{ type: 'tag', target: 'research' }])
   })
 
-  it('keeps Home, Settings, and Trash available when the sidebar is collapsed', async () => {
+  it('keeps Home, keyboard shortcuts, Settings, and Trash available when the sidebar is collapsed', async () => {
     const user = userEvent.setup()
     const onTrash = vi.fn()
+    const onOpenShortcuts = vi.fn()
     const onSettings = vi.fn()
     const view = render(
       <OutlinerSidebar
@@ -141,6 +142,7 @@ describe('outliner sidebar', () => {
         shortcuts={[]}
         trashCount={2}
         onChange={vi.fn()}
+        onOpenShortcuts={onOpenShortcuts}
         onOpenSettings={onSettings}
         onOpenTrash={onTrash}
       />,
@@ -148,6 +150,10 @@ describe('outliner sidebar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     expect(onSettings).toHaveBeenCalledOnce()
+    const keyboardShortcuts = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+    expect(keyboardShortcuts.nextElementSibling).toBe(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(keyboardShortcuts)
+    expect(onOpenShortcuts).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: 'Trash' }).closest('.sidebar-bottom')).toBeTruthy()
     view.rerender(
       <OutlinerSidebar
@@ -156,6 +162,7 @@ describe('outliner sidebar', () => {
         collapsed
         trashCount={2}
         onChange={vi.fn()}
+        onOpenShortcuts={onOpenShortcuts}
         onOpenSettings={onSettings}
         onOpenTrash={onTrash}
       />,
@@ -166,6 +173,7 @@ describe('outliner sidebar', () => {
     expect(screen.getByRole('button', { name: 'Inbox' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Daily Notes' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Tasks' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Trash' }))
     expect(onTrash).toHaveBeenCalledOnce()
   })

@@ -1049,6 +1049,7 @@ body.is-dragging-outline .bullet-collapse {
 .sidebar-inbox,
 .sidebar-daily-notes,
 .sidebar-tasks,
+.sidebar-keyboard-shortcuts,
 .sidebar-settings,
 .sidebar-trash,
 .sidebar-shortcut-drag,
@@ -1065,6 +1066,7 @@ body.is-dragging-outline .bullet-collapse {
 .sidebar-inbox,
 .sidebar-daily-notes,
 .sidebar-tasks,
+.sidebar-keyboard-shortcuts,
 .sidebar-settings,
 .sidebar-trash {
   display: flex;
@@ -1087,6 +1089,7 @@ body.is-dragging-outline .bullet-collapse {
   padding: 0 0 8px;
 }
 
+.sidebar-keyboard-shortcuts,
 .sidebar-settings,
 .sidebar-trash {
   width: 100%;
@@ -1141,6 +1144,7 @@ svg.sidebar-primary-icon {
 .outline-sidebar.is-collapsed .sidebar-inbox,
 .outline-sidebar.is-collapsed .sidebar-daily-notes,
 .outline-sidebar.is-collapsed .sidebar-tasks,
+.outline-sidebar.is-collapsed .sidebar-keyboard-shortcuts,
 .outline-sidebar.is-collapsed .sidebar-settings,
 .outline-sidebar.is-collapsed .sidebar-trash {
   justify-content: center;
@@ -1166,6 +1170,7 @@ svg.sidebar-primary-icon {
 .sidebar-inbox:hover,
 .sidebar-daily-notes:hover,
 .sidebar-tasks:hover,
+.sidebar-keyboard-shortcuts:hover,
 .sidebar-settings:hover,
 .sidebar-trash:hover,
 .sidebar-shortcuts li:hover,
@@ -1173,6 +1178,7 @@ svg.sidebar-primary-icon {
 .sidebar-inbox.is-active,
 .sidebar-daily-notes.is-active,
 .sidebar-tasks.is-active,
+.sidebar-keyboard-shortcuts.is-active,
 .sidebar-settings.is-active,
 .sidebar-trash.is-active {
   background: #f0edff;
@@ -1182,6 +1188,7 @@ svg.sidebar-primary-icon {
 .sidebar-inbox.is-active,
 .sidebar-daily-notes.is-active,
 .sidebar-tasks.is-active,
+.sidebar-keyboard-shortcuts.is-active,
 .sidebar-settings.is-active,
 .sidebar-trash.is-active {
   color: #6549c7;
@@ -3051,6 +3058,7 @@ kbd {
   .sidebar-inbox,
   .sidebar-daily-notes,
   .sidebar-tasks,
+  .sidebar-keyboard-shortcuts,
   .sidebar-settings,
   .sidebar-trash {
     min-height: 34px;
@@ -3071,6 +3079,7 @@ kbd {
   .sidebar-inbox:hover,
   .sidebar-daily-notes:hover,
   .sidebar-tasks:hover,
+  .sidebar-keyboard-shortcuts:hover,
   .sidebar-settings:hover,
   .sidebar-trash:hover,
   .sidebar-shortcuts li:hover {
@@ -3082,6 +3091,7 @@ kbd {
   .sidebar-inbox.is-active,
   .sidebar-daily-notes.is-active,
   .sidebar-tasks.is-active,
+  .sidebar-keyboard-shortcuts.is-active,
   .sidebar-settings.is-active,
   .sidebar-trash.is-active {
     border-color: var(--osui-border);

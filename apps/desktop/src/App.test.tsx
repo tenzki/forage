@@ -660,6 +660,31 @@ describe('App view switching', () => {
     expect(container.querySelector('.outline-editor-view')?.hasAttribute('hidden')).toBe(true)
   })
 
+  it('opens keyboard shortcuts from the sidebar and with the global shortcut', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const shortcutsNav = screen.getByRole('button', { name: 'Keyboard shortcuts' })
+    const settingsNav = screen.getByRole('button', { name: 'Settings' })
+
+    expect(shortcutsNav.nextElementSibling).toBe(settingsNav)
+    await user.click(shortcutsNav)
+
+    expect(screen.getByRole('heading', { name: 'Keyboard shortcuts' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeTruthy()
+    expect(screen.getByLabelText('Keyboard shortcut reference')).toBeTruthy()
+    expect(screen.getByText('Move branch up')).toBeTruthy()
+    expect(shortcutsNav.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('.outline-editor-view')?.hasAttribute('hidden')).toBe(false)
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
+
+    fireEvent.keyDown(window, { key: '?', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('heading', { name: 'Keyboard shortcuts' })).toBeTruthy()
+    fireEvent.keyDown(window, { key: '?', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('heading', { name: 'Keyboard shortcuts' })).toBeNull()
+  })
+
   it('persists Trash and restore as one atomic document/domain event each', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()
