@@ -208,6 +208,60 @@ describe('outliner chrome', () => {
     expect(editor.view.dom.querySelector('.todo-checkbox')).toBeTruthy()
   })
 
+  it('moves focus through bullet actions with menu keyboard controls', async () => {
+    const user = userEvent.setup()
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    const convert = screen.getByRole('menuitem', { name: 'Convert to todo' })
+    expect(document.activeElement).toBe(convert)
+
+    await user.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Add note' }))
+
+    await user.keyboard('{End}')
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Move to Trash' }))
+  })
+
+  it('searches for a valid destination before moving a bullet', async () => {
+    const user = userEvent.setup()
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to…' }))
+
+    expect(screen.getByRole('dialog', { name: 'Move bullet' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: /Alpha note/ })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Move here' }) as HTMLButtonElement).disabled).toBe(true)
+
+    const search = screen.getByLabelText('Search move destinations')
+    await user.type(search, 'bravo')
+    expect(screen.getByRole('option', { name: /Bravo note/ })).toBeTruthy()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('option', { name: /Bravo note/ }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('group', { name: 'Move placement' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Move here' }))
+
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')?.ancestorIds).toEqual(['bravo'])
+    expect(screen.queryByRole('dialog', { name: 'Move bullet' })).toBeNull()
+  })
+
+  it('shows an empty state when no move destination matches', async () => {
+    const user = userEvent.setup()
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    const menuButton = editor.view.dom.querySelector('.bullet-menu') as HTMLButtonElement
+
+    await user.click(menuButton)
+    await user.click(screen.getByRole('menuitem', { name: 'Move to…' }))
+    await user.type(screen.getByLabelText('Search move destinations'), 'nowhere at all')
+
+    expect(screen.getByText('No destinations match “nowhere at all”.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Move here' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('surfaces non-destructive feedback when a protected root action is attempted', async () => {
     const user = userEvent.setup()
     const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!

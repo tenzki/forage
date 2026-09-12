@@ -8,6 +8,7 @@ import {
 } from '../../agent/definitions'
 import { BUILTIN_TOOL_OPTIONS, type ToolOption } from '../../agent/tools'
 import { useSettingsStore } from '../../store/settingsStore'
+import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ConfirmButton } from './ConfirmButton'
 
 const EMPTY_AGENT: AgentDraft = {
@@ -40,16 +41,15 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
       </label>
       <fieldset className="agent-tool-list"><legend>Allowed tools</legend>
         {tools.map((tool) => (
-          <label key={tool.id}>
-            <input
-              type="checkbox"
-              checked={draft.toolIds.includes(tool.id)}
-              onChange={(event) => update('toolIds', event.target.checked
+          <SwitchFieldInput
+            key={tool.id}
+            checked={draft.toolIds.includes(tool.id)}
+            label={tool.name}
+            hint={tool.description}
+            onCheckedChange={(checked) => update('toolIds', checked
                 ? [...draft.toolIds, tool.id]
                 : draft.toolIds.filter((id) => id !== tool.id))}
-            />
-            {tool.name}
-          </label>
+          />
         ))}
       </fieldset>
       <div className="settings-actions">

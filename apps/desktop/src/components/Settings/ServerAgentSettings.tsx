@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../store/settingsStore'
 import type { ServerConnectionInfo } from '../../persistence/eventStore'
 import { invoke } from '@tauri-apps/api/core'
 import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
+import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 type RunDetail = Awaited<ReturnType<TauriServerAgentTransport['run']>>
@@ -171,7 +172,12 @@ export function ServerAgentSettings() {
           <button className="settings-secondary" disabled={index === policyOrder.length - 1} aria-label={`Move ${policy.label} down`} onClick={() => movePolicy(kind, 1)}>↓</button>
         </li>
       })}</ol>
-      <label className="tool-setting"><span>Enable Inbox link automation</span><input type="checkbox" checked={automationEnabled} onChange={(event) => setAutomationEnabled(event.target.checked)} /></label>
+      <SwitchFieldInput
+        checked={automationEnabled}
+        label="Enable Inbox link automation"
+        hint="Run the selected skill automatically when a matching link reaches the Inbox."
+        onCheckedChange={setAutomationEnabled}
+      />
       <button className="settings-save" disabled={busy || revision === 0} onClick={() => void publishAutomation()}>Publish link policies</button>
       {runs.length > 0 && <div><strong>Recent runs</strong><ul>{runs.map((run) => <li key={run.id}>
         <button className="settings-secondary" disabled={busy} onClick={() => void inspectRun(run.id)} aria-label={`View /${run.skillId} ${run.status}`}>

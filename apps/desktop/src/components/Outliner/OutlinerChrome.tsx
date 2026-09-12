@@ -48,6 +48,8 @@ import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
+import { SearchInput } from '../ui/SearchInput'
+import { IconButton } from '../ui/IconButton'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -111,58 +113,57 @@ function Toolbar({
   onToggleActivitySidebar: () => void
 }) {
   return (
-    <div className="outline-toolbar">
-      <div className="outline-toolbar-navigation">
-        <button
-          className="outline-sidebar-toggle"
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+    <div className="sticky top-0 z-20 flex min-h-12 items-center justify-between gap-4 border-b border-neutral-100 bg-white/90 px-3 py-2 backdrop-blur-xl">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <IconButton
+          label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick={onToggleSidebar}
         >
           {sidebarCollapsed
             ? <PanelLeftOpen size={17} aria-hidden="true" />
             : <PanelLeftClose size={17} aria-hidden="true" />}
-        </button>
-        <div className="outline-history-navigation" aria-label="Navigation history">
-          <button
-            aria-label="Go back"
+        </IconButton>
+        <div className="flex shrink-0 items-center gap-0.5" aria-label="Navigation history">
+          <IconButton
+            label="Go back"
             title="Back (⌘[ / Ctrl+[)"
             aria-keyshortcuts="Meta+[ Control+["
             disabled={!canNavigateBack}
             onClick={onNavigateBack}
           >
             <ArrowLeft size={16} aria-hidden="true" />
-          </button>
-          <button
-            aria-label="Go forward"
+          </IconButton>
+          <IconButton
+            label="Go forward"
             title="Forward (⌘] / Ctrl+])"
             aria-keyshortcuts="Meta+] Control+]"
             disabled={!canNavigateForward}
             onClick={onNavigateForward}
           >
             <ArrowRight size={16} aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
         <Breadcrumbs editor={editor} zoomId={zoomId} />
       </div>
-      <div className="outline-toolbar-actions">
-        <button className="completed-visibility" onClick={onToggleCompleted}>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <button className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-500 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:bg-neutral-100 focus-visible:text-neutral-900" onClick={onToggleCompleted}>
           {hideCompleted
             ? <Eye size={15} aria-hidden="true" />
             : <EyeOff size={15} aria-hidden="true" />}
           {hideCompleted ? 'Show completed' : 'Hide completed'}
         </button>
-        <button className="search-open" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
-          <Search size={15} aria-hidden="true" /> Search <kbd>⌘K</kbd>
+        <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-600 shadow-xs outline-none transition-[border-color,color,box-shadow] hover:border-neutral-300 hover:text-neutral-900 focus-visible:border-neutral-400 focus-visible:shadow-sm" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
+          <Search size={15} aria-hidden="true" /> Search
+          <kbd className="ml-1 font-mono text-[9px] text-neutral-400">⌘K</kbd>
         </button>
-        <button
-          className="outline-sidebar-toggle activity-toolbar-toggle"
-          aria-label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
+        <IconButton
+          label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
           onClick={onToggleActivitySidebar}
         >
           {activitySidebarCollapsed
             ? <PanelRightOpen size={17} aria-hidden="true" />
             : <PanelRightClose size={17} aria-hidden="true" />}
-        </button>
+        </IconButton>
       </div>
     </div>
   )
@@ -399,10 +400,19 @@ function OutlineSearch({
   return (
     <div className="search-backdrop" onMouseDown={onClose}>
       <section className="outline-search" role="dialog" aria-modal="true" aria-label="Search outline" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="search-input-row">
-          <span aria-hidden="true">⌕</span>
-          <input ref={inputRef} value={query} onChange={(event) => changeQuery(event.target.value)} onKeyDown={handleKeyDown} placeholder="Search commands or bullets…" aria-label="Search commands and bullets" role="combobox" aria-expanded="true" />
-          <kbd>esc</kbd>
+        <div className="border-b border-neutral-100 p-3">
+          <SearchInput
+            ref={inputRef}
+            value={query}
+            onValueChange={changeQuery}
+            onClear={() => changeQuery('')}
+            onKeyDown={handleKeyDown}
+            placeholder="Search commands or bullets…"
+            aria-label="Search commands and bullets"
+            role="combobox"
+            aria-expanded="true"
+            shortcutHint="esc"
+          />
         </div>
         <div className="search-options">
           <div className="search-status-filters" aria-label="Todo filters">

@@ -40,6 +40,7 @@ import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
 import { OutlineSession } from './application/OutlineSession'
+import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -388,13 +389,11 @@ export default function App() {
         {storageBackendLabel}
       </div>
       {agentError && (
-        <div className="agent-error-popup" role="alert">
-          <div>
-            <strong>Agent error</strong>
-            <span>{agentError}</span>
-          </div>
-          <button type="button" onClick={() => setAgentError(null)}>Dismiss</button>
-        </div>
+        <SystemAlertBanner
+          title="Agent error"
+          description={agentError}
+          onDismiss={() => setAgentError(null)}
+        />
       )}
 
       <main className="outliner-main">

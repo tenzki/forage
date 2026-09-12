@@ -6,6 +6,7 @@ import { TauriServerAgentTransport } from '../../agent/serverExecutor'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ServerConnectionInfo } from '../../persistence/eventStore'
 import { ConfirmButton } from './ConfirmButton'
+import { SegmentedControl } from '../ui/SegmentedControl'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -184,24 +185,19 @@ export function ComputeSettings() {
   return (
     <div className="auth-card compute-settings">
       <strong>Compute</strong>
-      <div className="auth-mode" role="group" aria-label="Compute location">
-        <button
-          type="button"
-          className={mode === 'local' ? 'active' : ''}
-          aria-pressed={mode === 'local'}
-          onClick={() => (connection ? setMode('local') : cancelWizard())}
-        >
-          Local
-        </button>
-        <button
-          type="button"
-          className={mode === 'server' ? 'active' : ''}
-          aria-pressed={mode === 'server'}
-          onClick={startWizard}
-        >
-          Server
-        </button>
-      </div>
+      <SegmentedControl
+        ariaLabel="Compute location"
+        value={mode}
+        options={[
+          { value: 'local', label: 'Local' },
+          { value: 'server', label: 'Server' },
+        ]}
+        onValueChange={(nextMode) => {
+          if (nextMode === 'server') startWizard()
+          else if (connection) setMode('local')
+          else cancelWizard()
+        }}
+      />
 
       {mode === 'local' ? (
         <>

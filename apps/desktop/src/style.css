@@ -1,3 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-forage-50: #f7f5ff;
+  --color-forage-100: #f0edff;
+  --color-forage-200: #ddd7f5;
+  --color-forage-500: #7659d6;
+  --color-forage-600: #6a4ce0;
+  --color-forage-700: #6549c7;
+}
+
+@keyframes forage-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/*
+ * The original application rules live in the base cascade layer so the
+ * OpenSourceUI component layer and Tailwind utilities can consistently win.
+ * This keeps the editor geometry intact without letting the legacy palette
+ * leak through the new design system.
+ */
+@layer base {
 /* ============================================================
    Global reset & base
    ============================================================ */
@@ -2909,4 +2939,982 @@ kbd {
 .load-error small {
   max-width: 480px;
   color: #888;
+}
+}
+
+/* ============================================================
+   OpenSourceUI application theme
+
+   A quiet neutral stage, hairline borders, compact controls, and accent
+   color reserved for meaningful state. Tailwind utilities remain the final
+   authority for component-level exceptions.
+   ============================================================ */
+@layer components {
+  :root {
+    color-scheme: light;
+    --osui-canvas: #fafafa;
+    --osui-surface: #ffffff;
+    --osui-subtle: #f5f5f5;
+    --osui-hover: #f5f5f5;
+    --osui-selected: #ffffff;
+    --osui-border: #e5e5e5;
+    --osui-border-strong: #d4d4d4;
+    --osui-ink: #171717;
+    --osui-muted: #737373;
+    --osui-faint: #a3a3a3;
+    --osui-agent: #6d4aff;
+    --osui-agent-soft: #f5f3ff;
+    --osui-danger: #dc2626;
+    --osui-danger-soft: #fef2f2;
+    --osui-success: #16845b;
+    --osui-focus: #a3a3a3;
+    --osui-shadow-popover: 0 18px 50px -12px rgb(0 0 0 / 0.22);
+  }
+
+  body,
+  #app {
+    background: var(--osui-canvas);
+    color: var(--osui-ink);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [role='button']:focus-visible,
+  [role='menuitem']:focus-visible {
+    outline: 2px solid var(--osui-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: #e5e5e5;
+    color: var(--osui-ink);
+  }
+
+  .app-loading {
+    background: var(--osui-canvas);
+    color: var(--osui-muted);
+  }
+
+  .storage-backend-widget {
+    right: 12px;
+    bottom: 12px;
+    padding: 6px 9px;
+    border-color: var(--osui-border);
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.92);
+    box-shadow: 0 6px 20px -10px rgb(0 0 0 / 0.3);
+    color: var(--osui-muted);
+    backdrop-filter: blur(16px);
+  }
+
+  /* Main surfaces */
+  .outliner-main {
+    background: var(--osui-canvas);
+  }
+
+  .outline-workspace,
+  .secondary-view {
+    background: var(--osui-surface);
+  }
+
+  .outline-sidebar,
+  .activity-sidebar {
+    border-color: var(--osui-border);
+    background: var(--osui-canvas);
+  }
+
+  /* Left navigation */
+  .outline-sidebar {
+    padding: 10px 8px;
+  }
+
+  .sidebar-system {
+    gap: 3px;
+  }
+
+  .sidebar-home,
+  .sidebar-inbox,
+  .sidebar-daily-notes,
+  .sidebar-tasks,
+  .sidebar-settings,
+  .sidebar-trash {
+    min-height: 34px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: #525252;
+    font-size: 12px;
+    font-weight: 500;
+    transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+  }
+
+  .sidebar-primary-icon {
+    color: #a3a3a3;
+  }
+
+  .sidebar-home:hover,
+  .sidebar-inbox:hover,
+  .sidebar-daily-notes:hover,
+  .sidebar-tasks:hover,
+  .sidebar-settings:hover,
+  .sidebar-trash:hover,
+  .sidebar-shortcuts li:hover {
+    background: var(--osui-hover);
+    color: var(--osui-ink);
+  }
+
+  .sidebar-home.is-active,
+  .sidebar-inbox.is-active,
+  .sidebar-daily-notes.is-active,
+  .sidebar-tasks.is-active,
+  .sidebar-settings.is-active,
+  .sidebar-trash.is-active {
+    border-color: var(--osui-border);
+    background: var(--osui-selected);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    color: var(--osui-ink);
+  }
+
+  .is-active > .sidebar-primary-icon,
+  .sidebar-shortcut-icon {
+    color: #525252;
+  }
+
+  .sidebar-trash-count,
+  .sidebar-tasks-count {
+    min-width: 18px;
+    border: 1px solid var(--osui-border);
+    background: var(--osui-subtle);
+    color: var(--osui-muted);
+  }
+
+  .sidebar-section-heading {
+    margin: 18px 9px 6px;
+  }
+
+  .sidebar-section-heading h2 {
+    color: var(--osui-faint);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+
+  .sidebar-section-heading button {
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--osui-muted);
+  }
+
+  .sidebar-section-heading button:hover,
+  .sidebar-section-heading button[aria-expanded='true'] {
+    border-color: var(--osui-border);
+    background: var(--osui-surface);
+    color: var(--osui-ink);
+  }
+
+  .sidebar-bottom {
+    border-color: var(--osui-border);
+  }
+
+  .sidebar-shortcuts li {
+    border: 1px solid transparent;
+    border-radius: 8px;
+  }
+
+  .sidebar-shortcut-open {
+    color: #525252;
+    font-size: 12px;
+  }
+
+  .sidebar-shortcut-drag,
+  .sidebar-shortcut-remove {
+    color: var(--osui-faint);
+  }
+
+  .sidebar-shortcut-drag:hover,
+  .sidebar-shortcut-remove:hover {
+    background: var(--osui-surface);
+    color: var(--osui-ink);
+  }
+
+  .shortcut-picker,
+  .sidebar-shortcut-ghost {
+    border-color: var(--osui-border);
+    border-radius: 12px;
+    box-shadow: var(--osui-shadow-popover);
+  }
+
+  .shortcut-picker-search {
+    border-color: var(--osui-border);
+  }
+
+  .shortcut-picker li > button {
+    border-radius: 8px;
+    color: #404040;
+  }
+
+  .shortcut-picker li > button:hover,
+  .shortcut-picker li > button:focus-visible {
+    background: var(--osui-hover);
+    color: var(--osui-ink);
+  }
+
+  .outline-sidebar.is-drop-target,
+  .sidebar-drop-message {
+    border-color: var(--osui-agent);
+    background: var(--osui-agent-soft);
+    color: var(--osui-agent);
+  }
+
+  /* Agent activity */
+  .activity-sidebar-header {
+    min-height: 60px;
+    border-color: var(--osui-border);
+  }
+
+  .activity-sidebar-header h2 {
+    color: var(--osui-ink);
+    font-size: 13px;
+  }
+
+  .activity-sidebar-header p,
+  .activity-sidebar-toolbar,
+  .activity-empty,
+  .activity-entry-main small,
+  .activity-duration {
+    color: var(--osui-faint);
+  }
+
+  .activity-sidebar-toolbar {
+    border-color: var(--osui-border);
+  }
+
+  .activity-icon-button,
+  .activity-sidebar-toolbar button {
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--osui-muted);
+  }
+
+  .activity-icon-button:hover,
+  .activity-sidebar-toolbar button:hover:not(:disabled) {
+    border-color: var(--osui-border);
+    background: var(--osui-surface);
+    color: var(--osui-ink);
+  }
+
+  .activity-call,
+  .activity-entry {
+    border-color: var(--osui-border);
+    border-radius: 10px;
+    background: var(--osui-surface);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.02);
+  }
+
+  .activity-call.is-running,
+  .activity-entry.is-running {
+    border-color: #ddd6fe;
+    background: #faf9ff;
+  }
+
+  .activity-call.is-error,
+  .activity-entry.is-error {
+    border-color: #fecaca;
+    background: var(--osui-danger-soft);
+  }
+
+  .activity-call-open,
+  .activity-entry-main {
+    color: #404040;
+  }
+
+  .activity-call-open:hover:not(:disabled),
+  .activity-call-toggle:hover {
+    background: var(--osui-hover);
+  }
+
+  .activity-timeline,
+  .activity-sidebar-toolbar {
+    border-color: var(--osui-border);
+  }
+
+  .activity-timeline::before {
+    background: var(--osui-border);
+  }
+
+  /* Editor: preserve structure, replace the visual baseline. */
+  .outliner-editor {
+    max-width: 800px;
+    padding-top: 28px;
+  }
+
+  .outliner-editor p {
+    border-radius: 6px;
+    color: #262626;
+  }
+
+  .outliner-editor p:focus-within {
+    background: var(--osui-subtle);
+  }
+
+  .bullet-controls button,
+  .bullet-note,
+  .bullet-note:focus {
+    color: var(--osui-faint);
+  }
+
+  .bullet-dot::after {
+    background: #d4d4d4;
+  }
+
+  .bullet-dot:hover::after,
+  .bullet-dot:focus-visible::after {
+    background: #525252;
+  }
+
+  .todo-checkbox,
+  .tasks-toggle {
+    border-color: var(--osui-border-strong);
+    border-radius: 5px;
+  }
+
+  .todo-checkbox[aria-checked='true'],
+  .tasks-toggle[aria-checked='true'] {
+    border-color: var(--osui-ink);
+    background: var(--osui-ink);
+  }
+
+  .todo-checkbox:focus-visible {
+    outline-color: var(--osui-focus);
+  }
+
+  .outline-tag {
+    border: 1px solid var(--osui-border);
+    background: var(--osui-subtle);
+    color: #525252;
+    font-weight: 550;
+  }
+
+  .outline-tag:hover {
+    background: #e5e5e5;
+  }
+
+  .outliner-editor .internal-link {
+    background: #eff6ff;
+    color: #2563eb;
+  }
+
+  .outliner-editor .internal-link:hover {
+    background: #dbeafe;
+  }
+
+  .outline-backlinks {
+    border-color: var(--osui-border);
+    background: var(--osui-canvas);
+  }
+
+  .outline-backlinks h2 {
+    color: var(--osui-muted);
+  }
+
+  .outline-backlinks button:hover {
+    background: var(--osui-surface);
+    color: var(--osui-ink);
+  }
+
+  /* Purple identifies agent context and generated state. */
+  .outline-command,
+  .slash-label,
+  .activity-kind-icon.is-tool,
+  .activity-kind-icon.is-command,
+  .activity-entry.is-running .activity-status-icon svg {
+    color: var(--osui-agent);
+  }
+
+  .outline-command {
+    border-color: #ddd6fe;
+    background: var(--osui-agent-soft);
+  }
+
+  /* Search, commands, formatting, and contextual menus */
+  .search-backdrop {
+    padding-top: min(12vh, 96px);
+    background: rgb(10 10 10 / 0.24);
+    backdrop-filter: blur(4px);
+  }
+
+  .outline-search,
+  .formatting-bubble,
+  .tag-menu,
+  .internal-link-menu,
+  .slash-menu,
+  .move-dialog {
+    border-color: var(--osui-border);
+    border-radius: 12px;
+    background: var(--osui-surface);
+    box-shadow: var(--osui-shadow-popover);
+  }
+
+  .outline-search {
+    width: min(640px, calc(100vw - 32px));
+  }
+
+  .move-dialog {
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(680px, 82vh);
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .move-dialog-header {
+    padding: 18px 18px 12px;
+  }
+
+  .move-dialog-header h2 {
+    color: var(--osui-ink);
+    font-size: 16px;
+    font-weight: 650;
+  }
+
+  .move-dialog-header p {
+    margin-top: 2px;
+    color: var(--osui-muted);
+    font-size: 12px;
+  }
+
+  .move-dialog-search {
+    padding: 0 14px 12px;
+  }
+
+  .move-destination-results {
+    min-height: 116px;
+    max-height: min(340px, 42vh);
+    margin: 0;
+    padding: 5px;
+    overflow-y: auto;
+    border-top: 1px solid var(--osui-border);
+    border-bottom: 1px solid var(--osui-border);
+    list-style: none;
+  }
+
+  .move-destination-results li {
+    border-radius: 8px;
+  }
+
+  .move-destination-results li.is-active {
+    background: var(--osui-hover);
+  }
+
+  .move-destination-results button {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: 24px minmax(0, 1fr) 20px;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 9px;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    color: var(--osui-ink);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .move-destination-results button:focus-visible {
+    background: var(--osui-hover);
+    outline: 1px solid var(--osui-border-strong);
+    outline-offset: -1px;
+  }
+
+  .move-destination-icon {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    border: 1px solid var(--osui-border);
+    border-radius: 7px;
+    background: var(--osui-surface);
+    color: var(--osui-muted);
+  }
+
+  .move-destination-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  .move-destination-copy strong,
+  .move-destination-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-destination-copy strong {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .move-destination-copy small {
+    color: var(--osui-muted);
+    font-size: 10px;
+  }
+
+  .move-destination-check {
+    color: var(--osui-success);
+  }
+
+  .move-destination-empty {
+    display: grid;
+    min-height: 104px;
+    place-items: center;
+    padding: 20px;
+    color: var(--osui-muted);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .move-placement {
+    display: flex;
+    min-height: 72px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 12px 14px;
+    background: var(--osui-canvas);
+  }
+
+  .move-placement > div:first-child {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .move-placement strong {
+    overflow: hidden;
+    color: var(--osui-ink);
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-placement small {
+    overflow: hidden;
+    color: var(--osui-muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-dialog .dialog-actions {
+    margin: 0;
+    padding: 12px 14px 14px;
+    border-top: 1px solid var(--osui-border);
+  }
+
+  .move-dialog .primary-action:disabled {
+    border-color: #d4d4d4 !important;
+    background: #d4d4d4 !important;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+
+  .search-options,
+  .search-commands {
+    border-color: var(--osui-border);
+  }
+
+  .search-status-filters button {
+    border-color: var(--osui-border);
+    background: var(--osui-surface);
+    color: var(--osui-muted);
+  }
+
+  .search-status-filters button:hover,
+  .search-status-filters button:focus-visible {
+    border-color: var(--osui-border-strong);
+    background: var(--osui-subtle);
+    color: var(--osui-ink);
+  }
+
+  .save-search-open,
+  .save-search-form button,
+  .search-command-open {
+    color: #525252;
+  }
+
+  .save-search-open:hover,
+  .search-commands li:hover,
+  .search-commands li.active,
+  .search-result:hover,
+  .search-result.active {
+    background: var(--osui-hover);
+  }
+
+  .search-commands button,
+  .search-result {
+    color: var(--osui-ink);
+  }
+
+  .search-match {
+    background: #fef3c7;
+    box-shadow: 0 0 0 1px #fcd34d;
+  }
+
+  .formatting-bubble > button:hover,
+  .formatting-bubble > button:focus-visible,
+  .formatting-bubble > button.is-active,
+  .formatting-link-form button:hover,
+  .tag-item:hover,
+  .tag-item.active,
+  .internal-link-item:hover,
+  .internal-link-item.active,
+  .slash-item.active {
+    background: var(--osui-hover);
+    color: var(--osui-ink);
+  }
+
+  .formatting-divider {
+    background: var(--osui-border);
+  }
+
+  .formatting-link-form input,
+  .save-search-form input {
+    border-color: var(--osui-border);
+  }
+
+  .formatting-link-form button,
+  .tag-item,
+  .internal-link-item {
+    color: #525252;
+  }
+
+  /* Secondary pages */
+  .secondary-view-header {
+    min-height: 49px;
+    border-color: var(--osui-border);
+    background: rgb(255 255 255 / 0.9);
+  }
+
+  .secondary-view-header h1 {
+    color: var(--osui-ink);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .secondary-view-back {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--osui-muted);
+  }
+
+  .secondary-view-back:hover {
+    border-color: var(--osui-border);
+    background: var(--osui-subtle);
+    color: var(--osui-ink);
+  }
+
+  .tasks-page,
+  .trash-page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding-top: 32px;
+  }
+
+  .tasks-list,
+  .trash-list {
+    overflow: hidden;
+    border: 1px solid var(--osui-border);
+    border-radius: 12px;
+    background: var(--osui-surface);
+  }
+
+  .tasks-list {
+    gap: 0;
+  }
+
+  .tasks-list li,
+  .trash-list li {
+    min-height: 44px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--osui-border);
+    border-radius: 0;
+  }
+
+  .tasks-list li:last-child,
+  .trash-list li:last-child {
+    border-bottom: 0;
+  }
+
+  .tasks-list li:hover,
+  .trash-list li:hover {
+    background: var(--osui-hover);
+  }
+
+  .tasks-open {
+    color: #262626;
+    font-size: 13px;
+  }
+
+  .daily-note-date-picker {
+    border: 1px solid transparent;
+    color: var(--osui-muted);
+  }
+
+  .daily-note-date-picker:hover,
+  .daily-note-date-picker:focus-within {
+    border-color: var(--osui-border);
+    background: var(--osui-subtle);
+    color: var(--osui-ink);
+  }
+
+  /* Settings use cards, compact inputs, segmented controls, and switches. */
+  .settings-panel {
+    max-width: 800px;
+    padding-top: 32px;
+  }
+
+  .settings-section {
+    gap: 9px;
+  }
+
+  .settings-section h2 {
+    color: var(--osui-ink);
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .settings-section + .settings-section,
+  .settings-tools-section {
+    border-color: var(--osui-border);
+  }
+
+  .settings-section label {
+    color: #404040;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .settings-section input,
+  .settings-section select,
+  .settings-section textarea,
+  .move-dialog select {
+    border-color: var(--osui-border);
+    border-radius: 8px;
+    background: var(--osui-surface);
+    color: var(--osui-ink);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .settings-section input:hover,
+  .settings-section select:hover,
+  .settings-section textarea:hover,
+  .move-dialog select:hover {
+    border-color: var(--osui-border-strong);
+  }
+
+  .settings-section input:focus,
+  .settings-section select:focus,
+  .settings-section textarea:focus,
+  .move-dialog select:focus {
+    border-color: #a3a3a3;
+    box-shadow: 0 0 0 3px rgb(0 0 0 / 0.04);
+    outline: none;
+  }
+
+  .model-setting,
+  .auth-card,
+  .custom-tool-form,
+  .agent-tool-list,
+  .tool-list {
+    border-color: var(--osui-border);
+    border-radius: 12px;
+    background: var(--osui-canvas);
+  }
+
+  .agent-tool-list {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    padding: 8px;
+  }
+
+  .agent-tool-list legend {
+    padding: 0 5px;
+    color: var(--osui-muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .agent-tool-list [data-slot='switch-field-input'] {
+    background: var(--osui-surface);
+  }
+
+  .settings-section .tool-setting {
+    border-color: var(--osui-border);
+    background: var(--osui-surface);
+  }
+
+  .settings-section .model-select select {
+    border-color: var(--osui-border);
+    color: var(--osui-ink);
+    font-weight: 550;
+  }
+
+  .model-select svg {
+    color: var(--osui-muted);
+  }
+
+  .settings-hint,
+  .tool-setting small,
+  .tool-setting code,
+  .runtime-status small {
+    color: var(--osui-muted);
+  }
+
+  .compute-wizard-steps li {
+    border: 1px solid var(--osui-border);
+    background: var(--osui-surface);
+    color: var(--osui-faint);
+  }
+
+  .compute-wizard-steps li.done {
+    background: var(--osui-subtle);
+    color: #525252;
+  }
+
+  .compute-wizard-steps li.active {
+    border-color: var(--osui-ink);
+    background: var(--osui-ink);
+    color: white;
+  }
+
+  .settings-save,
+  .primary-action {
+    border: 1px solid var(--osui-ink) !important;
+    border-radius: 8px;
+    background: var(--osui-ink) !important;
+    color: white !important;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+    font-weight: 600;
+    transition: background 120ms ease, box-shadow 120ms ease;
+  }
+
+  .settings-save:hover:not(:disabled),
+  .primary-action:hover:not(:disabled) {
+    background: #404040 !important;
+    box-shadow: 0 2px 5px rgb(0 0 0 / 0.14);
+  }
+
+  .settings-secondary,
+  .dialog-actions button,
+  .load-error button,
+  .trash-list button,
+  .device-code button,
+  .device-login-actions button {
+    border-color: var(--osui-border);
+    border-radius: 8px;
+    background: var(--osui-surface);
+    color: #525252;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+  }
+
+  .settings-secondary:hover,
+  .dialog-actions button:hover,
+  .load-error button:hover,
+  .trash-list button:hover,
+  .device-code button:hover,
+  .device-login-actions button:hover {
+    border-color: var(--osui-border-strong);
+    color: var(--osui-ink);
+  }
+
+  .device-login {
+    border: 1px solid #ddd6fe;
+    background: var(--osui-agent-soft);
+    color: #5b3bd5;
+  }
+
+  .settings-error,
+  .action-error,
+  .persistence-error {
+    border-color: #fecaca;
+    background: var(--osui-danger-soft);
+    color: #b91c1c;
+  }
+
+  .action-error button,
+  .persistence-error button {
+    color: #991b1b;
+  }
+
+  .danger-action,
+  .tool-setting-actions button.danger-action,
+  .tool-setting-actions button.danger-action:hover {
+    color: var(--osui-danger) !important;
+  }
+
+  .move-dialog h2,
+  .trash-panel h2,
+  .load-error h1 {
+    color: var(--osui-ink);
+    letter-spacing: -0.02em;
+  }
+
+  .move-dialog label,
+  .trash-description,
+  .trash-empty,
+  .trash-list small,
+  .load-error small {
+    color: var(--osui-muted);
+  }
+
+  kbd {
+    border-color: var(--osui-border);
+    background: var(--osui-subtle);
+    color: var(--osui-faint);
+    box-shadow: 0 1px 0 white inset;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .move-placement {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .move-placement [data-slot='segmented-control'] {
+      width: 100%;
+    }
+  }
 }

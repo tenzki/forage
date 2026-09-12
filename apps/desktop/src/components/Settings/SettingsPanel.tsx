@@ -23,6 +23,8 @@ import {
 import { SecondaryViewHeader } from '../SecondaryViewHeader'
 import { ComputeSettings } from './ComputeSettings'
 import { ServerAgentSettings } from './ServerAgentSettings'
+import { SegmentedControl } from '../ui/SegmentedControl'
+import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -207,46 +209,32 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     <div className="secondary-view">
       <SecondaryViewHeader title="Settings" onBack={onBack} />
       <div className="settings-panel">
-        <nav className="settings-navigation" aria-label="Settings sections">
-          {SETTINGS_VIEWS.map((settingsView) => (
-            <button
-              key={settingsView.id}
-              type="button"
-              className={activeView === settingsView.id ? 'active' : ''}
-              aria-current={activeView === settingsView.id ? 'page' : undefined}
-              onClick={() => {
-                setActionError(null)
-                setActiveView(settingsView.id)
-              }}
-            >
-              {settingsView.label}
-            </button>
-          ))}
-        </nav>
+        <SegmentedControl
+          ariaLabel="Settings sections"
+          className="mb-7 w-full"
+          value={activeView}
+          options={SETTINGS_VIEWS.map((settingsView) => ({ value: settingsView.id, label: settingsView.label }))}
+          onValueChange={(nextView) => {
+            setActionError(null)
+            setActiveView(nextView)
+          }}
+        />
 
         <section hidden={activeView !== 'connection'} className="settings-section" aria-labelledby="connection-heading">
         <h2 id="connection-heading">Compute</h2>
         <ComputeSettings />
         <ServerAgentSettings />
         <h2>Codex</h2>
-        <div className="auth-mode" role="group" aria-label="Codex authentication method">
-          <button
-            type="button"
-            className={authMode === 'subscription' ? 'active' : ''}
-            aria-pressed={authMode === 'subscription'}
-            onClick={() => void chooseMode('subscription')}
-          >
-            ChatGPT subscription
-          </button>
-          <button
-            type="button"
-            className={authMode === 'api_key' ? 'active' : ''}
-            aria-pressed={authMode === 'api_key'}
-            onClick={() => void chooseMode('api_key')}
-          >
-            OpenAI API key
-          </button>
-        </div>
+        <SegmentedControl
+          ariaLabel="Codex authentication method"
+          className="mb-4"
+          value={authMode}
+          options={[
+            { value: 'subscription', label: 'ChatGPT subscription' },
+            { value: 'api_key', label: 'OpenAI API key' },
+          ]}
+          onValueChange={(mode) => void chooseMode(mode)}
+        />
 
         {authMode === 'subscription' ? (
           <div className="auth-card">
@@ -343,36 +331,34 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         <p className="settings-hint">
           Globally enabled tools may be called through Pi only when the selected agent also allows them. Image generation is opt-in; subscription mode uses Codex limits and API-key mode uses API billing.
         </p>
-        <div className="tool-list">
+        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
           {BUILTIN_TOOL_OPTIONS.map((tool) => (
-            <label className="tool-setting" key={tool.id}>
-              <span>
-                <strong>{tool.name}</strong>
-                <small>{tool.description}</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={enabledToolIds.includes(tool.id)}
-                onChange={(event) => void toggleTool(tool.id, event.target.checked)}
-                disabled={!isLoaded}
-              />
-            </label>
+            <SwitchFieldInput
+              key={tool.id}
+              className="border-b border-neutral-100 last:border-b-0"
+              label={tool.name}
+              hint={tool.description}
+              checked={enabledToolIds.includes(tool.id)}
+              onCheckedChange={(checked) => void toggleTool(tool.id, checked)}
+              disabled={!isLoaded}
+            />
           ))}
           {customTools.map((tool) => (
-            <div className="tool-setting" key={tool.id}>
-              <span>
-                <strong>{tool.name}</strong>
-                <small>{tool.description}</small>
-                <code>{tool.urlTemplate}</code>
-              </span>
-              <div className="tool-setting-actions">
-                <input
-                  type="checkbox"
-                  aria-label={`Enable ${tool.name}`}
-                  checked={enabledToolIds.includes(tool.id)}
-                  onChange={(event) => void toggleTool(tool.id, event.target.checked)}
-                  disabled={!isLoaded}
-                />
+            <SwitchFieldInput
+              key={tool.id}
+              className="border-b border-neutral-100 last:border-b-0"
+              label={tool.name}
+              hint={(
+                <>
+                  <span className="block">{tool.description}</span>
+                  <code className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-neutral-400">{tool.urlTemplate}</code>
+                </>
+              )}
+              checked={enabledToolIds.includes(tool.id)}
+              onCheckedChange={(checked) => void toggleTool(tool.id, checked)}
+              switchAriaLabel={`Enable ${tool.name}`}
+              disabled={!isLoaded}
+              actions={(
                 <ConfirmButton
                   label="Remove"
                   confirmLabel="Confirm remove"
@@ -381,8 +367,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
                   confirmAriaLabel={`Confirm removing ${tool.name}`}
                   onConfirm={() => void deleteCustomTool(tool.id)}
                 />
-              </div>
-            </div>
+              )}
+            />
           ))}
         </div>
 
