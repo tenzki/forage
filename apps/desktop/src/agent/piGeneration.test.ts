@@ -206,7 +206,7 @@ describe('generateWithPi activity', () => {
       modelId: 'gpt-test',
     }, {
       skill: SKILLS[0],
-      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: '', modelId: '', toolIds: ['web_fetch'] },
+      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: '', toolIds: ['web_fetch'] },
       prompt: 'test',
       context: [],
       enabledToolIds: ['web_fetch'],
@@ -243,7 +243,7 @@ describe('generateWithPi activity', () => {
       modelId: 'gpt-test',
     }, {
       skill: SKILLS[0],
-      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: '', modelId: '', toolIds: ['web_search', 'web_fetch'] },
+      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: '', toolIds: ['web_search', 'web_fetch'] },
       prompt: 'test',
       context: [],
       enabledToolIds: ['web_search', 'web_fetch'],

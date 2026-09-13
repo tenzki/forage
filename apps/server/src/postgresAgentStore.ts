@@ -2,14 +2,21 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import {
   activityEventSchema,
   agentConfigurationSchema,
+  portableAgentConfigurationSchema,
+  computeProfileSchema,
+  migrateLegacyAgentConfiguration,
   runInputSchema,
   runStatusSchema,
   type ActivityEvent,
   type AgentConfiguration,
+  type PortableAgentConfiguration,
+  type ComputeProfile,
   type RunInput,
   type RunStatus,
+  type StructuredResult,
 } from '@forage/agent-runtime'
 import { automationPolicySetSchema, type AutomationPolicySet } from '@forage/protocol'
+import { canonicalJson } from '@forage/domain'
 import {
   AgentStoreError,
   type AdmitRunInput,
@@ -18,6 +25,7 @@ import {
   type AgentStore,
   type PublishedAutomation,
   type PublishedConfiguration,
+  type PublishedComputeProfile,
 } from './agentStore.js'
 
 export class PostgresAgentStore implements AgentStore {
@@ -27,12 +35,12 @@ export class PostgresAgentStore implements AgentStore {
     const result = await this.pool.query<{ configuration: unknown; published_at: Date }>(
       'SELECT configuration, published_at FROM agent_configuration_revisions WHERE outline_id = $1 ORDER BY revision DESC LIMIT 1', [outlineId],
     )
-    return result.rows[0] ? { configuration: agentConfigurationSchema.parse(result.rows[0].configuration), publishedAt: result.rows[0].published_at.toISOString() } : null
+    return result.rows[0] ? { configuration: normalizeConfiguration(result.rows[0].configuration), publishedAt: result.rows[0].published_at.toISOString() } : null
   }
 
-  async publishConfiguration(outlineId: string, baseRevision: number, configuration: AgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration> {
+  async publishConfiguration(outlineId: string, baseRevision: number, configuration: AgentConfiguration | PortableAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration> {
     if (!publishedBy) throw new AgentStoreError('invalid_state', 'Publishing credential is required.')
-    const parsed = agentConfigurationSchema.parse(configuration)
+    const parsed = normalizeConfiguration(configuration)
     return this.transaction(async (client) => {
       await lockOutline(client, outlineId)
       const current = await currentRevision(client, 'agent_configuration_revisions', outlineId)
@@ -42,6 +50,39 @@ export class PostgresAgentStore implements AgentStore {
          VALUES ($1,$2,$3,$4) RETURNING published_at`, [outlineId, parsed.revision, parsed, publishedBy],
       )
       return { configuration: parsed, publishedAt: result.rows[0]!.published_at.toISOString() }
+    })
+  }
+
+  async currentComputeProfile(outlineId: string): Promise<PublishedComputeProfile | null> {
+    const result = await this.pool.query<{ revision: string; provider: ComputeProfile['provider']; model_id: string; credential_reference: string; updated_at: Date }>(
+      'SELECT revision,provider,model_id,credential_reference,updated_at FROM agent_compute_profiles WHERE outline_id=$1',
+      [outlineId],
+    )
+    const row = result.rows[0]
+    return row ? {
+      profile: computeProfileSchema.parse({ version: 1, revision: Number(row.revision), provider: row.provider, modelId: row.model_id, credentialRef: row.credential_reference }),
+      updatedAt: row.updated_at.toISOString(),
+    } : null
+  }
+
+  async publishComputeProfile(outlineId: string, baseRevision: number, profile: ComputeProfile, publishedBy?: string): Promise<PublishedComputeProfile> {
+    if (!publishedBy) throw new AgentStoreError('invalid_state', 'Publishing credential is required.')
+    const parsed = computeProfileSchema.parse(profile)
+    return this.transaction(async (client) => {
+      await lockOutline(client, outlineId)
+      const current = await client.query<{ revision: string }>('SELECT revision FROM agent_compute_profiles WHERE outline_id=$1', [outlineId])
+      if (Number(current.rows[0]?.revision ?? 0) !== baseRevision || parsed.revision !== baseRevision + 1) {
+        throw new AgentStoreError('conflict', 'Compute profile revision conflict.')
+      }
+      const result = await client.query<{ updated_at: Date }>(
+        `INSERT INTO agent_compute_profiles(outline_id,revision,provider,model_id,credential_reference,updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (outline_id) DO UPDATE SET revision=EXCLUDED.revision,provider=EXCLUDED.provider,
+           model_id=EXCLUDED.model_id,credential_reference=EXCLUDED.credential_reference,
+           updated_by=EXCLUDED.updated_by,updated_at=now() RETURNING updated_at`,
+        [outlineId, parsed.revision, parsed.provider, parsed.modelId, parsed.credentialRef, publishedBy],
+      )
+      return { profile: parsed, updatedAt: result.rows[0]!.updated_at.toISOString() }
     })
   }
 
@@ -72,19 +113,24 @@ export class PostgresAgentStore implements AgentStore {
     if (!admission.ownerId) throw new AgentStoreError('invalid_state', 'Run owner is required.')
     const result = await this.pool.query<AgentRunRow>(
       `INSERT INTO agent_runs
-       (id, owner_id, outline_id, trigger_kind, trigger_identity, source_note_id, target_note_id,
+       (id, owner_id, outline_id, trigger_kind, trigger_identity, invocation_id, intent_hash, source_note_id, target_note_id,
         input_snapshot, definition_snapshot, configuration_revision, credential_reference, status,
         max_attempts, retry_of_run_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'queued',$12,$13)
-       ON CONFLICT (outline_id, trigger_identity, configuration_revision)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'queued',$14,$15)
+       ON CONFLICT (outline_id, trigger_identity)
        DO UPDATE SET id = agent_runs.id
        RETURNING *`,
       [input.runId, admission.ownerId, input.outlineId, admission.trigger, admission.triggerIdentity,
+        admission.invocationId ?? null, admission.intentHash ?? null,
         input.source.nodeId ?? null, input.target.parentId, input,
         { agent: input.agent, skill: input.skill, effectiveToolIds: input.effectiveToolIds, policyId: admission.policyId ?? null },
         input.configurationRevision, input.credentialRef, Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null],
     )
-    return runFromRow(result.rows[0]!)
+    const row = result.rows[0]!
+    if (admission.intentHash && row.intent_hash !== admission.intentHash) {
+      throw new AgentStoreError('conflict', 'Invocation identifier was already used with different intent.')
+    }
+    return runFromRow(row)
   }
 
   async getRun(outlineId: string, runId: string): Promise<AgentRunRecord | null> {
@@ -237,6 +283,74 @@ export class PostgresAgentStore implements AgentStore {
     })
   }
 
+  async persistOutput(runId: string, workerId: string, resultIdentity: string, result: StructuredResult): Promise<void> {
+    await this.transaction(async (client) => {
+      const existing = await client.query<{ result_identity: string; structured_output: unknown }>(
+        'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1', [runId],
+      )
+      if (existing.rows[0]) {
+        if (existing.rows[0].result_identity !== resultIdentity || canonicalJson(existing.rows[0].structured_output) !== canonicalJson(result)) {
+          throw new AgentStoreError('conflict', 'Run already has different persisted output.')
+        }
+        return
+      }
+      await requireLease(client, runId, workerId)
+      await client.query(
+        'INSERT INTO agent_run_outputs(run_id,result_identity,structured_output) VALUES ($1,$2,$3)',
+        [runId, resultIdentity, result],
+      )
+    })
+  }
+
+  async output(runId: string) {
+    const result = await this.pool.query<{ result_identity: string; structured_output: StructuredResult }>(
+      'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1', [runId],
+    )
+    return result.rows[0]
+      ? { resultIdentity: result.rows[0].result_identity, result: result.rows[0].structured_output }
+      : null
+  }
+
+  async completeUnplaced(runId: string, workerId: string, reason: string): Promise<void> {
+    await this.transaction(async (client) => {
+      const locked = await requireLease(client, runId, workerId)
+      const output = await client.query('SELECT run_id FROM agent_run_outputs WHERE run_id=$1', [runId])
+      if (!output.rowCount) throw new AgentStoreError('invalid_state', 'Run output has not been persisted.')
+      await client.query(
+        `UPDATE agent_run_attempts SET status='completed',finished_at=now()
+         WHERE run_id=$1 AND attempt_number=$2`, [runId, locked.attempt_count],
+      )
+      await client.query(
+        `UPDATE agent_runs SET status='completed_unplaced',placement_error=$2,lease_owner=NULL,
+         lease_expires_at=NULL,updated_at=now() WHERE id=$1`, [runId, reason],
+      )
+    })
+  }
+
+  async placeOutput(outlineId: string, runId: string, resultIdentity: string, result: AgentRunResult): Promise<AgentRunResult> {
+    return this.transaction(async (client) => {
+      const existing = await client.query<ResultRow>('SELECT * FROM agent_run_results WHERE run_id=$1', [runId])
+      if (existing.rows[0]) return resultFromRow(existing.rows[0])
+      const run = await client.query<{ status: string }>(
+        'SELECT status FROM agent_runs WHERE outline_id=$1 AND id=$2 FOR UPDATE', [outlineId, runId],
+      )
+      if (!run.rows[0]) throw new AgentStoreError('not_found', 'Run is unavailable.')
+      if (run.rows[0].status !== 'completed_unplaced') throw new AgentStoreError('invalid_state', 'Run output is not awaiting placement.')
+      await client.query(
+        `INSERT INTO agent_run_results(run_id,result_identity,first_revision,last_revision,root_note_ids)
+         VALUES ($1,$2,$3,$4,$5)`, [runId, resultIdentity, result.firstRevision, result.lastRevision, result.rootNoteIds],
+      )
+      await client.query(
+        `UPDATE agent_runs SET status='completed',placement_error=NULL,updated_at=now() WHERE id=$1`, [runId],
+      )
+      await client.query(
+        `UPDATE agent_run_outputs SET placed_at=now(),target_note_id=(SELECT target_note_id FROM agent_runs WHERE id=$1)
+         WHERE run_id=$1`, [runId],
+      )
+      return result
+    })
+  }
+
   async retry(outlineId: string, runId: string, input: RunInput, maxAttempts: number): Promise<AgentRunRecord> {
     const previous = await this.getRun(outlineId, runId)
     if (!previous) throw new AgentStoreError('not_found', 'Run is unavailable.')
@@ -270,6 +384,8 @@ interface AgentRunRow extends QueryResultRow {
   credential_reference: string; status: string; attempt_count: number; max_attempts: number; available_at: Date
   lease_owner: string | null; lease_expires_at: Date | null; cancel_requested_at: Date | null; error_code: string | null
   retry_of_run_id: string | null; created_at: Date; updated_at: Date
+  invocation_id: string | null; intent_hash: string | null
+  placement_error: string | null
   first_revision?: string | null; last_revision?: string | null; root_note_ids?: string[] | null
 }
 
@@ -287,10 +403,18 @@ function runFromRow(row: AgentRunRow): AgentRunRecord {
     leaseExpiresAt: row.lease_expires_at?.toISOString() ?? null,
     cancelRequestedAt: row.cancel_requested_at?.toISOString() ?? null, errorCode: row.error_code,
     retryOfRunId: row.retry_of_run_id, admittedAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
+    invocationId: row.invocation_id, intentHash: row.intent_hash,
+    placementError: row.placement_error,
     result: row.first_revision && row.last_revision && row.root_note_ids
       ? { firstRevision: Number(row.first_revision), lastRevision: Number(row.last_revision), rootNoteIds: row.root_note_ids }
       : null,
   }
+}
+
+function normalizeConfiguration(raw: unknown): PortableAgentConfiguration {
+  const portable = portableAgentConfigurationSchema.safeParse(raw)
+  if (portable.success) return portable.data
+  return migrateLegacyAgentConfiguration(agentConfigurationSchema.parse(raw)).configuration
 }
 
 function resultFromRow(row: ResultRow): AgentRunResult {

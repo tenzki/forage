@@ -78,6 +78,38 @@ describe('deterministic outline replay', () => {
     expect(fromCheckpoint).toEqual(fromAllEvents)
   })
 
+  it('leaves the state it was given untouched while folding events forward', () => {
+    const schema = createOutlineSchema()
+    const initial = createInitialOutlineState({
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [{
+          type: 'listItem',
+          attrs: { nodeId: 'inbox', nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Inbox' }] }],
+        }],
+      }],
+    })
+    const before = structuredClone(initial)
+    const document = schema.nodeFromJSON(initial.doc)
+    const transaction = EditorState.create({ schema, doc: document }).tr.insertText('!', 8)
+    const edit = envelope('document.steps_applied', {
+      ...captureStepBatch(document, transaction.steps),
+      beforeHash: sha256HexSync(canonicalJson(document.toJSON())),
+      afterHash: sha256HexSync(canonicalJson(transaction.doc.toJSON())),
+    }, 0)
+    const shortcut = envelope('shortcut.created', {
+      shortcut: { id: 'shortcut-1', kind: 'node', nodeId: 'inbox' },
+    }, 1)
+
+    const projected = replayOutlineEvents(initial, [edit, shortcut])
+
+    expect(initial).toEqual(before)
+    expect(projected.shortcuts).toHaveLength(1)
+    expect(projected.doc).not.toEqual(initial.doc)
+  })
+
   it('detects checkpoint corruption before it can replace replayable history', async () => {
     const checkpoint = await createCheckpoint(createInitialOutlineState({ type: 'doc', content: [] }), {
       id: 'checkpoint-1',

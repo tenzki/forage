@@ -42,6 +42,7 @@ export interface ReplayInput {
   state: OutlineState
   events: EventEnvelope[]
   latestLocalSequence?: number
+  acknowledgedSequence?: number
 }
 
 export interface LocalIdentity {
@@ -133,6 +134,10 @@ export class NativeEventRepository {
     return invoke('event_store_events_after', { outlineId, localSequence })
   }
 
+  async eventsBefore(outlineId: string, localSequence: number, limit: number): Promise<StoredEventRecord[]> {
+    return invoke('event_store_events_before', { outlineId, localSequence, limit })
+  }
+
   async loadReplayInput(outlineId: string): Promise<ReplayInput | null> {
     const checkpoint = await invoke<StoredCheckpoint | null>('event_store_latest_checkpoint', {
       outlineId,
@@ -147,15 +152,20 @@ export class NativeEventRepository {
     } catch {
       throw new Error('The local outline checkpoint contains invalid JSON.')
     }
+    const retained = records.filter((record) => !record.supersededBy)
+    const firstPending = retained.find((record) => record.status === 'pending')
+    const latestLocalSequence = Math.max(
+      checkpoint.localSequence,
+      ...records.map((record) => record.localSequence),
+    )
     return {
       checkpoint,
       state,
-      latestLocalSequence: Math.max(
-        checkpoint.localSequence,
-        ...records.map((record) => record.localSequence),
-      ),
-      events: records
-        .filter((record) => !record.supersededBy)
+      latestLocalSequence,
+      acknowledgedSequence: firstPending
+        ? firstPending.localSequence - 1
+        : latestLocalSequence,
+      events: retained
         .map((record) => {
           const event = parseEventEnvelope(record.envelope)
           return typeof record.serverRevision === 'number' && event.revision === undefined
@@ -167,6 +177,14 @@ export class NativeEventRepository {
 
   async saveCheckpoint(checkpoint: StoredCheckpoint): Promise<void> {
     await invoke('event_store_save_checkpoint', { checkpoint })
+  }
+
+  async seedOutline(state: OutlineState): Promise<{ outlineId: string; revision: number; integrityHash: string }> {
+    return invoke('server_seed_outline', { documentState: state })
+  }
+
+  async markSeeded(outlineId: string, checkpoint: StoredCheckpoint): Promise<void> {
+    await invoke('event_store_mark_seeded', { outlineId, checkpoint })
   }
 
   async pending(outlineId: string, limit = 100): Promise<StoredEventRecord[]> {

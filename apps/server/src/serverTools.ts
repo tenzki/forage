@@ -2,7 +2,14 @@ import { untrustedSourceMaterialSchema, type RuntimeTool, type UntrustedSourceMa
 import { inspectPublicUrl, type PublicSourceIdentity } from './sourceUrl.js'
 import type { TranscriptProvider } from './transcript.js'
 
-export interface PublicReaderResult { canonicalUrl: string; content: string; title?: string; author?: string; publishedAt?: string }
+export interface PublicReaderResult {
+  canonicalUrl: string
+  content: string
+  title?: string
+  author?: string
+  publishedAt?: string
+  truncated?: boolean
+}
 export interface PublicReader { read(url: string, signal: AbortSignal): Promise<PublicReaderResult> }
 
 export class DuckDuckGoSearchProvider {
@@ -58,11 +65,19 @@ export class BoundedPublicReader implements PublicReader {
       }
       if (response.status === 429) throw new Error('Public reader was rate limited.')
       if (!response.ok) throw new Error(response.status >= 500 ? 'Public reader is temporarily unavailable.' : 'Public source is unavailable.')
-      const declared = Number(response.headers.get('content-length') ?? 0)
-      if (declared > this.maximum * 4) throw new Error('Public source response is too large.')
-      const content = await response.text()
-      if (content.length > this.maximum) throw new Error('Public source response is too large.')
-      return { canonicalUrl: inspected.canonicalUrl, content }
+      const bounded = await readBoundedBody(response, this.maximum, signal)
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+      const extracted = contentType.includes('html') || /<html[\s>]/i.test(bounded.text)
+        ? readableHtml(bounded.text)
+        : bounded.text
+      const content = extracted.slice(0, this.maximum)
+      if (!content.trim()) throw new Error('Public source contained no readable text.')
+      return {
+        canonicalUrl: inspected.canonicalUrl,
+        content,
+        ...(bounded.truncated || extracted.length > this.maximum ? { truncated: true } : {}),
+        ...(contentType.includes('html') ? titleFromHtml(bounded.text) : {}),
+      }
     }
     throw new Error('Public reader redirect limit was exceeded.')
   }
@@ -132,10 +147,64 @@ function sourceReaderTool(
           ...(page.title ? { title: page.title } : {}),
           ...(page.author ? { author: page.author } : {}),
           ...(page.publishedAt ? { publishedAt: page.publishedAt } : {}),
+          ...(page.truncated ? { truncated: 'true' } : {}),
         },
       })
     },
   }
+}
+
+async function readBoundedBody(response: Response, maximumCharacters: number, signal: AbortSignal): Promise<{ text: string; truncated: boolean }> {
+  const maximumBytes = Math.max(4_096, Math.min(maximumCharacters * 8, 800_000))
+  if (!response.body) {
+    const text = await response.text()
+    return { text: text.slice(0, maximumBytes), truncated: text.length > maximumBytes }
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let received = 0
+  let text = ''
+  let truncated = false
+  try {
+    while (received < maximumBytes) {
+      if (signal.aborted) throw new DOMException('Public source read cancelled.', 'AbortError')
+      const { done, value } = await reader.read()
+      if (done) break
+      const remaining = maximumBytes - received
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value
+      received += chunk.byteLength
+      text += decoder.decode(chunk, { stream: received < maximumBytes })
+      if (value.byteLength > remaining || received === maximumBytes) {
+        truncated = true
+        await reader.cancel().catch(() => undefined)
+        break
+      }
+    }
+    if (!truncated) text += decoder.decode()
+    return { text, truncated }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function readableHtml(html: string): string {
+  return decodeHtml(html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|article|section|header|footer|h[1-6]|tr)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function titleFromHtml(html: string): { title?: string } {
+  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)
+  const title = match ? decodeHtml(match[1]!.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 300) : ''
+  return title ? { title } : {}
 }
 
 function simpleStringTool(
@@ -159,5 +228,19 @@ function urlArgument(arguments_: Record<string, unknown>): string {
 }
 
 function decodeHtml(value: string): string {
-  return value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  return value
+    .replace(/&#(\d+);/g, (match, decimal: string) => decodedCodePoint(match, Number(decimal)))
+    .replace(/&#x([0-9a-f]+);/gi, (match, hexadecimal: string) => decodedCodePoint(match, Number.parseInt(hexadecimal, 16)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+}
+
+function decodedCodePoint(fallback: string, value: number): string {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff
+    ? String.fromCodePoint(value)
+    : fallback
 }

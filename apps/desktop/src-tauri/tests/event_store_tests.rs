@@ -592,3 +592,170 @@ fn returns_recent_agent_runs_with_activity_and_clears_them_per_outline() {
         .expect("activity after clear")
         .is_empty());
 }
+
+#[test]
+fn mark_seeded_settles_pending_events_and_writes_the_genesis_checkpoint() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store.append(&event("event-1", 0)).expect("append first");
+    store.append(&event("event-2", 0)).expect("append second");
+
+    let checkpoint = CheckpointRecord {
+        id: "checkpoint-seed".to_string(),
+        outline_id: "outline-1".to_string(),
+        document_version: 1,
+        schema_epoch: 1,
+        local_sequence: 0,
+        server_revision: 0,
+        state_json: "{\"doc\":1}".to_string(),
+        integrity_hash: EventStore::checkpoint_hash("{\"doc\":1}"),
+        created_at: "2026-09-12T12:00:00.000Z".to_string(),
+    };
+    store
+        .mark_seeded("outline-1", &checkpoint)
+        .expect("mark seeded");
+
+    assert!(store
+        .pending_events("outline-1", 100)
+        .expect("pending after seed")
+        .is_empty());
+    let stored = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("load checkpoint")
+        .expect("checkpoint exists");
+    assert_eq!(stored.server_revision, 0);
+    assert_eq!(stored.id, "checkpoint-seed");
+}
+
+#[test]
+fn mark_seeded_leaves_another_outline_outbox_untouched() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store.append(&event("event-1", 0)).expect("append");
+    let mut other = event("event-other", 0);
+    other.outline_id = "outline-2".to_string();
+    store.append(&other).expect("append other outline");
+
+    let checkpoint = CheckpointRecord {
+        id: "checkpoint-seed".to_string(),
+        outline_id: "outline-1".to_string(),
+        document_version: 1,
+        schema_epoch: 1,
+        local_sequence: 0,
+        server_revision: 0,
+        state_json: "{\"doc\":1}".to_string(),
+        integrity_hash: EventStore::checkpoint_hash("{\"doc\":1}"),
+        created_at: "2026-09-12T12:00:00.000Z".to_string(),
+    };
+    store
+        .mark_seeded("outline-1", &checkpoint)
+        .expect("mark seeded");
+
+    assert_eq!(
+        store
+            .pending_events("outline-2", 100)
+            .expect("other outline pending")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn reads_only_the_newest_events_at_or_before_a_sequence() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    for index in 1..=10 {
+        store
+            .append(&event(&format!("event-{index}"), 0))
+            .expect("append");
+    }
+
+    let page = store
+        .events_before_sequence("outline-1", 8, 3)
+        .expect("read page");
+    assert_eq!(
+        page.iter().map(|event| event.id.as_str()).collect::<Vec<_>>(),
+        ["event-6", "event-7", "event-8"]
+    );
+
+    let beginning = store
+        .events_before_sequence("outline-1", 2, 50)
+        .expect("read beginning");
+    assert_eq!(
+        beginning
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<Vec<_>>(),
+        ["event-1", "event-2"]
+    );
+    assert!(store
+        .events_before_sequence("outline-1", 0, 10)
+        .expect("read empty")
+        .is_empty());
+}
+
+#[test]
+fn prunes_superseded_checkpoints_and_keeps_the_newest_generation() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    for index in 1..=(EventStore::CHECKPOINT_RETENTION + 5) {
+        let state = format!("{{\"doc\":{index}}}");
+        store
+            .save_checkpoint(&CheckpointRecord {
+                id: format!("checkpoint-{index}"),
+                outline_id: "outline-1".to_string(),
+                document_version: 1,
+                schema_epoch: 1,
+                local_sequence: index,
+                server_revision: index,
+                integrity_hash: EventStore::checkpoint_hash(&state),
+                state_json: state,
+                created_at: "2026-08-30T12:00:00.000Z".to_string(),
+            })
+            .expect("save checkpoint");
+    }
+
+    let retained = store
+        .checkpoint_count("outline-1")
+        .expect("count checkpoints");
+    assert_eq!(retained, EventStore::CHECKPOINT_RETENTION);
+    let selected = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("select checkpoint")
+        .expect("checkpoint exists");
+    assert_eq!(
+        selected.id,
+        format!("checkpoint-{}", EventStore::CHECKPOINT_RETENTION + 5)
+    );
+}
+
+#[test]
+fn keeps_enough_checkpoint_history_to_survive_a_corrupted_newest_one() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    for index in 1..=(EventStore::CHECKPOINT_RETENTION + 5) {
+        let state = format!("{{\"doc\":{index}}}");
+        let newest = index == EventStore::CHECKPOINT_RETENTION + 5;
+        store
+            .save_checkpoint(&CheckpointRecord {
+                id: format!("checkpoint-{index}"),
+                outline_id: "outline-1".to_string(),
+                document_version: 1,
+                schema_epoch: 1,
+                local_sequence: index,
+                server_revision: index,
+                integrity_hash: if newest {
+                    EventStore::checkpoint_hash("{\"doc\":0}")
+                } else {
+                    EventStore::checkpoint_hash(&state)
+                },
+                state_json: state,
+                created_at: "2026-08-30T12:00:00.000Z".to_string(),
+            })
+            .expect("save checkpoint");
+    }
+
+    let selected = store
+        .latest_compatible_checkpoint("outline-1", 1, 1)
+        .expect("select checkpoint")
+        .expect("checkpoint exists");
+    assert_eq!(
+        selected.id,
+        format!("checkpoint-{}", EventStore::CHECKPOINT_RETENTION + 4)
+    );
+}

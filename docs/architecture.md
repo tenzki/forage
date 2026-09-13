@@ -54,16 +54,30 @@ In server mode, PostgreSQL is authoritative and assigns the global event revisio
 4. Accepted server events and acknowledgements are recorded locally, preserving readable offline state.
 5. Referenced assets are signature- and hash-verified independently and transferred through the corresponding content-addressed stores.
 
+A freshly bootstrapped server holds an owner and credentials but no outline. The first desktop to enrol claims the server and seeds it with that device's own replayed document state, so the operator's existing local notes become the server's content; later devices pull that outline and leave their own local outlines parked. Outlines are never merged (ADR-0015).
+
 The initial server is self-hosted and single-owner. Multiple devices and scoped API clients are supported; teams, shared editing, real-time cursors, and a managed Forage cloud are not part of the current architecture.
+
+Server-mode authority is explicit:
+
+| Concern | Authority | Derived/local state |
+| --- | --- | --- |
+| Outline content | `outline_projections.state` at `outlines.current_revision` | Desktop replay cache and pending outbox |
+| Search | Canonical outline for validation | Rebuildable `note_projections` index |
+| Agent behavior | Portable configuration revision | Confirmed desktop mirror |
+| Model and credential | Environment-local compute profile | Sanitized metadata only |
+| Run execution | Immutable server admission snapshot | Remembered desktop run ID and activity cursor |
+
+The flattened note index never authorizes or validates a write. Its source revision and projector schema are tracked independently, and startup deterministically repairs missing, stale, or incomplete rows from the canonical outline.
 
 ## Agent execution
 
 The desktop supports two execution locations behind shared run and result contracts:
 
 - Local execution launches the Node.js sidecar, which embeds the Pi SDK and uses a user-owned OpenAI API key or short-lived ChatGPT OAuth credential. The sidecar is stateless across invocations and receives only explicitly selected outline context and authorized tools.
-- Server execution admits manual or automation-triggered runs to a PostgreSQL-backed queue. Workers claim bounded leases, use enrolled encrypted credentials, append sanitized activity, and commit successful results as ordinary `agent`-origin outline events.
+- Server execution accepts a small invocation intent and resolves current canonical context, portable configuration, compute, credentials, and capabilities at admission. PostgreSQL-backed workers claim bounded leases and append sanitized activity. The application-level desktop run manager observes multiple runs across popup closure, restart, disconnect, and reconnect.
 
-Both paths return validated structured outline nodes. Applying a result changes the same ProseMirror document and enters the same durable event stream as user edits; there is no parallel agent-owned outline.
+Both paths return validated structured outline nodes. Server output is persisted before placement and enters the outline as one atomic `agent.result_committed` event. A missing or trashed target produces `completed_unplaced`; the intact stored output can later be placed exactly once under another live node. There is no parallel agent-owned outline, and the editor remains available while runs and synchronization continue.
 
 ## External capture and assets
 
@@ -81,5 +95,10 @@ Generated raster images are stored outside the event payload as content-addresse
 - [ADR-0011: Retain Tauri and TipTap](ADRs/ADR-0011-retain-tauri-tiptap-over-gpuix.md)
 - [ADR-0012: Use an Event Store with an Optional Self-Hosted Server](ADRs/ADR-0012-event-store-and-optional-server.md)
 - [ADR-0013: Embed the Pi SDK in a Local Node.js Sidecar](ADRs/ADR-0013-embedded-pi-sdk-sidecar.md)
+- [ADR-0016: Use the Canonical Outline for Correctness-Critical Server Operations](ADRs/ADR-0016-canonical-outline-over-note-index.md)
+- [ADR-0017: Provision and Mirror Server Agent Configuration](ADRs/ADR-0017-provision-and-mirror-server-agent-configuration.md)
+- [ADR-0018: Resolve Models and Credentials Through Environment Compute Profiles](ADRs/ADR-0018-environment-compute-profiles.md)
+- [ADR-0019: Admit Server Agents From Invocation Intents](ADRs/ADR-0019-intent-based-server-agent-admission.md)
+- [ADR-0020: Keep Agent Runs Concurrent and Commit Results Atomically](ADRs/ADR-0020-concurrent-agents-and-atomic-results.md)
 
 For server setup, security, and operational limits, see [Optional Server Backend](server-backend.md).

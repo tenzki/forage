@@ -16,17 +16,8 @@ const MAX_AGENT_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub async fn server_enroll(
     state: State<'_, NativeState>,
     origin: String,
-    outline_id: String,
     device_token: String,
 ) -> Result<Value, String> {
-    if outline_id.is_empty()
-        || outline_id.len() > 128
-        || !outline_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-    {
-        return Err("invalid outline identifier".to_string());
-    }
     if device_token.trim().is_empty() || device_token.len() > 1_024 {
         return Err("invalid device token".to_string());
     }
@@ -58,17 +49,13 @@ pub async fn server_enroll(
     pinned
         .verify_instance(instance_id)
         .map_err(|error| error.to_string())?;
-    request_json(
-        &state.http_client,
-        &pinned,
-        Some(&device_token),
-        Method::GET,
-        &format!("/api/v1/outlines/{outline_id}/checkpoint"),
-        None,
-        MAX_CHECKPOINT_BYTES,
-    )
-    .await?;
 
+    // This device's own outline identity becomes the server's outline. A blank server has
+    // no checkpoint to probe, so claiming is what proves the token is accepted.
+    let outline_id = state
+        .event_store
+        .get_or_create_identity("outline_id", "outline")
+        .map_err(|error| error.to_string())?;
     let credential_reference = format!("device_{}", uuid::Uuid::new_v4());
     state
         .event_store
@@ -78,17 +65,45 @@ pub async fn server_enroll(
         origin: pinned.origin().as_str().trim_end_matches('/').to_string(),
         instance_id: instance_id.to_string(),
         credential_reference: credential_reference.clone(),
-        outline_id,
+        outline_id: outline_id.clone(),
     };
     if let Err(error) = state.event_store.set_server_configuration(&configuration) {
         let _ = state.event_store.remove_credential(&credential_reference);
         return Err(error.to_string());
     }
-    state
-        .event_store
-        .set_storage_mode(crate::persistence::StorageMode::Server)
-        .map_err(|error| error.to_string())?;
+    request_json(
+        &state.http_client,
+        &pinned,
+        Some(&device_token),
+        Method::POST,
+        "/api/v1/outlines",
+        Some(json!({ "outlineId": outline_id, "name": "Notes" })),
+        MAX_STATUS_BYTES,
+    )
+    .await?;
+    // Storage mode stays Local until the outline is seeded, so a failed seed is retryable.
     Ok(status)
+}
+
+#[tauri::command]
+pub async fn server_seed_outline(
+    state: State<'_, NativeState>,
+    document_state: Value,
+) -> Result<Value, String> {
+    let (configuration, pinned, token) = connection(&state)?;
+    for asset_id in referenced_asset_ids(&document_state) {
+        upload_asset(&state, &pinned, &token, &asset_id).await?;
+    }
+    request_json(
+        &state.http_client,
+        &pinned,
+        Some(&token),
+        Method::PUT,
+        &format!("/api/v1/outlines/{}/seed", configuration.outline_id),
+        Some(json!({ "state": document_state })),
+        MAX_CHECKPOINT_BYTES,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -212,6 +227,20 @@ pub fn server_disconnect(state: State<'_, NativeState>) -> Result<(), String> {
         .server_configuration()
         .map_err(|error| error.to_string())?
     {
+        let remembered = json!({
+            "version": 1,
+            "origin": configuration.origin,
+            "instanceId": configuration.instance_id,
+            "outlineId": configuration.outline_id,
+            "disconnectedAtEpochMs": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_millis(),
+        });
+        state
+            .event_store
+            .set_app_configuration_value("remembered_server_identity", &remembered.to_string())
+            .map_err(|error| error.to_string())?;
         state
             .event_store
             .remove_credential(&configuration.credential_reference)
@@ -284,6 +313,48 @@ pub async fn server_agent_publish_configuration(
 }
 
 #[tauri::command]
+pub async fn server_agent_compute_profile(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(&state, Method::GET, "compute-profile", None, MAX_STATUS_BYTES).await
+}
+
+#[tauri::command]
+pub async fn server_agent_publish_compute_profile(
+    state: State<'_, NativeState>,
+    request: Value,
+) -> Result<Value, String> {
+    agent_request(&state, Method::PUT, "compute-profile", Some(request), MAX_STATUS_BYTES).await
+}
+
+#[tauri::command]
+pub async fn server_agent_readiness(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(&state, Method::GET, "readiness", None, MAX_STATUS_BYTES).await
+}
+
+#[tauri::command]
+pub async fn server_outline_search(
+    state: State<'_, NativeState>,
+    query: String,
+    limit: i64,
+) -> Result<Value, String> {
+    if query.len() > 500 {
+        return Err("search query is too long".to_string());
+    }
+    let endpoint = {
+        let mut encoded = url::form_urlencoded::Serializer::new(String::new());
+        encoded.append_pair("query", query.trim());
+        encoded.append_pair("limit", &limit.clamp(1, 50).to_string());
+        format!("search?{}", encoded.finish())
+    };
+    agent_request(
+        &state,
+        Method::GET,
+        &endpoint,
+        None,
+        MAX_AGENT_RESPONSE_BYTES,
+    ).await
+}
+
+#[tauri::command]
 pub async fn server_agent_automation(state: State<'_, NativeState>) -> Result<Value, String> {
     agent_request(
         &state,
@@ -319,6 +390,21 @@ pub async fn server_agent_enroll_api_key(
         &state,
         Method::POST,
         "agent-credentials/api-key",
+        Some(request),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn server_agent_import_credential(
+    state: State<'_, NativeState>,
+    request: Value,
+) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::POST,
+        "agent-credentials/import",
         Some(request),
         MAX_STATUS_BYTES,
     )
@@ -517,6 +603,23 @@ pub async fn server_agent_retry(
         MAX_STATUS_BYTES,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn server_agent_place(
+    state: State<'_, NativeState>,
+    run_id: String,
+    target_node_id: String,
+) -> Result<Value, String> {
+    validate_agent_id(&run_id)?;
+    validate_agent_id(&target_node_id)?;
+    agent_request(
+        &state,
+        Method::POST,
+        &format!("agent-runs/{run_id}/place"),
+        Some(json!({ "targetNodeId": target_node_id })),
+        MAX_AGENT_RESPONSE_BYTES,
+    ).await
 }
 
 fn validate_agent_id(value: &str) -> Result<(), String> {
@@ -738,12 +841,20 @@ async fn request_json_with_idempotency(
     }
     let value: Value =
         serde_json::from_slice(&bytes).map_err(|_| "server returned invalid JSON".to_string())?;
-    if !status.is_success() && status != StatusCode::CONFLICT {
-        return Err(value
+    interpret_response(status.as_u16(), value)
+}
+
+pub fn interpret_response(status: u16, value: Value) -> Result<Value, String> {
+    let rebase_signal = status == 409 && value.get("error").is_none();
+    if (status < 200 || status >= 300) && !rebase_signal {
+        let code = value
             .pointer("/error/code")
             .and_then(Value::as_str)
-            .unwrap_or("server_error")
-            .to_string());
+            .unwrap_or("server_error");
+        return Err(match value.pointer("/error/message").and_then(Value::as_str) {
+            Some(message) => format!("{code}: {message}"),
+            None => code.to_string(),
+        });
     }
     Ok(value)
 }

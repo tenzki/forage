@@ -32,7 +32,7 @@ import {
 } from '../../agent/localCredentials'
 import { NativeEventRepository } from '../../persistence/eventStore'
 import { LocalAgentExecutor } from '../../agent/localExecutor'
-import { ServerAgentExecutor, TauriServerAgentTransport } from '../../agent/serverExecutor'
+import { serverRunManager } from '../../agent/serverRunManager'
 import { createPiLocalRunner } from '../../agent/piLocalRunner'
 import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
 import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
@@ -103,10 +103,14 @@ export function SlashMenu({
   editor,
   onError,
   onActivity,
+  onBeforeServerRun,
+  onAfterServerRun,
 }: {
   editor: Editor | null
   onError: (message: string | null) => void
   onActivity?: ActivityReporter
+  onBeforeServerRun?: () => Promise<void>
+  onAfterServerRun?: () => Promise<void>
 }) {
   const authMode = useSettingsStore((state) => state.authMode)
   const localCredentials = useSettingsStore((state) => state.localCredentials)
@@ -301,36 +305,30 @@ export function SlashMenu({
     void (async () => {
       const mode = await repository.storageMode()
       if (mode === 'server') {
-        const transport = new TauriServerAgentTransport()
-        const published = await transport.configuration()
-        const serverSkill = published.configuration.skills.find((candidate) => candidate.id === skill.id)
-        const serverAgent = serverSkill
-          ? published.configuration.agents.find((candidate) => candidate.id === serverSkill.agentId)
-          : undefined
-        if (!serverSkill || !serverAgent) throw new Error(`/${skill.label} is not published on the configured server.`)
-        if (!serverAgent.credentialRef) throw new Error(`/${skill.label} has no connected server credential.`)
+        await onBeforeServerRun?.()
         const connection = await repository.serverConnection()
         if (!connection) throw new Error('Server mode is not configured.')
         const sync = await repository.syncState(connection.outlineId)
-        const effectiveToolIds = resolveEffectiveToolIds({
-          agentToolIds: serverAgent.toolIds,
-          requiredToolIds: serverSkill.requiredToolIds,
-          globallyEnabledToolIds: published.configuration.globallyEnabledToolIds,
-          policyAllowedToolIds: serverAgent.toolIds,
-          executorSupportedToolIds: published.configuration.globallyEnabledToolIds,
-        })
-        const input: RunInput = {
-          version: 1, runId, executionMode: 'server', outlineId: connection.outlineId,
-          source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
-          baseRevision: sync.lastPulledRevision, configurationRevision: published.configuration.revision,
-          credentialRef: serverAgent.credentialRef, agent: serverAgent, skill: serverSkill,
-          effectiveToolIds, prompt: prompt || serverSkill.label, context: contextSnapshot.lines,
-          customTools: published.configuration.customTools,
+        const handle = await serverRunManager.invoke({
+          version: 2, invocationId: runId, sourceNodeId: invocationNodeId,
+          skillId: skill.id, prompt: prompt || skill.label,
+          acknowledgedOutlineRevision: sync.lastPulledRevision,
+        }, (event) => onActivity?.(fromRuntimeEvent(event, runId)))
+        const completed = await handle.completion
+        if (completed.status === 'completed_unplaced') {
+          onActivity?.({
+            id: `placement-${runId}`, callId: runId, phase: 'error', kind: 'output',
+            label: 'Result needs a destination',
+            detail: 'The output is stored on the server. Open Settings → Server agent executor to place it under a live bullet.',
+            nodeId: invocationNodeId,
+          })
+        } else {
+          await onAfterServerRun?.()
+          onActivity?.({
+            id: `outline-${runId}`, callId: runId, phase: 'complete', kind: 'output',
+            label: 'Outline updated', nodeId: invocationNodeId,
+          })
         }
-        const handle = await new ServerAgentExecutor(transport).invoke(input, {
-          onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
-        })
-        await handle.completion
         onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
         return
       }
@@ -350,7 +348,7 @@ export function SlashMenu({
         version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
         source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
         baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
-        agent, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
+        agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
         customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
       }
       const runner = createPiLocalRunner({

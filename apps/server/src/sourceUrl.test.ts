@@ -8,6 +8,7 @@ describe('public source URL inspection', () => {
   it.each([
     ['https://youtu.be/dQw4w9WgXcQ?t=3#fragment', 'youtube', 'dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
     ['https://m.youtube.com/shorts/dQw4w9WgXcQ', 'youtube', 'dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'],
+    ['https://www.youtube.com/@bakaprasemusic#videos', 'webpage', undefined, 'https://www.youtube.com/@bakaprasemusic'],
     ['https://twitter.com/example/status/1234567890#reply', 'x', '1234567890', 'https://x.com/example/status/1234567890'],
     ['https://example.com/article#comments', 'webpage', undefined, 'https://example.com/article'],
   ])('canonicalizes %s', async (submittedUrl, type, identity, canonicalUrl) => {

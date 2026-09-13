@@ -2,9 +2,11 @@ import {
   applySerializedSteps,
   createReplayOutlineSchema,
   insertPlainTextNote,
+  insertAgentResult,
   repairSystemNodes,
   type SerializedStep,
 } from '../../document/src'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import type { EventEnvelope } from './envelope'
 import { canonicalJson, sha256HexSync } from './checkpoint'
 
@@ -43,7 +45,10 @@ export function createInitialOutlineState(doc: JsonObject): OutlineState {
 }
 
 export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope): OutlineState {
-  const state = clone(current)
+  return reduceInto(clone(current), event)
+}
+
+function reduceInto(state: OutlineState, event: EventEnvelope): OutlineState {
   if (event.type !== 'document.schema_migrated' && event.schemaEpoch !== state.schemaEpoch) {
     throw new Error(
       `Event ${event.id} uses schema epoch ${event.schemaEpoch}, but the outline is at epoch ${state.schemaEpoch}.`,
@@ -54,20 +59,22 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     case 'document.undo_applied':
     case 'document.redo_applied': {
       assertDocumentHash(state.doc, event.payload.beforeHash, event.id, 'before', state.schemaEpoch)
-      const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
-      const projected = applySerializedSteps(
-        document,
-        event.payload.steps as SerializedStep[],
-      ).toJSON() as JsonObject
+      const document = parseDocument(state.doc, state.schemaEpoch)
+      const result = applySerializedSteps(document, event.payload.steps as SerializedStep[])
+      const projected = result.toJSON() as JsonObject
       // Early system-node migrations were recorded before the editor coalesced
       // legacy root lists. Replaying the same deterministic repair keeps their
       // already-recorded follow-up steps aligned; current migrations are idempotent here.
-      state.doc = event.origin === 'migration'
-        ? repairSystemNodes(projected, () => {
+      const repaired = event.origin === 'migration'
+      if (repaired) {
+        state.doc = repairSystemNodes(projected, () => {
           throw new Error('A system-node migration replay unexpectedly requires a new node id.')
         }).doc
-        : projected
-      assertDocumentHash(state.doc, event.payload.afterHash, event.id, 'after', state.schemaEpoch)
+      } else {
+        state.doc = projected
+        parsedDocuments.set(projected, result)
+      }
+      assertDocumentHash(state.doc, event.payload.afterHash, event.id, 'after', state.schemaEpoch, !repaired)
       return state
     }
     case 'shortcut.created':
@@ -92,24 +99,26 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
     case 'trash.entry_added':
       if (event.payload.document) {
         assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before', state.schemaEpoch)
-        const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
-        state.doc = applySerializedSteps(
-          document,
+        const trashResult = applySerializedSteps(
+          parseDocument(state.doc, state.schemaEpoch),
           event.payload.document.steps as SerializedStep[],
-        ).toJSON() as JsonObject
-        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch)
+        )
+        state.doc = trashResult.toJSON() as JsonObject
+        parsedDocuments.set(state.doc, trashResult)
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch, true)
       }
       state.trash.push(clone(event.payload.entry))
       return state
     case 'trash.entry_restored':
       if (event.payload.document) {
         assertDocumentHash(state.doc, event.payload.document.beforeHash, event.id, 'before', state.schemaEpoch)
-        const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
-        state.doc = applySerializedSteps(
-          document,
+        const trashResult = applySerializedSteps(
+          parseDocument(state.doc, state.schemaEpoch),
           event.payload.document.steps as SerializedStep[],
-        ).toJSON() as JsonObject
-        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch)
+        )
+        state.doc = trashResult.toJSON() as JsonObject
+        parsedDocuments.set(state.doc, trashResult)
+        assertDocumentHash(state.doc, event.payload.document.afterHash, event.id, 'after', state.schemaEpoch, true)
       }
       state.trash = state.trash.filter((entry) => entry.id !== event.payload.entryId)
       return state
@@ -120,13 +129,44 @@ export function reduceOutlineEvent(current: OutlineState, event: EventEnvelope):
       state.schemaEpoch = event.schemaEpoch
       return state
     case 'note.created': {
-      const document = createReplayOutlineSchema(state.schemaEpoch).nodeFromJSON(state.doc)
-      state.doc = insertPlainTextNote(document, event.payload).toJSON() as JsonObject
+      const noted = insertPlainTextNote(parseDocument(state.doc, state.schemaEpoch), event.payload)
+      state.doc = noted.toJSON() as JsonObject
+      parsedDocuments.set(state.doc, noted)
       return state
     }
     case 'asset.reference_added':
       return state
+    case 'agent.result_committed': {
+      const projected = insertAgentResult(parseDocument(state.doc, state.schemaEpoch), {
+        targetNodeId: event.payload.targetNodeId,
+        nodes: event.payload.nodes,
+      })
+      state.doc = projected.toJSON() as JsonObject
+      parsedDocuments.set(state.doc, projected)
+      return state
+    }
   }
+}
+
+const canonicalDocumentHashes = new WeakMap<JsonObject, string>()
+
+const parsedDocuments = new WeakMap<JsonObject, ProseMirrorNode>()
+
+function parseDocument(doc: JsonObject, schemaEpoch: number): ProseMirrorNode {
+  const remembered = parsedDocuments.get(doc)
+  if (remembered) return remembered
+  const parsed = createReplayOutlineSchema(schemaEpoch).nodeFromJSON(doc)
+  parsedDocuments.set(doc, parsed)
+  return parsed
+}
+
+function documentHash(doc: JsonObject, schemaEpoch: number, canonical: boolean): string {
+  const remembered = canonicalDocumentHashes.get(doc)
+  if (remembered !== undefined) return remembered
+  const source = canonical ? doc : parseDocument(doc, schemaEpoch).toJSON() as JsonObject
+  const hash = sha256HexSync(canonicalJson(source))
+  canonicalDocumentHashes.set(doc, hash)
+  return hash
 }
 
 function assertDocumentHash(
@@ -135,12 +175,9 @@ function assertDocumentHash(
   eventId: string,
   phase: 'before' | 'after',
   schemaEpoch: number,
+  canonical = false,
 ): void {
-  // ProseMirror supplies default attributes while parsing. Events are captured
-  // from that canonical form, so replay must compare the same representation
-  // even when an older checkpoint omitted default-valued attributes.
-  const canonicalDocument = createReplayOutlineSchema(schemaEpoch).nodeFromJSON(doc).toJSON()
-  const actual = sha256HexSync(canonicalJson(canonicalDocument))
+  const actual = documentHash(doc, schemaEpoch, canonical)
   if (actual !== expected) {
     throw new Error(`Document integrity mismatch ${phase} event ${eventId}: expected ${expected}, got ${actual}.`)
   }
@@ -168,11 +205,11 @@ export function replayOutlineEvents(
   initial: OutlineState,
   events: readonly EventEnvelope[],
 ): OutlineState {
-  let state = initial
+  let state = clone(initial)
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]
     try {
-      state = reduceOutlineEvent(state, event)
+      state = reduceInto(state, event)
     } catch (error) {
       throw new OutlineReplayError(event, index, state.schemaEpoch, error)
     }

@@ -16,6 +16,7 @@ await runCli(async () => {
     const result = await repository.bootstrapOwner(environment.FORAGE_OWNER_EMAIL)
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
     process.stdout.write('The tokens are displayed once. Store them before closing this terminal.\n')
+    process.stdout.write('This server holds no outline yet. Connect a desktop to seed it from that device.\n')
   } catch (error) {
     if (error instanceof Error && error.message.includes('already bootstrapped')) {
       throw new CliError([

@@ -7,11 +7,8 @@
       "persistent": true,
       "env": [
         "DATABASE_URL",
-        "FORAGE_INSTANCE_ID",
-        "FORAGE_ASSET_DIR",
-        "FORAGE_HOST",
-        "FORAGE_PORT",
-        "LOG_LEVEL"
+        "LOG_LEVEL",
+        "FORAGE_*"
       ]
     },
     "build": {

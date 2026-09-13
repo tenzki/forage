@@ -55,6 +55,22 @@ describe('activity calls', () => {
     expect(second.map((call) => call.id)).toEqual(['run-1', 'run-2'])
   })
 
+  it('groups runtime tool-call IDs beneath the agent run instead of at the top level', () => {
+    const parent = applyActivityEvent([], {
+      id: 'run-1', phase: 'start', kind: 'skill', label: 'Run /research',
+    }, 1)
+    const withTool = applyActivityEvent(parent, fromRuntimeEvent({
+      id: 'tool-call-1', callId: 'provider-tool-call-1', sequence: 1,
+      phase: 'start', kind: 'tool', label: 'web_fetch', status: 'running',
+    }, 'run-1'), 2)
+
+    expect(withTool).toHaveLength(1)
+    expect(withTool[0]).toMatchObject({ id: 'run-1', label: 'Run /research' })
+    expect(withTool[0].events).toEqual([
+      expect.objectContaining({ id: 'tool-call-1', label: 'web_fetch' }),
+    ])
+  })
+
   it('rebuilds calls from persisted runs, oldest first, with navigable results', () => {
     const history: LocalAgentRunHistory[] = [
       {

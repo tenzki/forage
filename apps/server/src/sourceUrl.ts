@@ -65,7 +65,16 @@ function youtubeIdentity(submittedUrl: string, url: URL, host: string): PublicSo
     const match = /^\/(?:shorts|embed)\/([^/]+)\/?$/.exec(url.pathname)
     videoId = match?.[1] ?? null
   }
-  if (!videoId || !/^[A-Za-z0-9_-]{6,64}$/.test(videoId)) throw new Error('YouTube URL does not contain a valid video identity.')
+  if (!videoId) {
+    // Channel, profile, playlist, and other ordinary YouTube pages are still
+    // public webpages. Only video-shaped URLs require a video identity.
+    if (host !== 'youtu.be' && host !== 'www.youtu.be'
+      && url.pathname !== '/watch' && !/^\/(?:shorts|embed)\//.test(url.pathname)) {
+      return { submittedUrl, canonicalUrl: url.toString(), type: 'webpage', identity: undefined, host }
+    }
+    throw new Error('YouTube URL does not contain a valid video identity.')
+  }
+  if (!/^[A-Za-z0-9_-]{6,64}$/.test(videoId)) throw new Error('YouTube URL does not contain a valid video identity.')
   return {
     submittedUrl,
     canonicalUrl: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,

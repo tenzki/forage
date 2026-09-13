@@ -15,20 +15,26 @@ const toolIdSchema = z.string().trim().min(1).max(64)
 const uniqueToolIdsSchema = z.array(toolIdSchema).max(64)
   .refine((ids) => new Set(ids).size === ids.length, 'Tool identifiers must be unique')
 
-export const agentDefinitionSchema = z.object({
+export const portableAgentDefinitionSchema = z.object({
   id: definitionIdSchema,
   name: z.string().trim().min(1).max(80),
   description: z.string().trim().min(1).max(300),
   systemPrompt: z.string().trim().min(1).max(MAX_AGENT_PROMPT_CHARS),
+  toolIds: uniqueToolIdsSchema,
+}).strict()
+
+/** @deprecated Read-only compatibility shape for configuration version 1. */
+export const legacyAgentDefinitionSchema = portableAgentDefinitionSchema.extend({
   modelId: z.string().trim().max(128).refine(
     (value) => !value || /^[A-Za-z0-9._:/-]+$/.test(value),
     'Invalid model identifier',
   ),
-  toolIds: uniqueToolIdsSchema,
   credentialRef: runtimeIdSchema.optional(),
 }).strict()
 
-export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
+export const agentDefinitionSchema = legacyAgentDefinitionSchema
+export type AgentDefinition = z.infer<typeof legacyAgentDefinitionSchema>
+export type PortableAgentDefinition = z.infer<typeof portableAgentDefinitionSchema>
 
 export const skillDefinitionSchema = z.object({
   id: definitionIdSchema,
@@ -69,14 +75,32 @@ function duplicate(values: string[]): string | undefined {
   return values.find((value) => seen.has(value) || !seen.add(value))
 }
 
-export const agentConfigurationSchema = z.object({
+export const legacyAgentConfigurationSchema = z.object({
   version: z.literal(1),
   revision: z.number().int().nonnegative(),
   agents: z.array(agentDefinitionSchema).max(100),
   skills: z.array(skillDefinitionSchema).max(200),
   customTools: z.array(customToolDefinitionSchema).max(100),
   globallyEnabledToolIds: uniqueToolIdsSchema,
-}).strict().superRefine((configuration, context) => {
+}).strict().superRefine(validateConfiguration)
+
+export const portableAgentConfigurationSchema = z.object({
+  version: z.literal(2),
+  revision: z.number().int().nonnegative(),
+  agents: z.array(portableAgentDefinitionSchema).max(100),
+  skills: z.array(skillDefinitionSchema).max(200),
+  customTools: z.array(customToolDefinitionSchema).max(100),
+  globallyEnabledToolIds: uniqueToolIdsSchema,
+}).strict().superRefine(validateConfiguration)
+
+function validateConfiguration(
+  configuration: {
+    agents: Array<{ id: string }>
+    skills: Array<{ id: string; agentId: string }>
+    customTools: Array<{ id: string }>
+  },
+  context: z.RefinementCtx,
+) {
   const duplicateAgentId = duplicate(configuration.agents.map((agent) => agent.id))
   if (duplicateAgentId) {
     context.addIssue({ code: 'custom', path: ['agents'], message: `Duplicate agent id: ${duplicateAgentId}` })
@@ -99,9 +123,44 @@ export const agentConfigurationSchema = z.object({
       })
     }
   }
-})
+}
 
-export type AgentConfiguration = z.infer<typeof agentConfigurationSchema>
+/** @deprecated Version-1 configuration accepted only at migration boundaries. */
+export const agentConfigurationSchema = legacyAgentConfigurationSchema
+export type AgentConfiguration = z.infer<typeof legacyAgentConfigurationSchema>
+export type PortableAgentConfiguration = z.infer<typeof portableAgentConfigurationSchema>
+
+export const computeProfileSchema = z.object({
+  version: z.literal(1),
+  revision: z.number().int().positive(),
+  provider: z.enum(['openai-codex', 'openai']),
+  modelId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:/-]+$/),
+  credentialRef: runtimeIdSchema,
+}).strict()
+
+export type ComputeProfile = z.infer<typeof computeProfileSchema>
+
+export const computeProfileMetadataSchema = computeProfileSchema.extend({
+  credentialStatus: z.enum(['pending', 'connected', 'authentication_required', 'disconnected']),
+  credentialLabel: z.string().trim().min(1).max(300).optional(),
+}).strict()
+
+export type ComputeProfileMetadata = z.infer<typeof computeProfileMetadataSchema>
+
+export function migrateLegacyAgentConfiguration(configuration: AgentConfiguration): {
+  configuration: PortableAgentConfiguration
+  compute: Omit<ComputeProfile, 'revision'> | null
+} {
+  const agents = configuration.agents.map(({ modelId: _modelId, credentialRef: _credentialRef, ...agent }) => agent)
+  const modelId = configuration.agents.find((agent) => agent.modelId)?.modelId
+  const credentialRef = configuration.agents.find((agent) => agent.credentialRef)?.credentialRef
+  return {
+    configuration: portableAgentConfigurationSchema.parse({ ...configuration, version: 2, agents }),
+    compute: modelId && credentialRef
+      ? { version: 1, provider: 'openai', modelId, credentialRef }
+      : null,
+  }
+}
 
 export const activityEventSchema = z.object({
   id: runtimeIdSchema,
@@ -125,6 +184,7 @@ export const runStatusSchema = z.enum([
   'running',
   'retry_wait',
   'completed',
+  'completed_unplaced',
   'failed',
   'cancelled',
   'interrupted',

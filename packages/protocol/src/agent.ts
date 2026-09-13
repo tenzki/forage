@@ -2,6 +2,8 @@ import { z } from 'zod'
 import {
   activityEventSchema,
   agentConfigurationSchema,
+  portableAgentConfigurationSchema,
+  computeProfileSchema,
   runStatusSchema,
 } from '@forage/agent-runtime'
 
@@ -13,15 +15,30 @@ const uniqueIds = (maximum: number) => z.array(boundedId).max(maximum)
 
 export const agentConfigurationPublishRequestSchema = z.object({
   baseRevision: revision,
-  configuration: agentConfigurationSchema,
+  configuration: z.union([portableAgentConfigurationSchema, agentConfigurationSchema]),
 }).strict().refine(
   ({ baseRevision, configuration }) => configuration.revision === baseRevision + 1,
   { path: ['configuration', 'revision'], message: 'Published configuration revision must advance baseRevision by one' },
 )
 
 export const agentConfigurationResponseSchema = z.object({
-  configuration: agentConfigurationSchema,
+  configuration: portableAgentConfigurationSchema,
   publishedAt: timestamp,
+}).strict()
+
+export const computeProfilePublishRequestSchema = z.object({
+  baseRevision: revision,
+  profile: computeProfileSchema,
+}).strict().refine(
+  ({ baseRevision, profile }) => profile.revision === baseRevision + 1,
+  { path: ['profile', 'revision'], message: 'Compute profile revision must advance baseRevision by one' },
+)
+
+export const computeProfileResponseSchema = z.object({
+  profile: computeProfileSchema,
+  credentialStatus: z.enum(['pending', 'connected', 'authentication_required', 'disconnected']),
+  credentialLabel: z.string().trim().min(1).max(300).optional(),
+  updatedAt: timestamp,
 }).strict()
 
 const matchSchema = z.object({
@@ -104,6 +121,17 @@ export const apiKeyEnrollmentRequestSchema = z.object({
   apiKey: z.string().trim().min(20).max(512),
 }).strict()
 
+export const credentialImportRequestSchema = z.discriminatedUnion('provider', [
+  apiKeyEnrollmentRequestSchema,
+  z.object({
+    provider: z.literal('openai-codex'),
+    accessToken: z.string().min(20).max(20_000),
+    refreshToken: z.string().min(20).max(20_000),
+    accountId: z.string().trim().min(1).max(300),
+    expiresAt: timestamp,
+  }).strict(),
+])
+
 export const deviceAuthorizationStartResponseSchema = z.object({
   authorizationId: boundedId,
   verificationUri: z.url().max(2_000),
@@ -131,6 +159,15 @@ export const agentRunAdmissionRequestSchema = z.object({
   credentialRef: boundedId.optional(),
 }).strict()
 
+export const agentInvocationIntentSchema = z.object({
+  version: z.literal(2),
+  invocationId: boundedId,
+  sourceNodeId: boundedId,
+  skillId: boundedId,
+  prompt: z.string().trim().min(1).max(20_000),
+  acknowledgedOutlineRevision: revision,
+}).strict()
+
 export const agentRunAdmissionResponseSchema = z.object({
   runId: boundedId,
   status: z.literal('queued'),
@@ -149,6 +186,15 @@ export const agentRunErrorSchema = z.object({
     'target_unavailable',
     'attempts_exhausted',
     'lease_lost',
+    'outline_not_synchronized',
+    'source_missing',
+    'source_trashed',
+    'configuration_unavailable',
+    'configuration_conflict',
+    'compute_unavailable',
+    'capability_unavailable',
+    'projection_rebuilding',
+    'worker_unavailable',
   ]),
   message: z.string().trim().min(1).max(1_000),
   retryable: z.boolean(),
@@ -177,6 +223,16 @@ export const agentRunSummarySchema = z.object({
 export const agentRunDetailSchema = agentRunSummarySchema.extend({
   error: agentRunErrorSchema.nullable(),
   result: agentRunResultSchema.nullable(),
+  placementError: z.string().trim().min(1).max(500).nullable().default(null),
+}).strict()
+
+export const outlineSearchQuerySchema = z.object({
+  query: z.string().trim().max(500),
+  limit: z.number().int().min(1).max(50).default(20),
+}).strict()
+
+export const outlineSearchResponseSchema = z.object({
+  results: z.array(z.object({ nodeId: boundedId, text: z.string().max(2_000) }).strict()).max(50),
 }).strict()
 
 export const agentRunListQuerySchema = z.object({
@@ -209,11 +265,35 @@ export const agentActivityPageSchema = z.object({
 
 export const agentRunCancelResponseSchema = z.object({
   runId: boundedId,
-  status: z.enum(['queued', 'running', 'cancelled', 'completed', 'failed']),
+  status: z.enum(['queued', 'running', 'cancelled', 'completed', 'completed_unplaced', 'failed']),
 }).strict()
 
 export const agentRunRetryResponseSchema = z.object({
   runId: boundedId,
   retryOfRunId: boundedId,
   status: z.literal('queued'),
+}).strict()
+
+export const agentRunPlacementRequestSchema = z.object({ targetNodeId: boundedId }).strict()
+export const agentRunPlacementResponseSchema = z.object({
+  runId: boundedId,
+  status: z.literal('completed'),
+  result: agentRunResultSchema,
+}).strict()
+
+const readinessComponentSchema = z.object({
+  ready: z.boolean(),
+  revision: revision.optional(),
+  message: z.string().trim().min(1).max(500).optional(),
+  recoveryAction: z.string().trim().min(1).max(100).optional(),
+}).strict()
+
+export const serverReadinessSchema = z.object({
+  connection: readinessComponentSchema,
+  outlineSync: readinessComponentSchema,
+  agentConfiguration: readinessComponentSchema,
+  computeProfile: readinessComponentSchema,
+  worker: readinessComponentSchema,
+  noteIndex: readinessComponentSchema,
+  admissionProtocolVersions: z.array(z.number().int().positive()).min(1),
 }).strict()

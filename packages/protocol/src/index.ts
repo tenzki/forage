@@ -40,6 +40,33 @@ export const checkpointBootstrapResponseSchema = z.object({
   }).strict(),
 }).strict()
 
+export const claimOutlineRequestSchema = z.object({
+  outlineId: boundedId,
+  name: z.string().trim().min(1).max(200),
+}).strict()
+
+export const claimOutlineResponseSchema = z.object({
+  outlineId: boundedId,
+  state: z.enum(['seeding', 'ready']),
+}).strict()
+
+export const outlineStateSchema = z.object({
+  doc: z.record(z.string(), z.unknown()),
+  trash: z.array(z.record(z.string(), z.unknown())),
+  shortcuts: z.array(z.record(z.string(), z.unknown())),
+  schemaEpoch: z.number().int().positive(),
+}).strict()
+
+export const seedOutlineRequestSchema = z.object({
+  state: outlineStateSchema,
+}).strict()
+
+export const seedOutlineResponseSchema = z.object({
+  outlineId: boundedId,
+  revision,
+  integrityHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict()
+
 export const pullEventsQuerySchema = z.object({
   afterRevision: z.coerce.number().int().nonnegative(),
   limit: z.coerce.number().int().min(1).max(100).default(100),
@@ -83,6 +110,17 @@ export const protocolErrorCodeSchema = z.enum([
   'request_too_large',
   'dependency_unavailable',
   'idempotency_conflict',
+  'outline_not_synchronized',
+  'source_missing',
+  'source_trashed',
+  'target_missing',
+  'target_trashed',
+  'configuration_unavailable',
+  'configuration_conflict',
+  'compute_unavailable',
+  'capability_unavailable',
+  'projection_rebuilding',
+  'worker_unavailable',
 ])
 
 export const protocolErrorSchema = z.object({
@@ -90,6 +128,7 @@ export const protocolErrorSchema = z.object({
     code: protocolErrorCodeSchema,
     message: z.string().min(1).max(1_000),
     retryable: z.boolean(),
+    recoveryAction: z.string().trim().min(1).max(100).optional(),
   }).strict(),
 }).strict()
 
@@ -101,6 +140,7 @@ export const serverStatusSchema = z.object({
   minimumAgentClientVersion: z.string().trim().min(1).max(50),
   documentSchemaVersion: z.number().int().positive(),
   minimumClientVersion: z.string().trim().min(1).max(50),
+  agentAdmissionVersions: z.array(z.number().int().positive()).min(1).optional(),
 }).strict()
 
 export type ServerStatus = z.infer<typeof serverStatusSchema>

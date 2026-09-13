@@ -12,11 +12,13 @@ After `npm install`, the normal development command starts PostgreSQL, applies t
 npm run dev
 ```
 
-On a fresh development database, bootstrap the only owner once before connecting the desktop. This command also starts PostgreSQL and applies migrations. It prints the outline ID plus initial API and device tokens exactly once; store them immediately.
+On a fresh development database, bootstrap the only owner once before connecting the desktop. This command also starts PostgreSQL and applies migrations. It prints the owner ID plus initial API and device tokens exactly once; store them immediately.
 
 ```bash
 npm run server:bootstrap
 ```
+
+Bootstrapping creates **no outline**. A blank server holds an owner and credentials and nothing else. The first desktop to connect claims the server and seeds it with that device's own outline, so your existing local notes become the server's content rather than being parked behind an empty stub. Until a device has seeded it, every outline, note-capture, and agent request is refused with a `conflict` explaining that the outline has not been seeded.
 
 Focused commands are available when the full stack is unnecessary:
 
@@ -28,7 +30,13 @@ npm run dev:down    # stop compose infrastructure
 
 The development API listens at `http://127.0.0.1:3210`. Production invocations of `@forage/server` still require explicit `DATABASE_URL`, `FORAGE_INSTANCE_ID`, and `FORAGE_ASSET_DIR`; development defaults exist only in the root orchestration scripts.
 
-Use Settings → Connection → Notes storage to supply the server origin, outline ID, and device token. HTTPS is required except for an HTTP loopback origin. The native client records the server instance identity, stores the token in OS credential storage, rejects redirects, and will not send it to another origin. Switching modes takes effect after restart.
+Use Settings → Connection to supply the server origin and device token. There is no outline ID to enter: the desktop supplies its own. HTTPS is required except for an HTTP loopback origin. The native client records the server instance identity, stores the token in the SQLite credential store (ADR-0014), rejects redirects, and will not send it to another origin.
+
+The wizard's **Copy** step performs the seed. It replays this device's local events to a document state, uploads every referenced image, sends the result as the server's revision-0 checkpoint, and publishes portable agent configuration: agents, skills, custom tools, and enabled tools. Model and credential choices are not portable configuration; each environment keeps its own compute profile. Provisioning steps and the last confirmed configuration mirror are persisted locally, so an interrupted setup resumes instead of relying on an agent run to repair it.
+
+Server compute is an explicit trust choice. The wizard can enroll an API key, connect ChatGPT directly on the server, or skip compute and keep outline synchronization active. Pressing **Run** never publishes configuration and never copies or migrates a credential. Older embedded configuration is upcast by forward migration: portable definitions become version 2 and a complete prior model/credential binding becomes the server compute profile without returning secret material.
+
+A device connecting to a server that **already** holds an outline cannot seed it. The wizard says so and offers to adopt the server outline instead, which leaves that device's local outline behind, reachable again only by disconnecting. Local outlines are never merged.
 
 ## Token management
 
@@ -71,14 +79,15 @@ For the system share-sheet workflow, see [Capture to Inbox with Apple Shortcuts]
 
 ## Server agent executor
 
-Server mode executes both manual slash commands and eligible Inbox automation on the authoritative server. It never falls back to the desktop executor during an outage. PostgreSQL is the durable queue; no Redis service is required. Runs use bounded leases, `FOR UPDATE SKIP LOCKED` claims, append-only activity, limited retry attempts, durable cancellation, and exactly one result identity. Successful structured output is committed below the stable target as ordinary `agent`-origin outline events, so every device receives it through normal synchronization.
+Server mode executes both manual slash commands and eligible Inbox automation on the authoritative server. It never falls back to the desktop executor during an outage. PostgreSQL is the durable queue; no Redis service is required. Runs use bounded leases, `FOR UPDATE SKIP LOCKED` claims, append-only activity, limited retry attempts, durable cancellation, and exactly one result identity. Manual admission receives only an invocation ID, source ID, skill ID, prompt, and acknowledged outline revision; the server resolves everything else lazily and snapshots it immutably.
+
+Validated structured output is stored before placement. Successful placement adds the complete generated subtree in one `agent.result_committed` event at the latest outline revision. If its stable target is missing or trashed, the run becomes `completed_unplaced` and the output remains available for one later placement under a searched live destination. Closing the popup, closing Forage, or disconnecting does not cancel server work; remembered run cursors resume on reconnect.
 
 The desktop Settings view publishes a distinct skill for YouTube, X, and general webpage captures and lets the owner order those policies explicitly. An optional dispatcher policy must name a published dispatcher agent and a bounded set of allowed skill IDs. Its model call receives untrusted capture data, has no tools, and can only return a validated subset of that allowlist.
 
-Apply migrations before enabling workers. Configure the executor with environment variables:
+Every server process runs the executor; there is no API-only mode. Apply migrations before starting a process. Configure the executor with environment variables:
 
 ```text
-FORAGE_AGENT_WORKER_ENABLED=true
 FORAGE_AGENT_ENCRYPTION_KEY=1:<base64-encoded-32-byte-key>
 FORAGE_AGENT_WORKER_CONCURRENCY=2
 FORAGE_AGENT_POLL_MS=1000
@@ -87,9 +96,9 @@ FORAGE_AGENT_MAX_ATTEMPTS=3
 FORAGE_AGENT_MAX_BACKOFF_SECONDS=300
 ```
 
-`FORAGE_AGENT_ENCRYPTION_KEY` is an authenticated-encryption master key and must be supplied outside PostgreSQL. Back it up separately from the database: losing every configured key version makes enrolled credentials unrecoverable. To rotate, put the new key first in `FORAGE_AGENT_ENCRYPTION_KEY` and retain comma-separated old versions in `FORAGE_AGENT_PREVIOUS_ENCRYPTION_KEYS` until credentials have been re-enrolled or rewritten. Never reuse the key as an API token or commit it to source control.
+`FORAGE_AGENT_ENCRYPTION_KEY` is required — a process refuses to start without it, because it always claims and executes queued runs. It is an authenticated-encryption master key and must be supplied outside PostgreSQL. Back it up separately from the database: losing every configured key version makes enrolled credentials unrecoverable. To rotate, put the new key first in `FORAGE_AGENT_ENCRYPTION_KEY` and retain comma-separated old versions in `FORAGE_AGENT_PREVIOUS_ENCRYPTION_KEYS` until credentials have been re-enrolled or rewritten. Never reuse the key as an API token or commit it to source control.
 
-For ChatGPT device authorization, also set `FORAGE_OAUTH_CLIENT_ID`; the authorization and token URLs have OpenAI defaults but can be overridden with `FORAGE_OAUTH_DEVICE_URL` and `FORAGE_OAUTH_TOKEN_URL`. The browser flow is explicit because desktop OAuth files and refresh tokens are never uploaded automatically. The server encrypts access and rotating refresh tokens, refreshes under a row lock, and marks revoked credentials `authentication_required`. An OpenAI API key can be enrolled instead. Enrollment responses, run snapshots, events, and logs expose only credential references and sanitized metadata.
+ChatGPT device authorization needs no configuration: `FORAGE_OAUTH_CLIENT_ID` defaults to the same public Codex client the desktop uses for local sign-in. The flow is OpenAI's own, not RFC 8628 — starting it returns a `device_auth_id`/`user_code` pair, polling that pair returns a one-time authorization code, and only a separate form-encoded PKCE exchange returns tokens. Each endpoint has an OpenAI default and can be overridden with `FORAGE_OAUTH_DEVICE_URL`, `FORAGE_OAUTH_DEVICE_TOKEN_URL`, `FORAGE_OAUTH_TOKEN_URL`, `FORAGE_OAUTH_VERIFICATION_URL`, and `FORAGE_OAUTH_REDIRECT_URI`. Because the provider states no deadline, `FORAGE_OAUTH_TIMEOUT_SECONDS` bounds how long an authorization stays pending. The browser flow is explicit because desktop OAuth files and refresh tokens are never uploaded automatically. The server encrypts access and rotating refresh tokens, refreshes under a row lock, and marks revoked credentials `authentication_required`. An OpenAI API key can be enrolled instead. Enrollment responses, run snapshots, events, and logs expose only credential references and sanitized metadata.
 
 Server image generation currently uses the enrolled OpenAI API key with `gpt-image-2`. Generated raster bytes are signature-checked, size-bounded, written to the configured content-addressed asset store, and exposed to the model only as an opaque SHA-256 asset reference. ChatGPT OAuth is not reused for the billed Images API; a skill that requires server image generation must use an OpenAI API-key credential.
 
@@ -102,7 +111,7 @@ FORAGE_SUPADATA_API_KEY=<deployment-secret>
 
 The adapter supports immediate and asynchronous transcripts, cancellation, deadlines, language metadata, and a 100,000-character limit. Forage does not scrape captions or download audio. Public webpage and X readers resolve and reject private, loopback, link-local, and special-use destinations; redirects are revalidated. All fetched material is labelled untrusted before it enters the model.
 
-In Settings → Connection, enroll a server credential, publish the selected agents and skills, then publish link policies. Policies are disabled unless explicitly enabled. Manual server runs require `agents:execute`; run/configuration reads require `agents:read`; publishing and credential management require `agents:manage`. The initial device credential receives these scopes. A `notes:create` capture token cannot inspect runs, configuration, or credentials.
+Settings → Connection shows connection, canonical outline sync, portable configuration, compute, worker, and search-index readiness independently. Synchronization can remain ready while compute needs attention. Configuration reconnect uses a confirmed local mirror and compare-and-swap: local-only changes publish, server-only changes apply locally, and divergent changes require an explicit **Use local** or **Use server** choice. Policies are disabled unless explicitly enabled. Manual server runs require `agents:execute`; run/configuration reads require `agents:read`; publishing and credential management require `agents:manage`. The initial device credential receives these scopes. A `notes:create` capture token cannot inspect runs, configuration, or credentials.
 
 To recover from failure, first disable Inbox policies to stop new automatic admission, then stop workers gracefully. Queued work and sanitized history remain in PostgreSQL. Expired leases become claimable after restart; exhausted runs remain failed and can be retried deliberately from current configuration. Disconnecting a credential makes future resolution fail safely. Never delete run/result rows to retry work, because their identities protect against duplicate outline output.
 

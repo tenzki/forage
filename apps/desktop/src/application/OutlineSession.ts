@@ -9,13 +9,15 @@ import type { EventEnvelope } from '@forage/domain'
 import { EMPTY_DOC, normalizeOutlinerDoc } from '../editor/emptyDoc'
 import { finalizeDocumentEvent, type CapturedEditorEvent } from '../editor/eventCapture'
 import {
-  rebuildPersistentHistory,
+  loadPersistentHistory,
   type PersistentHistoryState,
 } from '../editor/persistentHistory'
 import type {
   LocalAgentRunHistory,
   LocalIdentity,
+  ReplayInput,
   ServerConnectionInfo,
+  StoredEventRecord,
 } from '../persistence/eventStore'
 import { NativeEventRepository } from '../persistence/eventStore'
 import { createAssetReferenceEvents } from '../persistence/domainEvents'
@@ -31,6 +33,7 @@ import type { JsonValue } from '../types/tree'
 export type StorageBackend = { kind: 'local' } | { kind: 'server'; origin: string }
 
 export interface OutlineSessionRepository extends SyncRepository {
+  eventsBefore(outlineId: string, localSequence: number, limit: number): Promise<StoredEventRecord[]>
   identity(): Promise<LocalIdentity>
   serverConnection(): Promise<ServerConnectionInfo | null>
   interruptUnfinishedAgentRuns(interruptedAt: string): Promise<number>
@@ -54,17 +57,21 @@ export interface OutlineEventContext extends LocalIdentity {
 export interface OpenedOutline {
   state: OutlineState
   storageBackend: StorageBackend
-  history: PersistentHistoryState
+  history: Promise<PersistentHistoryState>
 }
+
+const EMPTY_HISTORY: PersistentHistoryState = { undo: [], redo: [] }
 
 export interface SynchronizedOutline {
   state: OutlineState
   historyInvalidated: boolean
+  appliedEvents: EventEnvelope[]
 }
 
 export interface SessionSyncEngine {
   state: SyncState
   historyInvalidated: boolean
+  appliedEvents?: EventEnvelope[]
   sync(): Promise<void>
 }
 
@@ -84,7 +91,8 @@ export class OutlineSession {
   private failedOperations: Array<() => Promise<void>> = []
   private persistenceBlocked = false
   private checkpointInProgress = false
-  private syncInProgress = false
+  private background: Promise<void> = Promise.resolve()
+  private activeSynchronization: Promise<SynchronizedOutline | null> | null = null
   private readonly listeners = new Set<() => void>()
   private readonly syncEngineFactory: (onState: (state: SyncState) => void) => SessionSyncEngine
   private status: OutlineSessionStatus = {
@@ -139,12 +147,6 @@ export class OutlineSession {
   async open(): Promise<OpenedOutline> {
     await this.repository.interruptUnfinishedAgentRuns(this.now())
     const mode = await this.repository.storageMode()
-    if (mode === 'server') {
-      await this.createSyncEngine().sync()
-    } else {
-      this.updateStatus({ syncState: { kind: 'local-only' } })
-    }
-
     const localIdentity = await this.repository.identity()
     const connection = mode === 'server' ? await this.repository.serverConnection() : null
     const storageBackend: StorageBackend = connection
@@ -156,22 +158,22 @@ export class OutlineSession {
       : localIdentity
     this.identityValue = activeIdentity
 
-    const replay = await this.repository.loadReplayInput(activeIdentity.outlineId)
-    const allRecords = await this.repository.eventsAfter(activeIdentity.outlineId, 0) ?? []
-    let history = rebuildPersistentHistory(
-      allRecords
-        .filter((record) => !record.supersededBy)
-        .map((record) => record.envelope as EventEnvelope),
-      activeIdentity.deviceId,
-    )
+    let replay = await this.repository.loadReplayInput(activeIdentity.outlineId)
+    if (mode === 'server') {
+      this.updateStatus({ syncState: { kind: 'connecting' } })
+      if (!replay) {
+        await this.createSyncEngine().sync()
+        replay = await this.repository.loadReplayInput(activeIdentity.outlineId)
+      }
+    } else {
+      this.updateStatus({ syncState: { kind: 'local-only' } })
+    }
+
     let state: OutlineState
     let sealRecoveredCheckpoint = false
     if (replay) {
       state = replayOutlineEvents(replay.state, replay.events)
-      this.localSequence = Math.max(
-        replay.checkpoint.localSequence,
-        ...allRecords.map((record) => record.localSequence),
-      )
+      this.localSequence = replay.latestLocalSequence ?? replay.checkpoint.localSequence
       sealRecoveredCheckpoint = mode === 'local'
         && this.localSequence > replay.checkpoint.localSequence
       this.serverRevision = replay.checkpoint.serverRevision
@@ -195,21 +197,59 @@ export class OutlineSession {
     if (repair) {
       this.localSequence = await this.repository.append(repair.event)
       state = repair.state
-      history = { undo: [], redo: [] }
       sealRecoveredCheckpoint = mode === 'local'
     }
     if (sealRecoveredCheckpoint) {
       await this.saveCheckpoint(state, this.localSequence, this.serverRevision)
     }
+    if (!sealRecoveredCheckpoint && replay) {
+      this.recordRecoveryCheckpoint(state, replay)
+    }
+
+    const history = replay && !repair
+      ? this.readHistory(activeIdentity)
+      : Promise.resolve(EMPTY_HISTORY)
 
     return { state, storageBackend, history }
+  }
+
+  private readHistory(identity: LocalIdentity): Promise<PersistentHistoryState> {
+    return loadPersistentHistory(
+      (before, limit) => this.repository.eventsBefore(identity.outlineId, before, limit)
+        .then((records) => records.map((record) => ({
+          localSequence: record.localSequence,
+          supersededBy: record.supersededBy,
+          envelope: record.envelope as EventEnvelope,
+        }))),
+      this.localSequence,
+      identity.deviceId,
+    )
+  }
+
+  backgroundWork(): Promise<void> {
+    return this.background
+  }
+
+  private recordRecoveryCheckpoint(state: OutlineState, replay: ReplayInput): void {
+    if (this.localSequence <= replay.checkpoint.localSequence) return
+    if ((replay.acknowledgedSequence ?? -1) !== this.localSequence) return
+    const revision = Math.max(
+      replay.checkpoint.serverRevision,
+      ...replay.events.map((candidate) => candidate.revision ?? 0),
+    )
+    const sequence = this.localSequence
+    this.background = this.background
+      .then(() => this.saveCheckpoint(state, sequence, revision))
+      .catch((error) => {
+        this.updateStatus({ maintenanceError: errorMessage(error) })
+      })
   }
 
   async startEmpty(): Promise<OpenedOutline> {
     const activeIdentity = this.identityValue ?? await this.repository.identity()
     this.identityValue = activeIdentity
-    const existingRecords = await this.repository.eventsAfter(activeIdentity.outlineId, 0) ?? []
-    this.localSequence = Math.max(0, ...existingRecords.map((record) => record.localSequence))
+    const newest = await this.repository.eventsBefore(activeIdentity.outlineId, Number.MAX_SAFE_INTEGER, 1)
+    this.localSequence = Math.max(0, ...newest.map((record) => record.localSequence))
     this.serverRevision = 0
     const state = createInitialOutlineState(
       normalizeOutlinerDoc(EMPTY_DOC, this.nextId) as Record<string, unknown>,
@@ -218,7 +258,7 @@ export class OutlineSession {
     return {
       state,
       storageBackend: this.status.storageBackend,
-      history: { undo: [], redo: [] },
+      history: Promise.resolve(EMPTY_HISTORY),
     }
   }
 
@@ -282,8 +322,7 @@ export class OutlineSession {
   async synchronize(
     applyProjection?: (projection: SynchronizedOutline) => void | Promise<void>,
   ): Promise<SynchronizedOutline | null> {
-    if (this.syncInProgress) return null
-    this.syncInProgress = true
+    if (this.activeSynchronization) return this.activeSynchronization
     const synchronization = this.appendQueue.then(async () => {
       if (this.persistenceBlocked || !this.identityValue) return null
       try {
@@ -310,7 +349,7 @@ export class OutlineSession {
           state = repair.state
           historyInvalidated = true
         }
-        const result = { state, historyInvalidated }
+        const result = { state, historyInvalidated, appliedEvents: engine.appliedEvents ?? [] }
         await applyProjection?.(result)
         return result
       } catch (error) {
@@ -320,11 +359,12 @@ export class OutlineSession {
         return null
       }
     })
+    this.activeSynchronization = synchronization
     this.appendQueue = synchronization.then(() => undefined)
     try {
       return await synchronization
     } finally {
-      this.syncInProgress = false
+      if (this.activeSynchronization === synchronization) this.activeSynchronization = null
     }
   }
 

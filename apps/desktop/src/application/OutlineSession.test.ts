@@ -19,6 +19,7 @@ function repository(overrides: Partial<OutlineSessionRepository> = {}) {
     storageMode: async () => 'local',
     loadReplayInput: async () => null,
     eventsAfter: async () => [],
+    eventsBefore: async () => [],
     saveCheckpoint: async (checkpoint) => { checkpoints.push(checkpoint) },
     append: async (event) => {
       events.push(event as EventEnvelope)
@@ -39,6 +40,19 @@ function repository(overrides: Partial<OutlineSessionRepository> = {}) {
     ...overrides,
   }
   return { value, checkpoints, events }
+}
+
+function historyEvent(id: string, changeGroupId: string): EventEnvelope {
+  return parseEventEnvelope({
+    id, outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'device-1',
+    type: 'document.steps_applied', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+    baseRevision: 0, origin: 'desktop', occurredAt: '2026-09-01T12:00:00.000Z', changeGroupId,
+    payload: {
+      steps: [{ stepType: 'replace', from: 1, to: 1 }],
+      inverseSteps: [{ stepType: 'replace', from: 1, to: 1 }],
+      beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64),
+    },
+  })
 }
 
 function ids(...values: string[]) {
@@ -75,7 +89,7 @@ describe('OutlineSession opening', () => {
 
     expect(opened.storageBackend).toEqual({ kind: 'local' })
     expect(opened.state.doc).toEqual(expect.objectContaining({ type: 'doc' }))
-    expect(opened.history).toEqual({ undo: [], redo: [] })
+    expect(await opened.history).toEqual({ undo: [], redo: [] })
     expect(session.context()).toMatchObject({
       outlineId: 'outline-1',
       actorId: 'owner-1',
@@ -154,12 +168,12 @@ describe('OutlineSession opening', () => {
     }))
     expect(JSON.stringify(opened.state.doc)).toContain('Legacy content')
     expect(JSON.stringify(opened.state.doc)).toContain('inbox')
-    expect(opened.history).toEqual({ undo: [], redo: [] })
+    expect(await opened.history).toEqual({ undo: [], redo: [] })
   })
 
   it('starts empty at the current event barrier after an unreadable outline', async () => {
     const repo = repository({
-      eventsAfter: async () => [{
+      eventsBefore: async () => [{
         localSequence: 9,
         id: 'event-9',
         outlineId: 'outline-1',
@@ -183,6 +197,218 @@ describe('OutlineSession opening', () => {
       id: 'checkpoint-empty',
       localSequence: 9,
     })])
+  })
+  it('rebuilds history from bounded pages instead of reading the whole event log', async () => {
+    const reads: Array<{ before: number; limit: number }> = []
+    const log = [
+      { sequence: 1, envelope: historyEvent('old-edit', 'old-group') },
+      { sequence: 2, envelope: historyEvent('boundary', 'system:daily-note') },
+      { sequence: 3, envelope: historyEvent('recent-edit', 'recent-group') },
+    ]
+    const checkpointState: OutlineState = {
+      doc: EMPTY_DOC as unknown as OutlineState['doc'], trash: [], shortcuts: [], schemaEpoch: 1,
+    }
+    const repo = repository({
+      loadReplayInput: async () => ({
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 3, serverRevision: 0, stateJson: JSON.stringify(checkpointState),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-01T12:00:00.000Z',
+        },
+        state: checkpointState,
+        events: [],
+        latestLocalSequence: 3,
+      }),
+      eventsAfter: async () => { throw new Error('the full event log must not be read on open') },
+      eventsBefore: async (_outlineId, before, limit) => {
+        reads.push({ before, limit })
+        return log
+          .filter((entry) => entry.sequence <= before)
+          .slice(-limit)
+          .map((entry) => ({
+            localSequence: entry.sequence, id: entry.envelope.id, outlineId: 'outline-1',
+            baseRevision: 0, serverRevision: null, envelope: entry.envelope,
+            status: 'pending' as const, supersededBy: null, createdAt: '2026-09-01T12:00:00.000Z',
+          }))
+      },
+    })
+    const session = new OutlineSession(repo.value, undefined, {
+      nextId: ids('unused'), now: () => '2026-09-04T12:00:00.000Z',
+    })
+
+    const opened = await session.open()
+
+    expect(await opened.history).toMatchObject({ undo: [{ id: 'recent-group' }], redo: [] })
+    expect(reads).toHaveLength(1)
+    expect(reads[0].before).toBe(3)
+  })
+
+  it('paints a cached server outline without waiting for the network', async () => {
+    const state = createInitialOutlineStateForTest()
+    let syncCalls = 0
+    const repo = repository({
+      storageMode: async () => 'server',
+      serverConnection: async () => ({
+        origin: 'https://forage.example', instanceId: 'server-1', outlineId: 'outline-1',
+      }),
+      loadReplayInput: async () => ({
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 4, serverRevision: 2, stateJson: JSON.stringify(state),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-04T12:00:00.000Z',
+        },
+        state,
+        events: [],
+        latestLocalSequence: 4,
+      }),
+    })
+    const session = new OutlineSession(repo.value, undefined, {
+      createSyncEngine: (onState) => ({
+        state: { kind: 'offline' },
+        historyInvalidated: false,
+        async sync() {
+          syncCalls += 1
+          this.state = { kind: 'up-to-date', revision: 2 }
+          onState(this.state)
+        },
+      }),
+    })
+
+    const opened = await session.open()
+
+    expect(syncCalls).toBe(0)
+    expect(opened.storageBackend).toEqual({ kind: 'server', origin: 'https://forage.example' })
+    expect(session.getSnapshot().syncState).toEqual({ kind: 'connecting' })
+    expect(opened.state.doc).toEqual(state.doc)
+  })
+
+  it('paints the outline before the undo history has been read', async () => {
+    const state = createInitialOutlineStateForTest()
+    let releaseHistory = () => {}
+    const historyRead = new Promise<void>((resolve) => { releaseHistory = resolve })
+    const repo = repository({
+      loadReplayInput: async () => ({
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 4, serverRevision: 0, stateJson: JSON.stringify(state),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-04T12:00:00.000Z',
+        },
+        state,
+        events: [],
+        latestLocalSequence: 4,
+        acknowledgedSequence: 4,
+      }),
+      eventsBefore: async () => {
+        await historyRead
+        return [{
+          localSequence: 3, id: 'edit', outlineId: 'outline-1', baseRevision: 0,
+          serverRevision: null, envelope: historyEvent('edit', 'typed'),
+          status: 'accepted' as const, supersededBy: null, createdAt: '2026-09-04T12:00:00.000Z',
+        }]
+      },
+    })
+    const session = new OutlineSession(repo.value)
+
+    const opened = await session.open()
+
+    expect(opened.state).toBeTruthy()
+    releaseHistory()
+    expect(await opened.history).toMatchObject({ undo: [{ id: 'typed' }] })
+  })
+
+  it('records a recovery checkpoint for the events it replayed on open', async () => {
+    const state = createInitialOutlineStateForTest()
+    const repo = repository({
+      storageMode: async () => 'server',
+      serverConnection: async () => ({
+        origin: 'https://forage.example', instanceId: 'server-1', outlineId: 'outline-1',
+      }),
+      loadReplayInput: async () => ({
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 4, serverRevision: 2, stateJson: JSON.stringify(state),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-04T12:00:00.000Z',
+        },
+        state,
+        events: [event('a'), event('b')],
+        latestLocalSequence: 6,
+        acknowledgedSequence: 6,
+      }),
+    })
+    const session = new OutlineSession(repo.value, undefined, { nextId: ids('checkpoint-2') })
+
+    await session.open()
+    expect(repo.checkpoints).toHaveLength(0)
+    await session.backgroundWork()
+
+    expect(repo.checkpoints).toMatchObject([{ localSequence: 6, serverRevision: 2 }])
+  })
+
+  it('leaves unacknowledged edits out of the recovery checkpoint it records on open', async () => {
+    const state = createInitialOutlineStateForTest()
+    const repo = repository({
+      storageMode: async () => 'server',
+      serverConnection: async () => ({
+        origin: 'https://forage.example', instanceId: 'server-1', outlineId: 'outline-1',
+      }),
+      loadReplayInput: async () => ({
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 4, serverRevision: 2, stateJson: JSON.stringify(state),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-04T12:00:00.000Z',
+        },
+        state,
+        events: [event('a'), event('b')],
+        latestLocalSequence: 6,
+        acknowledgedSequence: 5,
+      }),
+    })
+    const session = new OutlineSession(repo.value, undefined, { nextId: ids('checkpoint-2') })
+
+    await session.open()
+    await session.backgroundWork()
+
+    expect(repo.checkpoints).toHaveLength(0)
+  })
+
+  it('waits for the first sync when a server outline has nothing cached to show', async () => {
+    const state = createInitialOutlineStateForTest()
+    let syncCalls = 0
+    let pulled = false
+    const repo = repository({
+      storageMode: async () => 'server',
+      serverConnection: async () => ({
+        origin: 'https://forage.example', instanceId: 'server-1', outlineId: 'outline-1',
+      }),
+      loadReplayInput: async () => pulled ? {
+        checkpoint: {
+          id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          localSequence: 4, serverRevision: 2, stateJson: JSON.stringify(state),
+          integrityHash: 'a'.repeat(64), createdAt: '2026-09-04T12:00:00.000Z',
+        },
+        state,
+        events: [],
+        latestLocalSequence: 4,
+      } : null,
+    })
+    const session = new OutlineSession(repo.value, undefined, {
+      nextId: ids('inbox-id', 'daily-notes-id', 'checkpoint-genesis'),
+      createSyncEngine: (onState) => ({
+        state: { kind: 'offline' },
+        historyInvalidated: false,
+        async sync() {
+          syncCalls += 1
+          pulled = true
+          this.state = { kind: 'up-to-date', revision: 2 }
+          onState(this.state)
+        },
+      }),
+    })
+
+    const opened = await session.open()
+
+    expect(syncCalls).toBe(1)
+    expect(opened.state.doc).toEqual(state.doc)
   })
 })
 
@@ -353,6 +579,7 @@ describe('OutlineSession persistence', () => {
 describe('OutlineSession synchronization', () => {
   it('waits behind pending persistence and returns a normalized projection', async () => {
     const state = createInitialOutlineStateForTest()
+    const appliedEvent = event('remote-event')
     let opened = false
     let syncCalls = 0
     let releaseAppend!: () => void
@@ -378,6 +605,7 @@ describe('OutlineSession synchronization', () => {
       createSyncEngine: (onState) => ({
         state: { kind: 'offline' },
         historyInvalidated: true,
+        appliedEvents: [appliedEvent],
         async sync() {
           syncCalls += 1
           this.state = { kind: 'up-to-date', revision: 7 }
@@ -400,6 +628,7 @@ describe('OutlineSession synchronization', () => {
     expect(syncCalls).toBe(1)
     expect(result?.state.doc).toEqual(EMPTY_DOC)
     expect(result?.historyInvalidated).toBe(true)
+    expect(result?.appliedEvents).toEqual([appliedEvent])
     expect(session.getSnapshot().syncState).toEqual({ kind: 'up-to-date', revision: 7 })
     expect(session.context()?.baseRevision).toBe(7)
   })
@@ -422,6 +651,32 @@ describe('OutlineSession synchronization', () => {
       kind: 'server-unavailable',
       message: 'network vanished',
     })
+  })
+
+  it('lets an agent sync barrier wait for synchronization already in progress', async () => {
+    const repo = repository()
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    let syncCalls = 0
+    const session = new OutlineSession(repo.value, undefined, {
+      createSyncEngine: (onState) => ({
+        state: { kind: 'offline' }, historyInvalidated: false,
+        async sync() {
+          syncCalls += 1
+          await blocked
+          this.state = { kind: 'up-to-date', revision: 1 }
+          onState(this.state)
+        },
+      }),
+    })
+    await session.open()
+
+    const background = session.synchronize()
+    const barrier = session.synchronize()
+    release()
+
+    await expect(barrier).resolves.toEqual(await background)
+    expect(syncCalls).toBe(1)
   })
 
   it('reports projection-application failures through synchronization status', async () => {

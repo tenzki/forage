@@ -15,16 +15,32 @@ describe('server-safe source tools', () => {
     expect(resolve).toHaveBeenCalledTimes(2)
   })
 
-  it('blocks redirects to private targets and oversized bodies', async () => {
+  it('blocks redirects to private targets and truncates oversized bodies', async () => {
     const redirect = new BoundedPublicReader({
       fetch: async () => new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/admin' } }),
       resolve: async () => ['142.250.1.1'],
     })
     await expect(redirect.read('https://example.com', new AbortController().signal)).rejects.toThrow(/public/i)
     const oversized = new BoundedPublicReader({
-      fetch: async () => new Response('x'.repeat(101)), resolve: async () => ['142.250.1.1'], maxCharacters: 100,
+      fetch: async () => new Response('x'.repeat(5_000)), resolve: async () => ['142.250.1.1'], maxCharacters: 100,
     })
-    await expect(oversized.read('https://example.com', new AbortController().signal)).rejects.toThrow(/large/i)
+    await expect(oversized.read('https://example.com', new AbortController().signal)).resolves.toMatchObject({
+      content: 'x'.repeat(100), truncated: true,
+    })
+  })
+
+  it('extracts readable text from large HTML instead of counting markup against the content limit', async () => {
+    const html = `<html><head><title>Example &amp; page</title><style>${'x'.repeat(300)}</style></head><body><h1>Useful title</h1><p>Readable body.</p>${'<div>More text</div>'.repeat(100)}</body></html>`
+    const reader = new BoundedPublicReader({
+      fetch: async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+      resolve: async () => ['142.250.1.1'], maxCharacters: 100,
+    })
+    const result = await reader.read('https://example.com', new AbortController().signal)
+    expect(result).toMatchObject({ title: 'Example & page', truncated: true })
+    expect(result.content).toContain('Useful title')
+    expect(result.content).toContain('Readable body.')
+    expect(result.content).not.toContain('<h1>')
+    expect(result.content).not.toContain('<style>')
   })
 
   it('registers only explicit safe capabilities and labels source content untrusted', async () => {

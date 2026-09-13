@@ -10,6 +10,7 @@ describe('server configuration', () => {
       FORAGE_ASSET_DIR: '/var/lib/forage/assets',
       FORAGE_HOST: '127.0.0.1',
       FORAGE_PORT: '3210',
+      FORAGE_AGENT_ENCRYPTION_KEY: `1:${Buffer.alloc(32, 3).toString('base64')}`,
     })
     expect(config.port).toBe(3210)
     expect(publicConfigForLogging(config)).not.toContain('secret')
@@ -25,7 +26,6 @@ describe('server configuration', () => {
       DATABASE_URL: 'postgres://forage:secret@localhost:5432/forage',
       FORAGE_INSTANCE_ID: 'instance-1',
       FORAGE_ASSET_DIR: '/tmp/assets',
-      FORAGE_AGENT_WORKER_ENABLED: 'true',
       FORAGE_AGENT_ENCRYPTION_KEY: `4:${key}`,
       FORAGE_AGENT_WORKER_CONCURRENCY: '3',
       FORAGE_AGENT_LEASE_SECONDS: '45',
@@ -33,18 +33,16 @@ describe('server configuration', () => {
       FORAGE_SUPADATA_API_URL: 'https://api.supadata.ai/v1',
       FORAGE_SUPADATA_API_KEY: 'transcript-secret',
     })
-    expect(config.agent.worker).toMatchObject({ enabled: true, concurrency: 3, leaseSeconds: 45, maxAttempts: 4 })
+    expect(config.agent.worker).toMatchObject({ concurrency: 3, leaseSeconds: 45, maxAttempts: 4 })
     expect(config.agent.encryptionKeys[0]?.version).toBe(4)
     const logged = publicConfigForLogging(config)
     expect(logged).not.toContain(key)
     expect(logged).not.toContain('transcript-secret')
-    expect(logged).toContain('"workerEnabled":true')
   })
 
-  it('requires a valid external encryption key when the worker is enabled', () => {
+  it('requires a valid external encryption key because every process executes agent runs', () => {
     const base = {
       DATABASE_URL: 'postgres://localhost/forage', FORAGE_INSTANCE_ID: 'instance-1', FORAGE_ASSET_DIR: '/tmp/assets',
-      FORAGE_AGENT_WORKER_ENABLED: 'true',
     }
     expect(() => loadServerConfig(base)).toThrow(/encryption/i)
     expect(() => loadServerConfig({ ...base, FORAGE_AGENT_ENCRYPTION_KEY: '1:not-base64' })).toThrow(/encryption/i)

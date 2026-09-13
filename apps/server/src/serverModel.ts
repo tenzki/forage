@@ -26,7 +26,14 @@ export class OpenAIResponsesModelAdapter implements ModelAdapter {
     if (codex) {
       headers['chatgpt-account-id'] = credential.provider === 'openai-codex' ? credential.accountId : ''
       headers.originator = 'forage'
+      headers.accept = 'text/event-stream'
+      headers['OpenAI-Beta'] = 'responses=experimental'
     }
+    const tools = request.tools.map((tool) => ({
+      type: 'function', name: tool.id, description: tool.description,
+      parameters: { type: 'object', additionalProperties: true },
+      ...(!codex ? { strict: false } : {}),
+    }))
     const response = await this.fetch(endpoint, {
       method: 'POST', headers, signal,
       body: JSON.stringify({
@@ -36,10 +43,15 @@ export class OpenAIResponsesModelAdapter implements ModelAdapter {
           { role: 'user', content: request.user },
           ...historyInput(request),
         ],
-        tools: request.tools.map((tool) => ({
-          type: 'function', name: tool.id, description: tool.description,
-          parameters: { type: 'object', additionalProperties: true }, strict: false,
-        })),
+        ...(tools.length ? { tools } : {}),
+        ...(codex ? {
+          store: false,
+          stream: true,
+          text: { verbosity: 'low', format: structuredOutlineFormat() },
+          include: ['reasoning.encrypted_content'],
+          tool_choice: 'auto',
+          parallel_tool_calls: true,
+        } : { text: { format: structuredOutlineFormat() } }),
       }),
     })
     if (!response.ok) {
@@ -48,10 +60,7 @@ export class OpenAIResponsesModelAdapter implements ModelAdapter {
       if (response.status >= 500) throw new ProviderError('dependency_unavailable', 'Model provider is temporarily unavailable.', true)
       throw new ProviderError('invalid_input', 'Model provider rejected the request.', false)
     }
-    const text = await response.text()
-    if (text.length > 1_000_000) throw new ProviderError('invalid_output', 'Model provider response is too large.', false)
-    let body: Record<string, unknown>
-    try { body = JSON.parse(text) as Record<string, unknown> } catch { throw new ProviderError('invalid_output', 'Model provider returned invalid data.', false) }
+    const body = await responseBody(response, codex)
     return responseFromBody(body)
   }
 }
@@ -74,6 +83,8 @@ export class OpenAIResponsesDispatcherClassifier implements DispatcherClassifier
     if (codex) {
       headers['chatgpt-account-id'] = credential.accountId
       headers.originator = 'forage'
+      headers.accept = 'text/event-stream'
+      headers['OpenAI-Beta'] = 'responses=experimental'
     }
     const response = await this.fetch(endpoint, {
       method: 'POST', headers, signal,
@@ -84,14 +95,29 @@ export class OpenAIResponsesDispatcherClassifier implements DispatcherClassifier
           trust: 'untrusted', capture: input.text, source: input.source,
           allowedSkillIds: input.allowedSkillIds,
         }) }],
-        tools: [],
-        text: { format: {
-          type: 'json_schema', name: 'forage_dispatcher', strict: true,
-          schema: {
-            type: 'object', additionalProperties: false, required: ['skillIds'],
-            properties: { skillIds: { type: 'array', maxItems: 20, items: { type: 'string', enum: input.allowedSkillIds } } },
-          },
-        } },
+        ...(codex ? {
+          store: false,
+          stream: true,
+          text: { verbosity: 'low', format: {
+            type: 'json_schema', name: 'forage_dispatcher', strict: true,
+            schema: {
+              type: 'object', additionalProperties: false, required: ['skillIds'],
+              properties: { skillIds: { type: 'array', maxItems: 20, items: { type: 'string', enum: input.allowedSkillIds } } },
+            },
+          } },
+          include: ['reasoning.encrypted_content'],
+          tool_choice: 'none',
+          parallel_tool_calls: true,
+        } : {
+          tools: [],
+          text: { format: {
+            type: 'json_schema', name: 'forage_dispatcher', strict: true,
+            schema: {
+              type: 'object', additionalProperties: false, required: ['skillIds'],
+              properties: { skillIds: { type: 'array', maxItems: 20, items: { type: 'string', enum: input.allowedSkillIds } } },
+            },
+          } },
+        }),
       }),
     })
     if (!response.ok) {
@@ -99,10 +125,7 @@ export class OpenAIResponsesDispatcherClassifier implements DispatcherClassifier
       if (response.status === 429) throw new ProviderError('provider_rate_limited', 'Dispatcher provider rate limited the request.', true)
       throw new ProviderError('dependency_unavailable', 'Dispatcher provider is temporarily unavailable.', response.status >= 500)
     }
-    const serialized = await response.text()
-    if (serialized.length > 100_000) throw new ProviderError('invalid_output', 'Dispatcher response is too large.', false)
-    let body: Record<string, unknown>
-    try { body = JSON.parse(serialized) as Record<string, unknown> } catch { throw new ProviderError('invalid_output', 'Dispatcher returned invalid data.', false) }
+    const body = await responseBody(response, codex, 100_000)
     let selected: unknown
     try { selected = JSON.parse(outputText(body)) } catch { throw new ProviderError('invalid_output', 'Dispatcher returned malformed output.', false) }
     const skillIds = selected && typeof selected === 'object' && Array.isArray((selected as { skillIds?: unknown }).skillIds)
@@ -111,6 +134,130 @@ export class OpenAIResponsesDispatcherClassifier implements DispatcherClassifier
       throw new ProviderError('invalid_output', 'Dispatcher returned malformed output.', false)
     }
     return skillIds as string[]
+  }
+}
+
+async function responseBody(response: Response, streamed: boolean, maximum = 1_000_000): Promise<Record<string, unknown>> {
+  const text = await response.text()
+  if (text.length > maximum) throw new ProviderError('invalid_output', 'Model provider response is too large.', false)
+  if (!streamed) {
+    try { return JSON.parse(text) as Record<string, unknown> } catch {
+      throw new ProviderError('invalid_output', 'Model provider returned invalid data.', false)
+    }
+  }
+  if (text.trimStart().startsWith('{')) {
+    try { return JSON.parse(text) as Record<string, unknown> } catch {
+      throw new ProviderError('invalid_output', 'Model provider returned invalid data.', false)
+    }
+  }
+
+  let completed: Record<string, unknown> | null = null
+  const outputItems = new Map<number, Record<string, unknown>>()
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (!data || data === '[DONE]') continue
+    let event: Record<string, unknown>
+    try { event = JSON.parse(data) as Record<string, unknown> } catch { continue }
+    const outputIndex = typeof event.output_index === 'number' ? event.output_index : null
+    if (outputIndex !== null && event.type === 'response.output_item.added' && isRecord(event.item)) {
+      outputItems.set(outputIndex, structuredClone(event.item))
+    }
+    if (outputIndex !== null && event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+      appendOutputText(outputItems, outputIndex, typeof event.content_index === 'number' ? event.content_index : 0, event.delta)
+    }
+    if (outputIndex !== null && event.type === 'response.function_call_arguments.delta' && typeof event.delta === 'string') {
+      const item = outputItems.get(outputIndex)
+      if (item?.type === 'function_call') item.arguments = `${typeof item.arguments === 'string' ? item.arguments : ''}${event.delta}`
+    }
+    if (outputIndex !== null && event.type === 'response.function_call_arguments.done' && typeof event.arguments === 'string') {
+      const item = outputItems.get(outputIndex)
+      if (item?.type === 'function_call') item.arguments = event.arguments
+    }
+    if (outputIndex !== null && event.type === 'response.output_item.done' && isRecord(event.item)) {
+      outputItems.set(outputIndex, structuredClone(event.item))
+    }
+    if ((event.type === 'response.completed' || event.type === 'response.done') && isRecord(event.response)) {
+      completed = event.response
+    }
+    if (event.type === 'response.failed') {
+      throw new ProviderError('invalid_output', 'Model provider failed while generating a response.', false)
+    }
+  }
+  if (!completed) throw new ProviderError('invalid_output', 'Model provider stream ended without a completed response.', false)
+  if (!outputItems.size) return completed
+  const terminalOutput = Array.isArray(completed.output) ? completed.output : []
+  const merged = new Map<number, unknown>(terminalOutput.map((item, index) => [index, item]))
+  for (const [index, item] of outputItems) merged.set(index, item)
+  return { ...completed, output: [...merged.entries()].sort(([left], [right]) => left - right).map(([, item]) => item) }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function appendOutputText(items: Map<number, Record<string, unknown>>, outputIndex: number, contentIndex: number, delta: string): void {
+  let item = items.get(outputIndex)
+  if (!item || item.type !== 'message') {
+    item = { type: 'message', role: 'assistant', content: [] }
+    items.set(outputIndex, item)
+  }
+  const content = Array.isArray(item.content) ? [...item.content] : []
+  const current = isRecord(content[contentIndex]) ? content[contentIndex] : { type: 'output_text', text: '' }
+  content[contentIndex] = { ...current, type: 'output_text', text: `${typeof current.text === 'string' ? current.text : ''}${delta}` }
+  item.content = content
+}
+
+function structuredOutlineFormat(): Record<string, unknown> {
+  return {
+    type: 'json_schema',
+    name: 'forage_outline_result',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['version', 'nodes', 'sources'],
+      properties: {
+        version: { type: 'number', const: 1 },
+        nodes: { type: 'array', minItems: 1, maxItems: 500, items: { $ref: '#/$defs/node' } },
+        sources: {
+          type: 'array',
+          maxItems: 100,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['url', 'label'],
+            properties: { url: { type: 'string' }, label: { type: 'string' } },
+          },
+        },
+      },
+      $defs: {
+        node: {
+          anyOf: [
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'text', 'children'],
+              properties: {
+                type: { type: 'string', const: 'text' },
+                text: { type: 'string' },
+                children: { type: 'array', maxItems: 500, items: { $ref: '#/$defs/node' } },
+              },
+            },
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['type', 'assetId', 'alt'],
+              properties: {
+                type: { type: 'string', const: 'image' },
+                assetId: { type: 'string' },
+                alt: { type: 'string' },
+              },
+            },
+          ],
+        },
+      },
+    },
   }
 }
 

@@ -38,6 +38,20 @@ const stepBatchSchema = z.object({
   { message: 'steps and inverseSteps must have equal length' },
 )
 
+type AgentResultTreeNode =
+  | { type: 'text'; nodeId: string; text: string; children?: AgentResultTreeNode[] }
+  | { type: 'image'; assetId: string; alt: string }
+
+const agentResultTreeNodeSchema: z.ZodType<AgentResultTreeNode> = z.lazy(() => z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text'), nodeId: boundedId, text: z.string().trim().min(1).max(20_000),
+    children: z.array(agentResultTreeNodeSchema).max(500).optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('image'), assetId: z.string().regex(/^[a-f0-9]{64}$/), alt: z.string().trim().min(1).max(500),
+  }).strict(),
+]))
+
 const eventPayloadSchemas = {
   'document.steps_applied': stepBatchSchema,
   'document.undo_applied': stepBatchSchema.extend({
@@ -75,6 +89,12 @@ const eventPayloadSchemas = {
     assetId: z.string().regex(/^[a-f0-9]{64}$/),
     alt: z.string().trim().min(1).max(500),
   }).strict(),
+  'agent.result_committed': z.object({
+    runId: boundedId,
+    targetNodeId: boundedId,
+    nodes: z.array(agentResultTreeNodeSchema).min(1).max(500),
+    sources: z.array(z.object({ url: z.url().max(2_000), label: z.string().trim().min(1).max(300) }).strict()).max(100),
+  }).strict(),
 } as const
 
 export type OutlineEventType = keyof typeof eventPayloadSchemas
@@ -108,6 +128,12 @@ export interface EventPayloadByType {
     clientCreatedAt?: string
   }
   'asset.reference_added': { assetId: string; alt: string }
+  'agent.result_committed': {
+    runId: string
+    targetNodeId: string
+    nodes: AgentResultTreeNode[]
+    sources: Array<{ url: string; label: string }>
+  }
 }
 
 interface EventEnvelopeBase {

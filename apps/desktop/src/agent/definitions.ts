@@ -1,6 +1,6 @@
 import type { ToolOption } from './tools'
 import type {
-  AgentDefinition as RuntimeAgentDefinition,
+  PortableAgentDefinition as RuntimeAgentDefinition,
   SkillDefinition as RuntimeSkillDefinition,
 } from '@forage/agent-runtime'
 
@@ -22,7 +22,6 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [{
   name: 'General assistant',
   description: 'General-purpose outline assistant',
   systemPrompt: 'You are an agent embedded in a tree-based note-taking application. Be concise, factual, and organize the answer for an outliner.',
-  modelId: '',
   toolIds: ['web_search', 'web_fetch', 'generate_image'],
 }]
 
@@ -67,14 +66,11 @@ function validId(value: string | undefined): string {
 
 export function validateAgentDraft(draft: AgentDraft, availableTools: ToolOption[]): AgentDefinition {
   const allowedTools = new Set(availableTools.map((tool) => tool.id))
-  const modelId = draft.modelId.trim()
-  if (modelId && !/^[A-Za-z0-9._:/-]{1,128}$/.test(modelId)) throw new Error('Agent model is invalid.')
   return {
     id: validId(draft.id),
     name: cleanText(draft.name, 'Agent name', 80),
     description: cleanText(draft.description, 'Agent description', 300),
     systemPrompt: cleanText(draft.systemPrompt, 'Agent instructions', 20_000),
-    modelId,
     toolIds: [...new Set(draft.toolIds.filter((id) => allowedTools.has(id)))],
   }
 }

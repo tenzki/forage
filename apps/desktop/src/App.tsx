@@ -14,14 +14,17 @@ import { TasksPanel } from './components/Outliner/TasksPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
 import { ActivitySidebar, type ActivityCall } from './components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './agent/activity'
-import { applyActivityEvent, callsFromHistory } from './agent/activityCalls'
+import { applyActivityEvent, callsFromHistory, fromRuntimeEvent } from './agent/activityCalls'
+import { serverRunManager } from './agent/serverRunManager'
 import {
   captureDocumentEvent,
   DOMAIN_MUTATION_META,
+  type CapturedDocumentEvent,
 } from './editor/eventCapture'
 import {
   dispatchPersistentRedo,
   dispatchPersistentUndo,
+  mergeLoadedHistory,
   recordDocumentChange,
   type PersistentHistoryState,
 } from './editor/persistentHistory'
@@ -34,7 +37,7 @@ import {
   SYSTEM_NODE_REJECTION_EVENT,
   SYSTEM_NODE_REJECTION_MESSAGE,
 } from './editor/systemNodeGuards'
-import { createOutlineSchema, findSystemNode } from '@forage/document'
+import { captureStepBatch, createOutlineSchema, findSystemNode } from '@forage/document'
 import { focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
@@ -89,16 +92,10 @@ export default function App() {
   const sessionStatus = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const persistentHistory = useRef<PersistentHistoryState>({ undo: [], redo: [] })
   const activeChangeGroup = useRef<{ id: string; at: number; key: string } | null>(null)
-  const activeAgentCalls = useRef(new Set<string>())
   const syncInProgress = useRef(false)
+  const synchronizeNow = useRef<() => Promise<void>>(async () => undefined)
 
   const handleActivity = useCallback((event: ActivityEvent) => {
-    if (!event.callId) {
-      if (event.phase === 'start') activeAgentCalls.current.add(event.id)
-      else if (event.phase === 'complete' || event.phase === 'error' || event.phase === 'cancelled') {
-        activeAgentCalls.current.delete(event.id)
-      }
-    }
     setActivityCalls((current) => applyActivityEvent(current, event))
   }, [])
 
@@ -122,7 +119,10 @@ export default function App() {
     try {
       const opened = await session.open()
       const { state } = opened
-      persistentHistory.current = opened.history
+      persistentHistory.current = { undo: [], redo: [] }
+      void opened.history.then((loaded) => {
+        persistentHistory.current = mergeLoadedHistory(loaded, persistentHistory.current)
+      })
       const doc = state.doc as JsonValue
       setInitialContent(doc)
       liveDoc.current = doc
@@ -139,6 +139,11 @@ export default function App() {
     void loadSettings()
   }, [loadSettings, readOutline])
 
+  useEffect(() => {
+    if (!loaded) return
+    void serverRunManager.restore((event, runId) => handleActivity(fromRuntimeEvent(event, runId)))
+  }, [handleActivity, loaded])
+
   // Persisted runs rehydrate the sidebar so agent activity survives a restart.
   useEffect(() => {
     if (!loaded) return
@@ -153,53 +158,94 @@ export default function App() {
   useEffect(() => {
     if (!editor || !session.context()) return
     let disposed = false
-    const synchronize = () => {
-      if (syncInProgress.current || activeAgentCalls.current.size > 0) return
+    const synchronize = async (): Promise<void> => {
+      if (syncInProgress.current) {
+        await new Promise<void>((resolve) => {
+          const wait = window.setInterval(() => {
+            if (syncInProgress.current) return
+            window.clearInterval(wait)
+            resolve()
+          }, 25)
+        })
+        if (!disposed) await synchronize()
+        return
+      }
       syncInProgress.current = true
-      const wasEditable = editor.isEditable
-      const application = editor.view.dom.closest<HTMLElement>('#app')
-      setEditorMutationLocked(editor, true)
-      editor.setEditable(false)
-      if (application) application.inert = true
       const run = async () => {
         try {
           if (disposed) return
-          await session.synchronize(({ state: projected, historyInvalidated }) => {
+          await session.synchronize(({ state: projected, historyInvalidated, appliedEvents }) => {
             if (disposed) return
-            const nextDoc = projected.doc as JsonValue
-            createOutlineSchema().nodeFromJSON(nextDoc as object).check()
-            const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
-            if (documentChanged) {
-              const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
-              const transaction = editor.state.tr
-                .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
-                .setMeta('forageRemote', true)
-                .setMeta('preventUpdate', true)
-                .setMeta('addToHistory', false)
-              editor.view.dispatch(transaction)
-              if (!editor.state.doc.eq(projectedDoc)) {
-                throw new Error('The synchronized outline projection could not be applied.')
+            let application: HTMLElement | null = null
+            try { application = editor.view.dom.closest<HTMLElement>('#app') } catch { /* editor was destroyed */ }
+            const wasEditable = editor.isEditable
+            setEditorMutationLocked(editor, true)
+            if (application) application.inert = true
+            try {
+              const nextDoc = projected.doc as JsonValue
+              createOutlineSchema().nodeFromJSON(nextDoc as object).check()
+              const documentChanged = JSON.stringify(editor.getJSON()) !== JSON.stringify(nextDoc)
+              let agentResultHistory: CapturedDocumentEvent | null = null
+              if (documentChanged) {
+                const projectedDoc = editor.schema.nodeFromJSON(nextDoc as object)
+                const transaction = editor.state.tr
+                  .replaceWith(0, editor.state.doc.content.size, projectedDoc.content)
+                  .setMeta('forageRemote', true)
+                  .setMeta('preventUpdate', true)
+                  .setMeta('addToHistory', false)
+                const remoteResult = appliedEvents.length === 1 && appliedEvents[0]?.type === 'agent.result_committed'
+                  ? appliedEvents[0]
+                  : null
+                if (remoteResult) {
+                  agentResultHistory = {
+                    id: remoteResult.id,
+                    outlineId: remoteResult.outlineId,
+                    actorId: remoteResult.actorId,
+                    deviceId: remoteResult.deviceId,
+                    type: 'document.steps_applied', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+                    baseRevision: remoteResult.baseRevision,
+                    origin: 'server', occurredAt: remoteResult.occurredAt,
+                    changeGroupId: remoteResult.changeGroupId ?? `run:${remoteResult.payload.runId}`,
+                    payload: captureStepBatch(editor.state.doc, transaction.steps),
+                    before: editor.state.doc.toJSON() as Record<string, unknown>,
+                    after: projectedDoc.toJSON() as Record<string, unknown>,
+                  }
+                }
+                editor.view.dispatch(transaction)
+                if (!editor.state.doc.eq(projectedDoc)) {
+                  throw new Error('The synchronized outline projection could not be applied.')
+                }
               }
+              liveDoc.current = nextDoc
+              if ((documentChanged && !agentResultHistory) || historyInvalidated) {
+                activeChangeGroup.current = null
+                persistentHistory.current = { undo: [], redo: [] }
+              } else if (agentResultHistory) {
+                activeChangeGroup.current = null
+                recordDocumentChange(persistentHistory.current, agentResultHistory)
+              }
+              setTrash(projected.trash as unknown as TrashEntry[])
+              setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
+            } finally {
+              setEditorMutationLocked(editor, false)
+              if (!editor.isDestroyed) editor.setEditable(wasEditable)
+              if (application) application.inert = false
             }
-            liveDoc.current = nextDoc
-            if (documentChanged || historyInvalidated) {
-              activeChangeGroup.current = null
-              persistentHistory.current = { undo: [], redo: [] }
-            }
-            setTrash(projected.trash as unknown as TrashEntry[])
-            setShortcuts(projected.shortcuts as unknown as OutlineShortcut[])
           })
         } finally {
           syncInProgress.current = false
-          setEditorMutationLocked(editor, false)
-          if (!editor.isDestroyed) editor.setEditable(wasEditable)
-          if (application) application.inert = false
         }
       }
-      void run()
+      await run()
     }
-    const timer = window.setInterval(synchronize, 15_000)
-    return () => { disposed = true; window.clearInterval(timer) }
+    synchronizeNow.current = synchronize
+    void synchronize()
+    const timer = window.setInterval(() => { void synchronize() }, 15_000)
+    return () => {
+      disposed = true
+      if (synchronizeNow.current === synchronize) synchronizeNow.current = async () => undefined
+      window.clearInterval(timer)
+    }
   }, [editor, session])
 
   useEffect(() => {
@@ -289,6 +335,18 @@ export default function App() {
     return session.context()
   }, [session])
 
+  const prepareServerAgentRun = useCallback(async () => {
+    const synchronized = await session.synchronize()
+    if (synchronized) return
+    const state = session.getSnapshot().syncState
+    const detail = 'message' in state ? state.message : `Synchronization stopped in state: ${state.kind}`
+    throw new Error(`Could not sync this bullet before starting the agent. ${detail}`)
+  }, [session])
+
+  const applyServerAgentResult = useCallback(async () => {
+    await synchronizeNow.current()
+  }, [])
+
   const handleShortcutsChange = useCallback((next: OutlineShortcut[]) => {
     setShortcuts((current) => {
       const context = domainContext()
@@ -321,7 +379,7 @@ export default function App() {
     setInitialContent(doc)
     liveDoc.current = doc
     activeChangeGroup.current = null
-    persistentHistory.current = opened.history
+    persistentHistory.current = await opened.history
     setTrash(opened.state.trash as unknown as TrashEntry[])
     setShortcuts(opened.state.shortcuts as unknown as OutlineShortcut[])
     setLoadError(null)
@@ -450,7 +508,13 @@ export default function App() {
             />
             {editor && <BacklinksPanel editor={editor} />}
             <FormattingBubbleMenu editor={editor} />
-            <SlashMenu editor={editor} onError={setAgentError} onActivity={handleActivity} />
+            <SlashMenu
+              editor={editor}
+              onError={setAgentError}
+              onActivity={handleActivity}
+              onBeforeServerRun={prepareServerAgentRun}
+              onAfterServerRun={applyServerAgentResult}
+            />
             <TagMenu editor={editor} />
             <InternalLinkMenu editor={editor} />
           </div>

@@ -2,9 +2,27 @@ import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type { CredentialMetadata } from '@forage/protocol'
+import type { PortableAgentConfiguration } from '@forage/agent-runtime'
 import { TauriServerAgentTransport } from '../../agent/serverExecutor'
+import {
+  buildServerAgentConfiguration,
+  isMissingServerAgentConfiguration,
+} from '../../agent/serverConfiguration'
+import {
+  confirmedConfigurationMirror,
+  NativeConfigurationMirrorStore,
+  reconcileConfiguration,
+} from '../../agent/configurationMirror'
+import {
+  firstIncompleteProvisioningStep,
+  NativeServerProvisioningStore,
+  type ServerProvisioningState,
+  type ServerProvisioningStep,
+} from '../../agent/serverProvisioning'
 import { useSettingsStore } from '../../store/settingsStore'
-import type { ServerConnectionInfo } from '../../persistence/eventStore'
+import { NativeEventRepository, type ServerConnectionInfo } from '../../persistence/eventStore'
+import { adoptLocalOutline } from '../../sync/adoptOutline'
+import { serverRunManager } from '../../agent/serverRunManager'
 import { ConfirmButton } from './ConfirmButton'
 import { SegmentedControl } from '../ui/SegmentedControl'
 
@@ -13,13 +31,13 @@ function message(error: unknown): string {
 }
 
 type ComputeMode = 'local' | 'server'
-type WizardStep = 'connect' | 'verify' | 'credential' | 'publish'
+type WizardStep = 'connect' | 'copy' | 'verify' | 'credential'
 
 const WIZARD_STEPS: Array<{ id: WizardStep; label: string }> = [
   { id: 'connect', label: 'Connect' },
+  { id: 'copy', label: 'Copy' },
   { id: 'verify', label: 'Verify' },
   { id: 'credential', label: 'Credential' },
-  { id: 'publish', label: 'Publish' },
 ]
 
 export function ComputeSettings() {
@@ -27,43 +45,96 @@ export function ComputeSettings() {
   const skills = useSettingsStore((state) => state.skills)
   const customTools = useSettingsStore((state) => state.customTools)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
+  const modelId = useSettingsStore((state) => state.modelId)
+  const isLoaded = useSettingsStore((state) => state.isLoaded)
+  const replaceAgentConfiguration = useSettingsStore((state) => state.replaceAgentConfiguration)
 
   // Local stays selected until the native side confirms an enrolled server.
   const [mode, setMode] = useState<ComputeMode>('local')
+  const [wizardActive, setWizardActive] = useState(false)
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [step, setStep] = useState<WizardStep>('connect')
   const [origin, setOrigin] = useState('')
-  const [outlineId, setOutlineId] = useState('')
   const [deviceToken, setDeviceToken] = useState('')
+  const [alreadySeeded, setAlreadySeeded] = useState(false)
   const [verified, setVerified] = useState(false)
   const [credential, setCredential] = useState<CredentialMetadata | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [authorizationId, setAuthorizationId] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
+  const [computeCredentialRef, setComputeCredentialRef] = useState<string | null>(null)
+  const [computeRevision, setComputeRevision] = useState(0)
+  const [outlineCopied, setOutlineCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [configurationConflict, setConfigurationConflict] = useState<PortableAgentConfiguration | null>(null)
+  const [readiness, setReadiness] = useState<Awaited<ReturnType<TauriServerAgentTransport['readiness']>> | null>(null)
+  const [provisioning, setProvisioning] = useState<ServerProvisioningState | null>(null)
 
   const transport = new TauriServerAgentTransport()
+  const localAgentConfiguration = { agents, skills, customTools, enabledToolIds, modelId }
 
   useEffect(() => {
+    if (!isLoaded) return
     void invoke<ServerConnectionInfo | null>('server_connection_info')
       .then(async (value) => {
         if (!value) return
         setConnection(value)
         setMode('server')
         try {
-          const published = await transport.configuration()
+          const saved = await new NativeServerProvisioningStore().load()
+          if (saved?.instanceId === value.instanceId && saved.outlineId === value.outlineId) {
+            setProvisioning(saved)
+            const incomplete = firstIncompleteProvisioningStep(saved)
+            if (incomplete) {
+              setWizardActive(true)
+              setStep(incomplete === 'compute' ? 'credential' : 'copy')
+            }
+          }
+        } catch { /* older native builds have no resumable provisioning state */ }
+        try {
+          let published = await transport.configuration()
+          const local = buildServerAgentConfiguration(localAgentConfiguration, published.configuration.revision)
+          const mirrorStore = new NativeConfigurationMirrorStore()
+          const reconciliation = await reconcileConfiguration(
+            local,
+            published.configuration,
+            await mirrorStore.load().catch(() => null),
+          )
+          if (reconciliation.outcome === 'publish_local') {
+            published = await transport.publishConfiguration({
+              baseRevision: published.configuration.revision,
+              configuration: { ...local, revision: published.configuration.revision + 1 },
+            })
+          } else if (reconciliation.outcome === 'use_server') {
+            await replaceAgentConfiguration(published.configuration)
+          } else if (reconciliation.outcome === 'conflict') {
+            setConfigurationConflict(published.configuration)
+          }
           setRevision(published.configuration.revision)
-          const reference = published.configuration.agents.find((agent) => agent.credentialRef)?.credentialRef
-          if (reference) setCredential(await transport.credential(reference))
-        } catch { /* an unpublished server has no configuration yet */ }
+          if (reconciliation.outcome !== 'conflict') {
+            await mirrorStore.save(await confirmedConfigurationMirror(published.configuration))
+          }
+          try {
+            const compute = await transport.computeProfile()
+            setComputeRevision(compute.profile.revision)
+            setComputeCredentialRef(compute.profile.credentialRef)
+            const serverCredential = await transport.credential(compute.profile.credentialRef)
+            setCredential(serverCredential)
+          } catch { /* outline synchronization remains usable without server compute */ }
+          try { setReadiness(await transport.readiness()) } catch { /* show the known component state */ }
+        } catch (error) {
+          if (isMissingServerAgentConfiguration(error)) setStep('copy')
+          else setStatus(message(error))
+        }
       })
       .catch((error) => setStatus(message(error)))
-  }, [])
+  }, [isLoaded])
 
   function startWizard() {
     setStatus(null)
     setMode('server')
+    setWizardActive(true)
     if (!connection) {
       setStep('connect')
       setVerified(false)
@@ -73,8 +144,10 @@ export function ComputeSettings() {
   function cancelWizard() {
     setStatus(null)
     setMode('local')
+    setWizardActive(false)
     setStep('connect')
     setDeviceToken('')
+    setAlreadySeeded(false)
     setVerified(false)
   }
 
@@ -84,11 +157,73 @@ export function ComputeSettings() {
     try {
       await invoke('server_enroll', {
         origin: origin.trim(),
-        outlineId: outlineId.trim(),
         deviceToken: deviceToken.trim(),
       })
-      setConnection(await invoke<ServerConnectionInfo>('server_connection_info'))
+      const enrolledConnection = await invoke<ServerConnectionInfo>('server_connection_info')
+      setConnection(enrolledConnection)
+      const store = new NativeServerProvisioningStore()
+      let progress = await store.start(enrolledConnection.instanceId, enrolledConnection.outlineId)
+      progress = await store.complete(progress, 'connection')
+      setProvisioning(progress)
       setDeviceToken('')
+      setStep('copy')
+    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
+  }
+
+  async function copyOutline() {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const repository = new NativeEventRepository()
+      const identity = await repository.identity()
+      const result = await adoptLocalOutline(repository, identity.outlineId, (progress) => {
+        setStatus(
+          progress.phase === 'replaying' ? 'Reading the local outline…'
+            : progress.phase === 'seeding'
+              ? progress.assetCount
+                ? `Uploading ${progress.assetCount} image(s), then the outline…`
+                : 'Uploading the outline…'
+              : 'Finishing up…',
+        )
+      })
+      setOutlineCopied(true)
+      setStatus('Syncing agents, skills, and tool settings…')
+      await publishLocalConfiguration()
+      await completeProvisioningSteps('outline', 'synchronization', 'configuration', 'mirror')
+      await invoke('event_store_set_storage_mode', { mode: 'server' })
+      setStatus(`Copied the outline and ${result.assetCount} image(s), then synced agent settings. Restart Forage to finish switching.`)
+      setStep('verify')
+    } catch (error) {
+      const text = message(error)
+      // A server that already holds an outline cannot take this device's content.
+      if (/already been seeded|already holds an outline/i.test(text)) setAlreadySeeded(true)
+      setStatus(text)
+    } finally { setBusy(false) }
+  }
+
+  async function useServerOutline() {
+    setBusy(true)
+    setStatus(null)
+    try {
+      let published
+      try {
+        published = await transport.configuration()
+        await replaceAgentConfiguration(published.configuration)
+      } catch (error) {
+        if (!isMissingServerAgentConfiguration(error)) throw error
+        published = await publishLocalConfiguration()
+      }
+      setRevision(published.configuration.revision)
+      await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(published.configuration))
+      await completeProvisioningSteps('outline', 'synchronization', 'configuration', 'mirror')
+      try {
+        const compute = await transport.computeProfile()
+        setComputeRevision(compute.profile.revision)
+        setComputeCredentialRef(compute.profile.credentialRef)
+        setCredential(await transport.credential(compute.profile.credentialRef))
+      } catch { setCredential(null) }
+      await invoke('event_store_set_storage_mode', { mode: 'server' })
+      setStatus('This device will load the server outline after a restart. Agent settings are synced.')
       setStep('verify')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
@@ -107,9 +242,14 @@ export function ComputeSettings() {
     setBusy(true)
     setStatus(null)
     try {
-      setCredential(await transport.enrollApiKey({ provider: 'openai', apiKey: apiKey.trim() }))
+      const enrolled = await transport.enrollApiKey({ provider: 'openai', apiKey: apiKey.trim() })
+      setCredential(enrolled)
       setApiKey('')
-      setStatus('Server API key enrolled securely.')
+      if (revision === 0) await publishLocalConfiguration()
+      await publishCompute(enrolled)
+      await completeProvisioningSteps('compute')
+      setWizardActive(false)
+      setStatus('Server API key enrolled and all agent settings synced. Server compute is ready.')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
@@ -129,29 +269,87 @@ export function ComputeSettings() {
     setBusy(true)
     try {
       const result = await transport.pollDeviceAuthorization(authorizationId)
-      if (result.credential) setCredential(result.credential)
-      setStatus(result.state === 'connected' ? 'Server ChatGPT credential connected.' : `ChatGPT login: ${result.state}`)
+      if (result.credential) {
+        setCredential(result.credential)
+        if (revision === 0) await publishLocalConfiguration()
+        await publishCompute(result.credential)
+        await completeProvisioningSteps('compute')
+        setWizardActive(false)
+      }
+      setStatus(result.state === 'connected' ? 'Server ChatGPT credential connected and all agent settings synced. Server compute is ready.' : `ChatGPT login: ${result.state}`)
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
-  async function publishConfiguration() {
-    if (!credential || credential.status !== 'connected') return setStatus('Connect a server credential before publishing.')
+  async function publishLocalConfiguration() {
+    const published = await transport.publishConfiguration({
+      baseRevision: revision,
+      configuration: buildServerAgentConfiguration({
+        agents, skills, customTools, enabledToolIds, modelId,
+      }, revision + 1),
+    })
+    setRevision(published.configuration.revision)
+    await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(published.configuration))
+    setConfigurationConflict(null)
+    return published
+  }
+
+  async function completeProvisioningSteps(...steps: ServerProvisioningStep[]) {
+    if (!provisioning) return
+    const store = new NativeServerProvisioningStore()
+    let progress = provisioning
+    for (const step of steps) progress = await store.complete(progress, step)
+    setProvisioning(progress)
+  }
+
+  async function skipServerCompute() {
+    if (provisioning) setProvisioning(await new NativeServerProvisioningStore().skipCompute(provisioning))
+    setWizardActive(false)
+    setStatus('Outline sync remains active. Server agents are disabled until compute is configured.')
+  }
+
+  async function resolveConfigurationConflict(choice: 'local' | 'server') {
+    if (!configurationConflict) return
     setBusy(true)
     setStatus(null)
     try {
-      const published = await transport.publishConfiguration({
-        baseRevision: revision,
-        configuration: {
-          version: 1,
-          revision: revision + 1,
-          agents: agents.map((agent) => ({ ...agent, credentialRef: credential.id })),
-          skills,
-          customTools,
-          globallyEnabledToolIds: enabledToolIds,
-        },
-      })
-      setRevision(published.configuration.revision)
-      setStatus('Server compute is ready. Restart Forage to load the server outline.')
+      if (choice === 'local') {
+        const published = await transport.publishConfiguration({
+          baseRevision: configurationConflict.revision,
+          configuration: buildServerAgentConfiguration(localAgentConfiguration, configurationConflict.revision + 1),
+        })
+        setRevision(published.configuration.revision)
+        await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(published.configuration))
+      } else {
+        await replaceAgentConfiguration(configurationConflict)
+        setRevision(configurationConflict.revision)
+        await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(configurationConflict))
+      }
+      setConfigurationConflict(null)
+      setStatus(choice === 'local' ? 'Published this device’s agent configuration.' : 'Applied the server agent configuration to this device.')
+    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
+  }
+
+  async function publishCompute(serverCredential: CredentialMetadata) {
+    if (serverCredential.status !== 'connected') throw new Error('The selected server credential is not connected.')
+    const compute = await transport.publishComputeProfile({
+      baseRevision: computeRevision,
+      profile: {
+        version: 1, revision: computeRevision + 1, provider: serverCredential.provider,
+        modelId, credentialRef: serverCredential.id,
+      },
+    })
+    setComputeRevision(compute.profile.revision)
+    setComputeCredentialRef(compute.profile.credentialRef)
+    return compute
+  }
+
+  async function retryAgentSettingsSync() {
+    if (!credential || credential.status !== 'connected') return
+    setBusy(true)
+    setStatus(null)
+    try {
+      await publishCompute(credential)
+      setStatus('Server compute is ready.')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
@@ -168,19 +366,26 @@ export function ComputeSettings() {
     setBusy(true)
     setStatus(null)
     try {
+      const activeRemoteRuns = serverRunManager.remembered().filter((run) => !['completed', 'completed_unplaced', 'failed', 'cancelled', 'interrupted'].includes(run.status)).length
       await invoke('server_disconnect')
       setConnection(null)
       setCredential(null)
       setRevision(0)
+      setComputeCredentialRef(null)
+      setComputeRevision(0)
+      setOutlineCopied(false)
       setVerified(false)
       setStep('connect')
       setMode('local')
-      setStatus('Local compute will be used after restart.')
+      setStatus(activeRemoteRuns
+        ? `Local compute will be used after restart. ${activeRemoteRuns} server run${activeRemoteRuns === 1 ? '' : 's'} will continue and reconcile when you reconnect.`
+        : 'Local compute will be used after restart. The server identity is remembered without retaining its access token.')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
   const stepIndex = WIZARD_STEPS.findIndex((entry) => entry.id === step)
-  const setupComplete = Boolean(connection) && revision > 0
+  const setupComplete = Boolean(connection)
+    && revision > 0
 
   return (
     <div className="auth-card compute-settings">
@@ -198,6 +403,17 @@ export function ComputeSettings() {
           else cancelWizard()
         }}
       />
+
+      {mode === 'server' && configurationConflict && (
+        <div role="alert" className="settings-conflict">
+          <strong>Agent configuration changed in both places</strong>
+          <p className="settings-hint">Choose which complete configuration to keep. Closing Settings changes neither side.</p>
+          <div className="settings-actions">
+            <button type="button" className="settings-save" disabled={busy} onClick={() => void resolveConfigurationConflict('local')}>Use local</button>
+            <button type="button" className="settings-secondary" disabled={busy} onClick={() => void resolveConfigurationConflict('server')}>Use server</button>
+          </div>
+        </div>
+      )}
 
       {mode === 'local' ? (
         <>
@@ -217,13 +433,33 @@ export function ComputeSettings() {
             </>
           )}
         </>
-      ) : setupComplete ? (
+      ) : setupComplete && !wizardActive ? (
         <>
           <p className="settings-hint">Runs continue on {connection?.origin} while this app is closed. Server mode never falls back to local execution.</p>
           <code>{connection?.outlineId}</code>
           <p className="settings-hint">Credential: {credential?.status ?? 'not enrolled'} · Configuration revision: {revision}</p>
+          {readiness && (
+            <ul className="readiness-list" aria-label="Server readiness">
+              {Object.entries({
+                Connection: readiness.connection,
+                'Outline sync': readiness.outlineSync,
+                Configuration: readiness.agentConfiguration,
+                Compute: readiness.computeProfile,
+                Worker: readiness.worker,
+                'Search index': readiness.noteIndex,
+              }).map(([label, component]) => (
+                <li key={label} className={component.ready ? 'is-ready' : 'is-not-ready'}>
+                  <strong>{label}</strong>: {component.ready ? 'Ready' : component.message ?? 'Needs attention'}
+                  {component.revision !== undefined ? ` · revision ${component.revision}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="settings-actions">
             <button type="button" className="settings-save" disabled={busy} onClick={() => void testConnection()}>Test connection</button>
+            {credential?.status !== 'connected' && (
+              <button type="button" className="settings-secondary" disabled={busy} onClick={() => { setWizardActive(true); setStep('credential') }}>Configure server compute</button>
+            )}
             <ConfirmButton
               label="Use local compute"
               confirmLabel="Confirm disconnect"
@@ -249,10 +485,31 @@ export function ComputeSettings() {
               <p className="settings-hint">Point Forage at a self-hosted server. It becomes the source of truth for the outline and runs agents while this app is closed.</p>
               <label htmlFor="forage-server-origin">Server URL</label>
               <input id="forage-server-origin" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="https://notes.example.com" />
-              <label htmlFor="forage-outline-id">Outline ID</label>
-              <input id="forage-outline-id" value={outlineId} onChange={(event) => setOutlineId(event.target.value)} autoComplete="off" />
               <label htmlFor="forage-device-token">Device token</label>
               <input id="forage-device-token" type="password" value={deviceToken} onChange={(event) => setDeviceToken(event.target.value)} autoComplete="off" />
+            </>
+          )}
+
+          {step === 'copy' && (
+            <>
+              {alreadySeeded ? (
+                <>
+                  <p className="settings-hint">
+                    This server already holds an outline. Connecting will switch this device to it and
+                    leave this device's local outline behind.
+                  </p>
+                  <button type="button" className="settings-save" disabled={busy} onClick={() => void useServerOutline()}>
+                    Use the server outline
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="settings-hint">This device's outline, shortcuts, agents, skills, and tool settings become the server's content. Images upload first.</p>
+                  <button type="button" className="settings-save" disabled={busy} onClick={() => void copyOutline()}>
+                    {outlineCopied ? 'Finish syncing setup' : 'Copy everything to server'}
+                  </button>
+                </>
+              )}
             </>
           )}
 
@@ -276,17 +533,11 @@ export function ComputeSettings() {
                 <button type="button" className="settings-secondary" disabled={busy} onClick={() => void checkChatGpt()}>Check ChatGPT login</button>
               </div>
               <p className="settings-hint">Credential: {credential?.status ?? 'not enrolled'}</p>
-            </>
-          )}
-
-          {step === 'publish' && (
-            <>
-              <p className="settings-hint">
-                Publish the current agents, skills, and enabled tools so the server can run them. Later edits can be republished from Server agent executor below.
-              </p>
-              <button type="button" className="settings-save" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>
-                Publish agents and skills
-              </button>
+              {credential?.status === 'connected' && computeCredentialRef !== credential.id && (
+                <button type="button" className="settings-save" disabled={busy} onClick={() => void retryAgentSettingsSync()}>
+                  Retry syncing agent settings
+                </button>
+              )}
             </>
           )}
 
@@ -305,7 +556,7 @@ export function ComputeSettings() {
               <button
                 type="button"
                 className="settings-save"
-                disabled={busy || !origin.trim() || !outlineId.trim() || !deviceToken.trim()}
+                disabled={busy || !isLoaded || !origin.trim() || !deviceToken.trim()}
                 onClick={() => void enrollServer()}
               >
                 Connect server
@@ -315,7 +566,7 @@ export function ComputeSettings() {
               <button type="button" className="settings-save" disabled={busy || !verified} onClick={() => setStep('credential')}>Next</button>
             )}
             {step === 'credential' && (
-              <button type="button" className="settings-save" disabled={busy || credential?.status !== 'connected'} onClick={() => setStep('publish')}>Next</button>
+              <button type="button" className="settings-secondary" disabled={busy} onClick={() => void skipServerCompute()}>Skip server compute</button>
             )}
             <button type="button" className="settings-secondary" disabled={busy} onClick={cancelWizard}>Cancel</button>
           </div>

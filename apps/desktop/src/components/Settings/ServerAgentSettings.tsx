@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CredentialMetadata } from '@forage/protocol'
 import { TauriServerAgentTransport } from '../../agent/serverExecutor'
+import { buildServerAgentConfiguration } from '../../agent/serverConfiguration'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ServerConnectionInfo } from '../../persistence/eventStore'
 import { invoke } from '@tauri-apps/api/core'
@@ -23,6 +24,7 @@ export function ServerAgentSettings() {
   const skills = useSettingsStore((state) => state.skills)
   const customTools = useSettingsStore((state) => state.customTools)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
+  const modelId = useSettingsStore((state) => state.modelId)
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [revision, setRevision] = useState(0)
   const [credential, setCredential] = useState<CredentialMetadata | null>(null)
@@ -34,6 +36,9 @@ export function ServerAgentSettings() {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null)
   const [runActivity, setRunActivity] = useState<RunActivity[]>([])
+  const [placementQuery, setPlacementQuery] = useState('')
+  const [placementResults, setPlacementResults] = useState<Array<{ nodeId: string; text: string }>>([])
+  const [placementTarget, setPlacementTarget] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const transport = new TauriServerAgentTransport()
@@ -45,25 +50,23 @@ export function ServerAgentSettings() {
       try {
         const published = await transport.configuration()
         setRevision(published.configuration.revision)
-        const reference = published.configuration.agents.find((agent) => agent.credentialRef)?.credentialRef
-        if (reference) setCredential(await transport.credential(reference))
+        const compute = await transport.computeProfile()
+        setCredential(await transport.credential(compute.profile.credentialRef))
       } catch { /* the first publication starts at revision zero */ }
       try { setRuns((await transport.runs(undefined, 20)).runs) } catch { /* history is optional while offline */ }
     }).catch((error) => setStatus(message(error)))
   }, [])
 
   async function publishConfiguration() {
-    if (!credential || credential.status !== 'connected') return setStatus('Connect a server credential before publishing.')
     setBusy(true); setStatus(null)
     try {
       const nextRevision = revision + 1
       const published = await transport.publishConfiguration({
         baseRevision: revision,
-        configuration: {
-          version: 1, revision: nextRevision,
-          agents: agents.map((agent) => ({ ...agent, credentialRef: credential.id })),
-          skills, customTools, globallyEnabledToolIds: enabledToolIds,
-        },
+        configuration: buildServerAgentConfiguration(
+          { agents, skills, customTools, enabledToolIds, modelId },
+          nextRevision,
+        ),
       })
       setRevision(published.configuration.revision)
       setStatus(`Published server agent configuration revision ${published.configuration.revision}.`)
@@ -131,6 +134,25 @@ export function ServerAgentSettings() {
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
+  async function searchPlacementTargets() {
+    setBusy(true); setStatus(null)
+    try {
+      const response = await transport.searchOutline(placementQuery, 20)
+      setPlacementResults(response.results)
+      setPlacementTarget(response.results[0]?.nodeId ?? null)
+    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
+  }
+
+  async function placeRun() {
+    if (!selectedRun || !placementTarget) return
+    setBusy(true); setStatus(null)
+    try {
+      await transport.place(selectedRun.id, placementTarget)
+      setStatus('Stored output placed without rerunning the agent.')
+      await inspectRun(selectedRun.id)
+    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
+  }
+
   function openResult() {
     const targetId = selectedRun?.result?.rootNoteIds[0]
     if (targetId) window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, { detail: { targetId } }))
@@ -188,12 +210,43 @@ export function ServerAgentSettings() {
         <strong>Run /{selectedRun.skillId}</strong>
         <p className="settings-hint">Status: {selectedRun.status} · Attempts: {selectedRun.attemptCount}</p>
         <p className="settings-hint">Policy: {selectedRun.policyId ?? 'manual invocation'}</p>
+        {selectedRun.placementError && <p role="alert">Output is safe, but could not be placed: {selectedRun.placementError.split('_').join(' ')}</p>}
         {selectedRun.error && <p role="alert">{selectedRun.error.message}</p>}
         <div className="settings-actions">
           {['queued', 'running', 'retry_wait'].includes(selectedRun.status) && <button className="settings-secondary" disabled={busy} onClick={() => void cancelRun()}>Cancel run</button>}
           {['failed', 'cancelled', 'interrupted'].includes(selectedRun.status) && <button className="settings-secondary" disabled={busy} onClick={() => void retryRun()}>Retry run</button>}
           {selectedRun.result?.rootNoteIds.length && <button className="settings-secondary" onClick={openResult}>Open result</button>}
         </div>
+        {selectedRun.status === 'completed_unplaced' && (
+          <div className="server-result-placement">
+            <label htmlFor="server-result-target-search">Place output under</label>
+            <div className="settings-actions">
+              <input
+                id="server-result-target-search"
+                type="search"
+                autoComplete="off"
+                value={placementQuery}
+                onChange={(event) => setPlacementQuery(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchPlacementTargets() } }}
+                placeholder="Search live bullets…"
+              />
+              <button className="settings-secondary" disabled={busy} onClick={() => void searchPlacementTargets()}>Search</button>
+            </div>
+            {placementResults.length > 0 && (
+              <ul aria-label="Result placement destinations">
+                {placementResults.map((result) => (
+                  <li key={result.nodeId}>
+                    <label>
+                      <input type="radio" name="result-placement" checked={placementTarget === result.nodeId} onChange={() => setPlacementTarget(result.nodeId)} />
+                      {result.text || 'Untitled'}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button className="settings-save" disabled={busy || !placementTarget} onClick={() => void placeRun()}>Place stored output</button>
+          </div>
+        )}
         {runActivity.length > 0 && <><strong>Activity</strong><ol>{runActivity.map((event) => <li key={`${event.sequence}:${event.id}`}>{event.label}</li>)}</ol></>}
       </div>}
       {status && <p role="status" className="settings-hint">{status}</p>}

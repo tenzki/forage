@@ -17,32 +17,47 @@ export interface PersistentHistoryState {
   redo: ChangeGroup[]
 }
 
+export interface HistoryRecord {
+  localSequence: number
+  supersededBy?: string | null
+  envelope: EventEnvelope
+}
+
+export type HistoryPageReader = (beforeSequence: number, limit: number) => Promise<readonly HistoryRecord[]>
+
+export function isHistoryReset(event: EventEnvelope, localDeviceId?: string): boolean {
+  const external = (event.origin === 'server'
+    || (localDeviceId !== undefined && event.deviceId !== localDeviceId))
+    && (event.type === 'document.steps_applied'
+      || event.type === 'document.undo_applied'
+      || event.type === 'document.redo_applied'
+      || event.type === 'note.created'
+      || ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored')
+        && Boolean(event.payload.document)))
+  if (external) return true
+  if (event.type === 'document.steps_applied') {
+    const groupId = event.changeGroupId ?? event.id
+    return event.origin === 'migration' || groupId.startsWith('system:')
+  }
+  if (event.type === 'trash.entry_added' || event.type === 'trash.entry_restored') {
+    return Boolean(event.payload.document)
+  }
+  return event.type === 'note.created' || event.type === 'document.schema_migrated'
+}
+
 export function rebuildPersistentHistory(
   events: readonly EventEnvelope[],
   localDeviceId?: string,
 ): PersistentHistoryState {
   const state: PersistentHistoryState = { undo: [], redo: [] }
   for (const event of events) {
-    const externalDocumentChange = (event.origin === 'server'
-      || (localDeviceId !== undefined && event.deviceId !== localDeviceId))
-      && (event.type === 'document.steps_applied'
-        || event.type === 'document.undo_applied'
-        || event.type === 'document.redo_applied'
-        || event.type === 'note.created'
-        || ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored')
-          && Boolean(event.payload.document)))
-    if (externalDocumentChange) {
+    if (isHistoryReset(event, localDeviceId)) {
       state.undo = []
       state.redo = []
       continue
     }
     if (event.type === 'document.steps_applied') {
       const groupId = event.changeGroupId ?? event.id
-      if (event.origin === 'migration' || groupId.startsWith('system:')) {
-        state.undo = []
-        state.redo = []
-        continue
-      }
       const current = state.undo[state.undo.length - 1]
       if (current?.id === groupId) current.events.push(event)
       else state.undo.push({ id: groupId, events: [event] })
@@ -59,37 +74,65 @@ export function rebuildPersistentHistory(
       const targets = new Set(event.payload.targetEventIds)
       const index = findGroup(state.redo, targets)
       if (index >= 0) state.undo.push(...state.redo.splice(index, 1))
-      continue
-    }
-    if ((event.type === 'trash.entry_added' || event.type === 'trash.entry_restored')
-      && event.payload.document) {
-      state.undo = []
-      state.redo = []
-      continue
-    }
-    if (event.type === 'note.created' || event.type === 'document.schema_migrated') {
-      state.undo = []
-      state.redo = []
     }
   }
   return state
 }
 
+export async function loadPersistentHistory(
+  readPage: HistoryPageReader,
+  latestSequence: number,
+  localDeviceId?: string,
+  pageSize = 250,
+): Promise<PersistentHistoryState> {
+  const size = Math.max(1, pageSize)
+  let cursor = latestSequence
+  let tail: EventEnvelope[] = []
+  while (cursor > 0) {
+    const page = await readPage(cursor, size)
+    if (!page.length) break
+    const usable = page.filter((entry) => !entry.supersededBy).map((entry) => entry.envelope)
+    let boundary = -1
+    for (let index = usable.length - 1; index >= 0; index -= 1) {
+      if (isHistoryReset(usable[index], localDeviceId)) { boundary = index; break }
+    }
+    if (boundary >= 0) {
+      tail = usable.slice(boundary + 1).concat(tail)
+      break
+    }
+    tail = usable.concat(tail)
+    if (page.length < size) break
+    cursor = page[0].localSequence - 1
+  }
+  return rebuildPersistentHistory(tail, localDeviceId)
+}
+
+export function mergeLoadedHistory(
+  loaded: PersistentHistoryState,
+  recorded: PersistentHistoryState,
+): PersistentHistoryState {
+  if (!recorded.undo.length && !recorded.redo.length) return loaded
+  return {
+    undo: [...loaded.undo, ...recorded.undo],
+    redo: recorded.undo.length ? recorded.redo : [...loaded.redo, ...recorded.redo],
+  }
+}
+
 export function dispatchPersistentUndo(editor: Editor, history: PersistentHistoryState): ChangeGroup | null {
   const group = history.undo[history.undo.length - 1]
   if (!group) return null
-  dispatchCompensation(editor, group, 'document.undo_applied')
+  const applied = dispatchCompensation(editor, group, 'document.undo_applied')
   history.undo.pop()
-  history.redo.push(group)
+  if (applied) history.redo.push(group)
   return group
 }
 
 export function dispatchPersistentRedo(editor: Editor, history: PersistentHistoryState): ChangeGroup | null {
   const group = history.redo[history.redo.length - 1]
   if (!group) return null
-  dispatchCompensation(editor, group, 'document.redo_applied')
+  const applied = dispatchCompensation(editor, group, 'document.redo_applied')
   history.redo.pop()
-  history.undo.push(group)
+  if (applied) history.undo.push(group)
   return group
 }
 
@@ -109,15 +152,23 @@ function dispatchCompensation(
   editor: Editor,
   group: ChangeGroup,
   type: 'document.undo_applied' | 'document.redo_applied',
-): void {
+): boolean {
   const serialized = type === 'document.undo_applied'
     ? [...group.events].reverse().flatMap((event) => event.payload.inverseSteps)
     : group.events.flatMap((event) => event.payload.steps)
   let transaction = editor.state.tr
-  for (const value of serialized) transaction = transaction.step(Step.fromJSON(editor.schema, value))
+  try {
+    for (const value of serialized) {
+      const result = transaction.maybeStep(Step.fromJSON(editor.schema, value))
+      if (result.failed) return false
+    }
+  } catch {
+    return false
+  }
   transaction.setMeta('addToHistory', false)
   transaction.setMeta(COMPENSATION_META, { type, targetEventIds: group.events.map((event) => event.id) })
   editor.view.dispatch(transaction)
+  return true
 }
 
 function findGroup(groups: ChangeGroup[], targets: Set<string>): number {

@@ -312,6 +312,23 @@ impl EventStore {
         )
     }
 
+    pub fn events_before_sequence(
+        &self,
+        outline_id: &str,
+        sequence: i64,
+        limit: i64,
+    ) -> StoreResult<Vec<StoredEvent>> {
+        let mut events = self.query_events(
+            "SELECT local_sequence, id, outline_id, base_revision, server_revision,
+                    envelope_json, status, superseded_by, created_at
+             FROM outline_events WHERE outline_id = ?1 AND local_sequence <= ?2
+             ORDER BY local_sequence DESC LIMIT ?3",
+            params![outline_id, sequence, limit.clamp(1, 5000)],
+        )?;
+        events.reverse();
+        Ok(events)
+    }
+
     pub fn pending_events(&self, outline_id: &str, limit: i64) -> StoreResult<Vec<StoredEvent>> {
         self.query_events(
             "SELECT local_sequence, id, outline_id, base_revision, server_revision,
@@ -409,8 +426,50 @@ impl EventStore {
         Ok(())
     }
 
+    pub fn mark_seeded(
+        &self,
+        outline_id: &str,
+        checkpoint: &CheckpointRecord,
+    ) -> StoreResult<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
+            "UPDATE outline_events
+             SET status = 'accepted', server_revision = NULL
+             WHERE outline_id = ?1 AND status = 'pending' AND superseded_by IS NULL",
+            params![outline_id],
+        )?;
+        let local_sequence: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(local_sequence), 0) FROM outline_events WHERE outline_id = ?1",
+            params![outline_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            "INSERT OR REPLACE INTO outline_checkpoints
+             (id, outline_id, document_version, schema_epoch, local_sequence, server_revision,
+              state_json, integrity_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                checkpoint.id,
+                checkpoint.outline_id,
+                checkpoint.document_version,
+                checkpoint.schema_epoch,
+                local_sequence,
+                checkpoint.server_revision,
+                checkpoint.state_json,
+                checkpoint.integrity_hash,
+                checkpoint.created_at,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub const CHECKPOINT_RETENTION: i64 = 8;
+
     pub fn save_checkpoint(&self, checkpoint: &CheckpointRecord) -> StoreResult<()> {
-        self.connection()?.execute(
+        let connection = self.connection()?;
+        connection.execute(
             "INSERT OR REPLACE INTO outline_checkpoints
              (id, outline_id, document_version, schema_epoch, local_sequence, server_revision,
               state_json, integrity_hash, created_at)
@@ -427,7 +486,33 @@ impl EventStore {
                 checkpoint.created_at
             ],
         )?;
+        connection.execute(
+            "DELETE FROM outline_checkpoints
+             WHERE outline_id = ?1 AND document_version = ?2 AND schema_epoch = ?3
+               AND id NOT IN (
+                 SELECT id FROM outline_checkpoints
+                 WHERE outline_id = ?1 AND document_version = ?2 AND schema_epoch = ?3
+                 ORDER BY local_sequence DESC, julianday(created_at) DESC, created_at DESC
+                 LIMIT ?4
+               )",
+            params![
+                checkpoint.outline_id,
+                checkpoint.document_version,
+                checkpoint.schema_epoch,
+                Self::CHECKPOINT_RETENTION
+            ],
+        )?;
         Ok(())
+    }
+
+    pub fn checkpoint_count(&self, outline_id: &str) -> StoreResult<i64> {
+        let connection = self.connection()?;
+        let count = connection.query_row(
+            "SELECT count(*) FROM outline_checkpoints WHERE outline_id = ?1",
+            params![outline_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     pub fn latest_compatible_checkpoint(
@@ -437,36 +522,14 @@ impl EventStore {
         schema_epoch: i64,
     ) -> StoreResult<Option<CheckpointRecord>> {
         let connection = self.connection()?;
-        let mut statement = connection.prepare(
-            "SELECT id, outline_id, document_version, schema_epoch, local_sequence,
-                    server_revision, state_json, integrity_hash, created_at
-             FROM outline_checkpoints
-             WHERE outline_id = ?1 AND document_version = ?2 AND schema_epoch = ?3
-             ORDER BY local_sequence DESC, julianday(created_at) DESC, created_at DESC",
-        )?;
-        let rows =
-            statement.query_map(params![outline_id, document_version, schema_epoch], |row| {
-                Ok(CheckpointRecord {
-                    id: row.get(0)?,
-                    outline_id: row.get(1)?,
-                    document_version: row.get(2)?,
-                    schema_epoch: row.get(3)?,
-                    local_sequence: row.get(4)?,
-                    server_revision: row.get(5)?,
-                    state_json: row.get(6)?,
-                    integrity_hash: row.get(7)?,
-                    created_at: row.get(8)?,
-                })
-            })?;
-        let checkpoints = rows.collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let verified = checkpoints
-            .into_iter()
-            .filter(|checkpoint| {
-                Self::checkpoint_hash(&checkpoint.state_json) == checkpoint.integrity_hash
-            })
-            .collect::<Vec<_>>();
-        let Some(selected) = verified.first().cloned() else {
+        let Some(selected) = Self::first_verified_checkpoint(
+            &connection,
+            outline_id,
+            document_version,
+            schema_epoch,
+            None,
+        )?
+        else {
             return Ok(None);
         };
         if selected.local_sequence == 0 {
@@ -477,11 +540,14 @@ impl EventStore {
         // sequence zero even when an event log already existed. Recover one only
         // when its timestamp produces an unambiguous barrier and its document
         // exactly matches the next retained document event's before-hash.
-        let newest_reset = verified
-            .into_iter()
-            .filter(|checkpoint| checkpoint.local_sequence == 0)
-            .next();
-        let Some(mut checkpoint) = newest_reset else {
+        let Some(mut checkpoint) = Self::first_verified_checkpoint(
+            &connection,
+            outline_id,
+            document_version,
+            schema_epoch,
+            Some(0),
+        )?
+        else {
             return Ok(Some(selected));
         };
         let Some(barrier) = Self::legacy_reset_barrier(&connection, &checkpoint, &selected)? else {
@@ -489,6 +555,55 @@ impl EventStore {
         };
         checkpoint.local_sequence = barrier;
         Ok(Some(checkpoint))
+    }
+
+    fn first_verified_checkpoint(
+        connection: &Connection,
+        outline_id: &str,
+        document_version: i64,
+        schema_epoch: i64,
+        local_sequence: Option<i64>,
+    ) -> StoreResult<Option<CheckpointRecord>> {
+        let mut statement = connection.prepare(&format!(
+            "SELECT id, outline_id, document_version, schema_epoch, local_sequence,
+                    server_revision, state_json, integrity_hash, created_at
+             FROM outline_checkpoints
+             WHERE outline_id = ?1 AND document_version = ?2 AND schema_epoch = ?3{}
+             ORDER BY local_sequence DESC, julianday(created_at) DESC, created_at DESC",
+            if local_sequence.is_some() {
+                " AND local_sequence = ?4"
+            } else {
+                ""
+            },
+        ))?;
+        let read = |row: &rusqlite::Row<'_>| {
+            Ok(CheckpointRecord {
+                id: row.get(0)?,
+                outline_id: row.get(1)?,
+                document_version: row.get(2)?,
+                schema_epoch: row.get(3)?,
+                local_sequence: row.get(4)?,
+                server_revision: row.get(5)?,
+                state_json: row.get(6)?,
+                integrity_hash: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        };
+        let mut rows = match local_sequence {
+            Some(sequence) => statement.query_map(
+                params![outline_id, document_version, schema_epoch, sequence],
+                read,
+            )?,
+            None => {
+                statement.query_map(params![outline_id, document_version, schema_epoch], read)?
+            }
+        };
+        while let Some(checkpoint) = rows.next().transpose()? {
+            if Self::checkpoint_hash(&checkpoint.state_json) == checkpoint.integrity_hash {
+                return Ok(Some(checkpoint));
+            }
+        }
+        Ok(None)
     }
 
     fn legacy_reset_barrier(
@@ -701,6 +816,26 @@ impl EventStore {
         self.connection()?.execute(
             "DELETE FROM app_configuration WHERE key = 'server_configuration'",
             [],
+        )?;
+        Ok(())
+    }
+
+    pub fn app_configuration_value(&self, key: &str) -> StoreResult<Option<String>> {
+        self.connection()?
+            .query_row(
+                "SELECT value FROM app_configuration WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    pub fn set_app_configuration_value(&self, key: &str, value: &str) -> StoreResult<()> {
+        self.connection()?.execute(
+            "INSERT INTO app_configuration(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
         )?;
         Ok(())
     }

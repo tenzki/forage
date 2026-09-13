@@ -41,7 +41,11 @@ The executor SHALL expose only tools supported by the active environment and all
 - **THEN** the runtime returns a bounded tool error and performs no requested action
 
 ### Requirement: Executor-owned provider credentials
-Model and provider credentials SHALL be stored and refreshed by the active executor. Runs and configuration SHALL contain only credential references, and secrets SHALL NOT enter model context, outline events, activity payloads, API responses after enrollment, or logs.
+Model and provider credentials SHALL be stored and refreshed by the active executor. Portable agent configuration SHALL contain neither a model nor a credential reference. Each environment SHALL resolve its active versioned compute profile only when admitting a run, and secrets SHALL NOT enter model context, outline events, activity payloads, API responses after enrollment, or logs.
+
+#### Scenario: Change the active model
+- **WHEN** the owner changes the model in an environment compute profile
+- **THEN** subsequently admitted runs use the new model while queued and running snapshots and portable agent definitions remain unchanged
 
 #### Scenario: Refresh server ChatGPT authentication
 - **WHEN** a server run references a valid ChatGPT-managed Codex credential nearing expiry
@@ -78,7 +82,7 @@ Cancellation SHALL be idempotent, SHALL abort queued work immediately, SHALL sig
 - **THEN** the system creates a new linked run with the current configuration snapshot and retains the failed run unchanged
 
 ### Requirement: Exactly-once structured result commit
-The runtime SHALL validate a bounded structured result before any outline mutation. A successful server run SHALL commit its result events, terminal run provenance, projection updates, unique result record, and terminal status atomically so retries or lease recovery cannot duplicate output.
+The runtime SHALL validate and durably persist a bounded structured result before any outline mutation. A successful placement SHALL append one versioned `agent.result_committed` event, update projections, record the unique result identity, and settle the run atomically so retries or lease recovery cannot duplicate or partially expose output.
 
 #### Scenario: Completion transaction is retried
 - **WHEN** a worker repeats completion after an ambiguous database response
@@ -86,7 +90,25 @@ The runtime SHALL validate a bounded structured result before any outline mutati
 
 #### Scenario: Target is no longer live
 - **WHEN** a run finishes after its stable target note was trashed or purged
-- **THEN** the run terminates with `target_unavailable`, does not resurrect the target, and appends no outline result
+- **THEN** the run becomes `completed_unplaced`, retains its complete output, does not resurrect the target, and can place that output exactly once under a user-selected live node
+
+### Requirement: Intent-based server admission
+The desktop SHALL send a stable invocation ID, source node ID, skill ID, bounded prompt, and acknowledged outline revision. The server SHALL resolve canonical context, portable configuration, compute, credentials, and effective capabilities and SHALL use a canonical intent hash for idempotency independent of configuration revision.
+
+#### Scenario: Retry a lost admission response
+- **WHEN** the same invocation ID and intent are submitted more than once
+- **THEN** the server returns the existing run even if configuration changed after the first admission
+
+#### Scenario: Reuse an invocation ID with different input
+- **WHEN** an invocation ID is submitted with a different canonical intent hash
+- **THEN** admission fails with an idempotency conflict and no second run is created
+
+### Requirement: Durable global run observation
+Server runs SHALL outlive the slash popup and desktop process. The desktop SHALL persist remote run IDs and cursors, observe runs concurrently at application scope, and resume after transient disconnection without cancelling remote work.
+
+#### Scenario: Edit while several agents run
+- **WHEN** multiple server runs are queued or running
+- **THEN** the outline remains editable and synchronization continues while each run retains independent activity and cancellation state
 
 ### Requirement: Observable run APIs and local parity
 Authorized clients SHALL be able to invoke, list, inspect, cursor-poll activity, cancel, and retry runs within their bound outline. The local executor SHALL provide equivalent behavior through its local adapter. Raw reasoning, provider secrets, and unbounded fetched bodies SHALL NOT be exposed.

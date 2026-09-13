@@ -2,7 +2,8 @@ import { readdir, readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Pool } from 'pg'
-import { loadServerConfig } from './config.js'
+import { z } from 'zod'
+import { databaseUrl, readEnvironment, runCli } from './cli.js'
 
 export interface SqlMigration {
   name: string
@@ -30,7 +31,9 @@ export async function migrate(databaseUrl: string, directory: string): Promise<v
 
 const entry = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ''
 if (import.meta.url === entry) {
-  const config = loadServerConfig(process.env)
-  const directory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
-  await migrate(config.databaseUrl, directory)
+  await runCli(async () => {
+    const environment = readEnvironment(z.object({ DATABASE_URL: databaseUrl }))
+    const directory = resolve(dirname(fileURLToPath(import.meta.url)), '../migrations')
+    await migrate(environment.DATABASE_URL, directory)
+  })
 }

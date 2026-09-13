@@ -2,7 +2,6 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import {
   canonicalJson,
-  createInitialOutlineState,
   parseEventEnvelope,
   reduceOutlineEvent,
   sha256Hex,
@@ -10,7 +9,7 @@ import {
   type OutlineState,
 } from '@forage/domain'
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
-import { createOutlineSchema, findSystemNode, repairSystemNodes } from '@forage/document'
+import { createOutlineSchema, findSystemNode, queryCanonicalOutline } from '@forage/document'
 import {
   RepositoryError,
   referencedAssetIds,
@@ -23,9 +22,12 @@ import {
   type ServerRepository,
   type DispatcherAgentContext,
   type TokenScope,
+  noteProjectionsFromState,
+  NOTE_PROJECTOR_SCHEMA_VERSION,
+  type BoundPrincipal,
 } from './repository.js'
 import { PostgresAgentStore } from './postgresAgentStore.js'
-import { agentConfigurationSchema, parseStructuredResult, resolveEffectiveToolIds, runInputSchema, type RunInput, type StructuredResult } from '@forage/agent-runtime'
+import { portableAgentConfigurationSchema, parseStructuredResult, resolveEffectiveToolIds, runInputSchema, type RunInput, type StructuredResult } from '@forage/agent-runtime'
 import { automationPolicySetSchema } from '@forage/protocol'
 import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
@@ -66,62 +68,116 @@ export class PostgresServerRepository implements ServerRepository {
       if (existing.rowCount) throw new Error('The one-owner server is already bootstrapped.')
 
       const ownerId = `owner_${randomUUID()}`
-      const outlineId = `outline_${randomUUID()}`
-      const inboxId = `note_${randomUUID()}`
-      const dailyNotesId = `note_${randomUUID()}`
-      const editableId = `note_${randomUUID()}`
-      const now = new Date().toISOString()
-      const systemIds = [inboxId, dailyNotesId]
-      const repaired = repairSystemNodes({
-        type: 'doc',
-        content: [{
-          type: 'bulletList',
-          content: [{
-            type: 'listItem',
-            attrs: {
-              nodeId: editableId, nodeType: 'user', collapsed: false, bulletKind: 'bullet', completed: false,
-              systemRole: null, dailyDate: null,
-            },
-            content: [{ type: 'paragraph' }],
-          }],
-        }],
-      }, () => systemIds.shift()!)
-      const state = createInitialOutlineState(repaired.doc)
-      const checkpointId = `checkpoint_${randomUUID()}`
-      const integrityHash = await sha256Hex(canonicalJson(state))
-
       await client.query('INSERT INTO owners(id, email) VALUES ($1, $2)', [ownerId, email])
-      await client.query(
-        `INSERT INTO outlines(id, owner_id, name, api_inbox_id) VALUES ($1, $2, 'Notes', $3)`,
-        [outlineId, ownerId, inboxId],
+      const apiToken = await this.issueToken(client, ownerId, null, 'api', 'External note capture', ['notes:create'])
+      const deviceToken = await this.issueToken(
+        client, ownerId, null, 'device', 'Initial desktop',
+        ['sync', 'agents:read', 'agents:execute', 'agents:manage'],
       )
-      await client.query(
-        `INSERT INTO note_projections(outline_id, id, parent_id, text_content, created_at)
-         VALUES ($1, $2, NULL, 'Inbox', $5),
-                ($1, $3, NULL, 'Daily Notes', $5),
-                ($1, $4, NULL, '', $5)`,
-        [outlineId, inboxId, dailyNotesId, editableId, now],
+      return { ownerId, apiToken, deviceToken }
+    })
+  }
+
+  async claimOutline(
+    principal: Principal,
+    input: { outlineId: string; name: string },
+  ): Promise<{ outlineId: string; state: 'seeding' | 'ready' }> {
+    return this.transaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock($1)', [0x464f5242])
+      const existing = await client.query<{ id: string; state: 'seeding' | 'ready' }>(
+        'SELECT id, state FROM outlines WHERE owner_id = $1', [principal.ownerId],
       )
+      const current = existing.rows[0]
+      if (current) {
+        if (current.id !== input.outlineId || principal.outlineId !== current.id) {
+          throw new RepositoryError('conflict', 'This server already holds an outline.')
+        }
+        return { outlineId: current.id, state: current.state }
+      }
       await client.query(
-        `INSERT INTO outline_projections(outline_id, revision, state) VALUES ($1, 0, $2)`,
+        `INSERT INTO outlines(id, owner_id, name, api_inbox_id, state) VALUES ($1, $2, $3, NULL, 'seeding')`,
+        [input.outlineId, principal.ownerId, input.name],
+      )
+      // Every credential the owner already holds attaches to the outline they have just
+      // claimed. Binding only the claiming device would strand the capture token forever.
+      await client.query(
+        'UPDATE credentials SET outline_id = $2 WHERE owner_id = $1 AND outline_id IS NULL',
+        [principal.ownerId, input.outlineId],
+      )
+      return { outlineId: input.outlineId, state: 'seeding' as const }
+    })
+  }
+
+  async outlineState(outlineId: string): Promise<'seeding' | 'ready'> {
+    const result = await this.pool.query<{ state: 'seeding' | 'ready' }>(
+      'SELECT state FROM outlines WHERE id = $1', [outlineId],
+    )
+    if (!result.rows[0]) throw hiddenResourceError()
+    return result.rows[0].state
+  }
+
+  async seedOutline(
+    principal: BoundPrincipal,
+    state: OutlineState,
+  ): Promise<{ outlineId: string; revision: number; integrityHash: string }> {
+    const outlineId = principal.outlineId
+    const integrityHash = await sha256Hex(canonicalJson(state))
+    return this.transaction(async (client) => {
+      const outline = await client.query<{ state: 'seeding' | 'ready'; document_version: number }>(
+        'SELECT state, document_version FROM outlines WHERE id = $1 AND owner_id = $2 FOR UPDATE',
+        [outlineId, principal.ownerId],
+      )
+      if (!outline.rows[0]) throw hiddenResourceError()
+      if (outline.rows[0].state === 'ready') {
+        const existing = await client.query<{ integrity_hash: string }>(
+          'SELECT integrity_hash FROM outline_checkpoints WHERE outline_id = $1 AND revision = 0',
+          [outlineId],
+        )
+        if (existing.rows[0]?.integrity_hash === integrityHash) {
+          return { outlineId, revision: 0, integrityHash }
+        }
+        throw new RepositoryError('conflict', 'This outline has already been seeded.')
+      }
+
+      const referenced = [...referencedAssetIds(state)]
+      if (referenced.length) {
+        const complete = await client.query<{ asset_id: string }>(
+          'SELECT asset_id FROM assets WHERE owner_id = $1 AND completed_at IS NOT NULL AND asset_id = ANY($2::text[])',
+          [principal.ownerId, referenced],
+        )
+        const uploaded = new Set(complete.rows.map((row) => row.asset_id))
+        const missing = referenced.filter((assetId) => !uploaded.has(assetId))
+        if (missing.length) {
+          throw new RepositoryError('conflict', `The seed references assets that are not uploaded: ${missing.join(', ')}`)
+        }
+      }
+
+      const inbox = findSystemNode(createOutlineSchema().nodeFromJSON(state.doc), 'inbox')
+      if (!inbox) throw new RepositoryError('conflict', 'The seed document has no Inbox node.')
+
+      await client.query(
+        'INSERT INTO outline_projections(outline_id, revision, state) VALUES ($1, 0, $2)',
         [outlineId, state],
       )
       await client.query(
         `INSERT INTO outline_checkpoints
          (id, outline_id, revision, document_version, schema_epoch, state, integrity_hash)
-         VALUES ($1, $2, 0, 1, 1, $3, $4)`,
-        [checkpointId, outlineId, state, integrityHash],
+         VALUES ($1, $2, 0, $3, $4, $5, $6)`,
+        [`checkpoint_${randomUUID()}`, outlineId, outline.rows[0].document_version, state.schemaEpoch, state, integrityHash],
       )
-      const apiToken = await this.issueToken(client, ownerId, outlineId, 'api', 'External note capture', ['notes:create'])
-      const deviceToken = await this.issueToken(client, ownerId, outlineId, 'device', 'Initial desktop', ['sync', 'agents:read', 'agents:execute', 'agents:manage'])
-      return { ownerId, outlineId, inboxId, apiToken, deviceToken }
+      await client.query(
+        `UPDATE outlines SET state = 'ready', api_inbox_id = $2, schema_epoch = $3 WHERE id = $1`,
+        [outlineId, inbox.id, state.schemaEpoch],
+      )
+      await this.rebuildNoteIndex(client, outlineId, state, 0)
+      return { outlineId, revision: 0, integrityHash }
     })
   }
 
   private async issueToken(
     client: PoolClient,
     ownerId: string,
-    outlineId: string,
+    outlineId: string | null,
     kind: 'api' | 'device',
     name: string,
     scopes: TokenScope[],
@@ -161,7 +217,7 @@ export class PostgresServerRepository implements ServerRepository {
     return Number(result.rows[0].current_revision)
   }
 
-  async createNote(principal: Principal, key: string, input: NotesCreateRequest): Promise<CreateNoteResult> {
+  async createNote(principal: BoundPrincipal, key: string, input: NotesCreateRequest): Promise<CreateNoteResult> {
     return this.transaction(async (client) => {
       await this.recheckCredential(client, principal)
       const outline = await client.query<{ current_revision: string }>(
@@ -182,19 +238,11 @@ export class PostgresServerRepository implements ServerRepository {
         return { response: previous.rows[0].response, replayed: true }
       }
 
-      const projection = await client.query<{ state: OutlineState }>(
-        'SELECT state FROM outline_projections WHERE outline_id = $1', [principal.outlineId],
-      )
-      const inbox = projection.rows[0]
-        ? findSystemNode(createOutlineSchema().nodeFromJSON(projection.rows[0].state.doc), 'inbox')
-        : null
+      const canonicalProjection = await this.canonicalProjection(client, principal.outlineId, true)
+      const inbox = findSystemNode(createOutlineSchema().nodeFromJSON(canonicalProjection.state.doc), 'inbox')
       if (!inbox) throw new RepositoryError('conflict', 'The canonical Inbox is unavailable.')
       const parentId = input.parentId ?? inbox.id
-      const parent = await client.query(
-        `SELECT id FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false`,
-        [principal.outlineId, parentId],
-      )
-      if (!parent.rowCount) throw new RepositoryError('conflict', 'The requested parent does not exist or is deleted.')
+      requireLiveCanonicalNode(queryCanonicalOutline(canonicalProjection.state), parentId, 'target')
 
       const revision = Number(row.current_revision) + 1
       const noteId = `note_${randomUUID()}`
@@ -208,13 +256,10 @@ export class PostgresServerRepository implements ServerRepository {
         payload: { noteId, parentId, text: input.text, source: input.source, clientCreatedAt: input.clientCreatedAt },
       })
       await this.insertEvent(client, event)
-      await client.query(
-        `INSERT INTO note_projections(outline_id, id, parent_id, text_content, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [principal.outlineId, noteId, parentId, input.text, createdAt],
-      )
       await this.applyProjection(client, principal.outlineId, revision, event)
       await client.query('UPDATE outlines SET current_revision = $2 WHERE id = $1', [principal.outlineId, revision])
+      const latest = await this.canonicalProjection(client, principal.outlineId, true)
+      await this.rebuildNoteIndex(client, principal.outlineId, latest.state, revision)
       const response: NotesCreateResponse = { noteId, eventId, revision, parentId, origin: 'notes_api', createdAt }
       await client.query(
         `INSERT INTO idempotency_records(credential_id, key, request_hash, response)
@@ -227,40 +272,45 @@ export class PostgresServerRepository implements ServerRepository {
   }
 
   private async admitAutomaticRuns(
-    client: PoolClient, principal: Principal, noteId: string, capture: NotesCreateRequest, baseRevision: number,
+    client: PoolClient, principal: BoundPrincipal, noteId: string, capture: NotesCreateRequest, baseRevision: number,
   ): Promise<void> {
-    const [configurationResult, automationResult] = await Promise.all([
-      client.query<{ configuration: unknown }>(
+    const configurationResult = await client.query<{ configuration: unknown }>(
         'SELECT configuration FROM agent_configuration_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
-      ),
-      client.query<{ policies: unknown }>(
+      )
+    const automationResult = await client.query<{ policies: unknown }>(
         'SELECT policies FROM agent_automation_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
-      ),
-    ])
-    if (!configurationResult.rows[0] || !automationResult.rows[0]) return
-    const configuration = agentConfigurationSchema.parse(configurationResult.rows[0].configuration)
+      )
+    const computeResult = await client.query<{ provider: 'openai' | 'openai-codex'; model_id: string; credential_reference: string }>(
+        'SELECT provider,model_id,credential_reference FROM agent_compute_profiles WHERE outline_id=$1', [principal.outlineId],
+      )
+    if (!configurationResult.rows[0] || !automationResult.rows[0] || !computeResult.rows[0]) return
+    const configuration = portableAgentConfigurationSchema.parse(configurationResult.rows[0].configuration)
     const policies = automationPolicySetSchema.parse(automationResult.rows[0].policies)
+    const compute = computeResult.rows[0]
     const matches = await resolveAutomationMatches(
       policies,
       captureFacts(capture.text, capture.source),
       { text: capture.text, source: capture.source ?? {} },
       async (agentId) => {
         const agent = configuration.agents.find((candidate) => candidate.id === agentId)
-        if (!agent?.credentialRef || !this.dispatcherForAgent) return undefined
+        if (!agent || !this.dispatcherForAgent) return undefined
         const credential = await client.query(
           `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
-          [agent.credentialRef, principal.ownerId, principal.outlineId],
+          [compute.credential_reference, principal.ownerId, principal.outlineId],
         )
         if (!credential.rowCount) return undefined
-        return this.dispatcherForAgent({ ownerId: principal.ownerId, outlineId: principal.outlineId, agent })
+        return this.dispatcherForAgent({ ownerId: principal.ownerId, outlineId: principal.outlineId, agent: {
+          ...agent, modelId: compute.model_id, credentialRef: compute.credential_reference,
+        } })
       },
       AbortSignal.timeout(15_000),
     )
     for (const match of matches) {
       const skill = configuration.skills.find((candidate) => candidate.id === match.skillId)
       const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
-      const credentialRef = agent?.credentialRef
-      if (!skill || !agent || !credentialRef) continue
+      const credentialRef = compute.credential_reference
+      if (!skill || !agent) continue
+      const resolvedAgent = { ...agent, modelId: compute.model_id, credentialRef }
       const credential = await client.query(
         `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
         [credentialRef, principal.ownerId, principal.outlineId],
@@ -269,7 +319,7 @@ export class PostgresServerRepository implements ServerRepository {
       let effectiveToolIds: string[]
       try {
         effectiveToolIds = resolveEffectiveToolIds({
-          agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
+          agentToolIds: resolvedAgent.toolIds, requiredToolIds: skill.requiredToolIds,
           globallyEnabledToolIds: configuration.globallyEnabledToolIds,
           policyAllowedToolIds: configuration.globallyEnabledToolIds,
           executorSupportedToolIds: this.supportedAgentToolIds,
@@ -280,7 +330,7 @@ export class PostgresServerRepository implements ServerRepository {
         version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
-        credentialRef, agent, skill, effectiveToolIds,
+        credentialRef, agent: resolvedAgent, skill, effectiveToolIds,
         prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
         customTools: configuration.customTools,
       }
@@ -289,10 +339,10 @@ export class PostgresServerRepository implements ServerRepository {
          (id,owner_id,outline_id,trigger_kind,trigger_identity,source_note_id,target_note_id,input_snapshot,
           definition_snapshot,configuration_revision,credential_reference,status,max_attempts)
          VALUES ($1,$2,$3,'inbox_automation',$4,$5,$5,$6,$7,$8,$9,'queued',$10)
-         ON CONFLICT (outline_id,trigger_identity,configuration_revision) DO NOTHING`,
+         ON CONFLICT (outline_id,trigger_identity) DO NOTHING`,
         [runId, principal.ownerId, principal.outlineId,
           `capture:${noteId}:policy:${policies.revision}:skill:${skill.id}`, noteId, input,
-          { agent, skill, effectiveToolIds, policyId: match.policyId }, configuration.revision,
+          { agent: resolvedAgent, skill, effectiveToolIds, policyId: match.policyId }, configuration.revision,
           credentialRef, this.agentMaxAttempts],
       )
     }
@@ -331,7 +381,7 @@ export class PostgresServerRepository implements ServerRepository {
     return checkpoint
   }
 
-  async acceptEvents(principal: Principal, baseRevision: number, events: EventEnvelope[]) {
+  async acceptEvents(principal: BoundPrincipal, baseRevision: number, events: EventEnvelope[]) {
     return this.transaction(async (client) => {
       await this.recheckCredential(client, principal)
       const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
@@ -371,12 +421,16 @@ export class PostgresServerRepository implements ServerRepository {
         acknowledgements.push({ eventId: accepted.id, revision })
       }
       await client.query('UPDATE outlines SET current_revision = $2 WHERE id = $1', [principal.outlineId, revision])
+      if (revision !== currentRevision) {
+        const latest = await this.canonicalProjection(client, principal.outlineId, true)
+        await this.rebuildNoteIndex(client, principal.outlineId, latest.state, revision)
+      }
       return acknowledgements
     })
   }
 
   async initiateAsset(
-    principal: Principal,
+    principal: BoundPrincipal,
     input: Omit<AssetRecord, 'ownerId' | 'storageKey' | 'completed'>,
   ): Promise<AssetRecord> {
     const result = await this.pool.query<AssetRow>(
@@ -394,7 +448,7 @@ export class PostgresServerRepository implements ServerRepository {
     return record
   }
 
-  async completeAsset(principal: Principal, assetId: string, storageKey: string): Promise<AssetRecord> {
+  async completeAsset(principal: BoundPrincipal, assetId: string, storageKey: string): Promise<AssetRecord> {
     const result = await this.pool.query<AssetRow>(
       `UPDATE assets SET storage_key = $3, completed_at = COALESCE(completed_at, now())
        WHERE asset_id = $1 AND owner_id = $2
@@ -405,7 +459,7 @@ export class PostgresServerRepository implements ServerRepository {
     return assetFromRow(result.rows[0])
   }
 
-  async asset(principal: Principal, assetId: string): Promise<AssetRecord> {
+  async asset(principal: BoundPrincipal, assetId: string): Promise<AssetRecord> {
     const result = await this.pool.query<AssetRow>(
       `SELECT asset_id, owner_id, media_type, byte_size, storage_key, completed_at
        FROM assets WHERE asset_id = $1 AND owner_id = $2 AND completed_at IS NOT NULL`,
@@ -415,31 +469,28 @@ export class PostgresServerRepository implements ServerRepository {
     return assetFromRow(result.rows[0])
   }
 
-  async runAdmissionContext(principal: Principal, sourceNodeId: string, targetParentId: string) {
-    const notes = await this.pool.query<{ id: string; parent_id: string | null; text_content: string }>(
-      `WITH RECURSIVE ancestors AS (
-         SELECT id, parent_id, text_content, 1 AS depth FROM note_projections
-          WHERE outline_id = $1 AND id = $2 AND deleted = false
-         UNION ALL
-         SELECT parent.id, parent.parent_id, parent.text_content, child.depth + 1
-          FROM note_projections parent JOIN ancestors child ON child.parent_id = parent.id
-          WHERE parent.outline_id = $1 AND parent.deleted = false AND child.depth < 20
-       ) SELECT id, parent_id, text_content FROM ancestors`,
-      [principal.outlineId, targetParentId],
-    )
-    const source = await this.pool.query<{ text_content: string }>(
-      'SELECT text_content FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false',
-      [principal.outlineId, sourceNodeId],
-    )
-    if (!source.rows[0] || !notes.rows.some((note) => note.id === targetParentId)) throw hiddenResourceError()
+  async runAdmissionContext(principal: BoundPrincipal, sourceNodeId: string, targetParentId: string) {
+    const projection = await this.canonicalProjection(this.pool, principal.outlineId)
+    const canonical = queryCanonicalOutline(projection.state)
+    const source = requireLiveCanonicalNode(canonical, sourceNodeId, 'source')
+    const target = requireLiveCanonicalNode(canonical, targetParentId, 'target')
     return {
-      sourceText: source.rows[0].text_content,
-      context: [...notes.rows].reverse().map((note) => note.text_content),
-      baseRevision: await this.currentRevision(principal.outlineId),
+      sourceText: source.text,
+      context: canonical.ancestors(target.id).map((note) => note.text),
+      baseRevision: projection.revision,
     }
   }
 
   async searchOutline(outlineId: string, query: string, limit = 20) {
+    const status = await this.noteIndexStatus(outlineId)
+    if (!status.ready) {
+      const projection = await this.canonicalProjection(this.pool, outlineId)
+      const needle = query.trim().toLocaleLowerCase()
+      return queryCanonicalOutline(projection.state).nodes()
+        .filter((node) => node.text.toLocaleLowerCase().includes(needle))
+        .slice(0, Math.max(1, Math.min(limit, 50)))
+        .map((node) => ({ nodeId: node.id, text: node.text.slice(0, 2_000) }))
+    }
     const result = await this.pool.query<{ id: string; text_content: string }>(
       `SELECT id,text_content FROM note_projections WHERE outline_id=$1 AND deleted=false
        AND text_content ILIKE $2 ORDER BY created_at DESC LIMIT $3`,
@@ -448,8 +499,54 @@ export class PostgresServerRepository implements ServerRepository {
     return result.rows.map((row) => ({ nodeId: row.id, text: row.text_content.slice(0, 2_000) }))
   }
 
+  async noteIndexStatus(outlineId: string) {
+    const result = await this.pool.query<{ source_revision: string; schema_version: number; current_revision: string; rebuild_status: string }>(
+      `SELECT s.source_revision,s.schema_version,s.rebuild_status,o.current_revision
+       FROM outlines o LEFT JOIN note_projection_status s ON s.outline_id=o.id WHERE o.id=$1`,
+      [outlineId],
+    )
+    const row = result.rows[0]
+    if (!row) throw hiddenResourceError()
+    const sourceRevision = Number(row.source_revision ?? -1)
+    return {
+      ready: row.rebuild_status === 'ready' && row.schema_version === NOTE_PROJECTOR_SCHEMA_VERSION && sourceRevision === Number(row.current_revision),
+      sourceRevision,
+      schemaVersion: row.schema_version ?? 0,
+    }
+  }
+
+  async reconcileNoteProjections(): Promise<number> {
+    const outlines = await this.pool.query<{
+      outline_id: string; revision: string; current_revision: string; state: OutlineState
+      source_revision: string | null; schema_version: number | null; rebuild_status: string | null; note_count: string
+    }>(
+      `SELECT p.outline_id,p.revision,p.state,o.current_revision,
+          s.source_revision,s.schema_version,s.rebuild_status,
+          (SELECT count(*) FROM note_projections n WHERE n.outline_id=p.outline_id AND n.deleted=false) AS note_count
+       FROM outline_projections p
+       JOIN outlines o ON o.id=p.outline_id
+       LEFT JOIN note_projection_status s ON s.outline_id=p.outline_id`,
+    )
+    const stale = outlines.rows.filter((outline) => {
+      const expectedCount = noteProjectionsFromState(outline.state).length
+      return outline.rebuild_status !== 'ready'
+        || outline.schema_version !== NOTE_PROJECTOR_SCHEMA_VERSION
+        || Number(outline.source_revision ?? -1) !== Number(outline.revision)
+        || Number(outline.revision) !== Number(outline.current_revision)
+        || Number(outline.note_count) !== expectedCount
+    })
+    for (const outline of stale) {
+      await this.transaction(async (client) => {
+        const current = await this.canonicalProjection(client, outline.outline_id, true)
+        await this.rebuildNoteIndex(client, outline.outline_id, current.state, current.revision)
+      })
+    }
+    return stale.length
+  }
+
   async commitAgentResult(runId: string, workerId: string, rawResult: StructuredResult) {
     const result = parseStructuredResult(rawResult)
+    await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, result)
     const committed = await this.transaction(async (client) => {
       const selected = await client.query<{
         id: string; owner_id: string; outline_id: string; input_snapshot: unknown; status: string; lease_owner: string | null
@@ -461,25 +558,16 @@ export class PostgresServerRepository implements ServerRepository {
         'SELECT first_revision, last_revision, root_note_ids FROM agent_run_results WHERE run_id = $1', [runId],
       )
       if (existing.rows[0]) return {
+        placement: 'placed' as const,
         firstRevision: Number(existing.rows[0].first_revision), lastRevision: Number(existing.rows[0].last_revision), rootNoteIds: existing.rows[0].root_note_ids,
       }
       if (run.status !== 'running' || run.lease_owner !== workerId) throw new RepositoryError('conflict', 'Run lease was lost.')
       if (run.cancel_requested_at) throw new RepositoryError('conflict', 'Run cancellation was requested.')
       const input = runInputSchema.parse(run.input_snapshot)
-      const target = await client.query(
-        'SELECT id FROM note_projections WHERE outline_id = $1 AND id = $2 AND deleted = false FOR UPDATE',
-        [run.outline_id, input.target.parentId],
-      )
-      if (!target.rowCount) {
-        await client.query(
-          `UPDATE agent_runs SET status='cancelled', error_code='target_unavailable', lease_owner=NULL,
-           lease_expires_at=NULL, updated_at=now() WHERE id=$1`, [runId],
-        )
-        await client.query(
-          `UPDATE agent_run_attempts SET status='cancelled', error_code='target_unavailable', finished_at=now()
-           WHERE run_id=$1 AND attempt_number=$2`, [runId, run.attempt_count],
-        )
-        return null
+      const projection = await this.canonicalProjection(client, run.outline_id, true)
+      const target = queryCanonicalOutline(projection.state).resolve(input.target.parentId)
+      if (target.state !== 'live') {
+        return { placement: 'unplaced' as const, reason: `target_${target.state}` }
       }
       const imageIds = collectImageIds(result)
       if (imageIds.length) {
@@ -492,53 +580,31 @@ export class PostgresServerRepository implements ServerRepository {
       const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
         'SELECT current_revision, document_version, schema_epoch FROM outlines WHERE id=$1 FOR UPDATE', [run.outline_id],
       )
-      let revision = Number(outline.rows[0]!.current_revision)
-      const firstRevision = revision + 1
-      const rootNoteIds: string[] = []
-      const changeGroupId = `run_${runId}`.slice(0, 128)
+      const revision = Number(outline.rows[0]!.current_revision) + 1
+      const nodes = assignResultNodeIds(result.nodes, runId)
+      const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
+      if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
       const provenance = {
         runId, skillId: input.skill.id, ...(input.source.nodeId ? { sourceNodeId: input.source.nodeId } : {}),
         sourceUrls: result.sources.map((source) => source.url).slice(0, 20),
       }
-      const addNodes = async (nodes: StructuredResult['nodes'], parentId: string): Promise<void> => {
-        for (const node of nodes) {
-          revision += 1
-          if (node.type === 'image') {
-            const event = parseEventEnvelope({
-              id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
-              deviceId: `agent_${this.instanceId}`, type: 'asset.reference_added', eventVersion: 1,
-              documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
-              baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
-              changeGroupId, occurredAt: new Date().toISOString(), payload: { assetId: node.assetId, alt: node.alt },
-            })
-            await this.insertEvent(client, event); await this.applyProjection(client, run.outline_id, revision, event)
-            continue
-          }
-          const noteId = `note_${randomUUID()}`
-          if (parentId === input.target.parentId) rootNoteIds.push(noteId)
-          const event = parseEventEnvelope({
-            id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
-            deviceId: `agent_${this.instanceId}`, type: 'note.created', eventVersion: 1,
-            documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
-            baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
-            changeGroupId, occurredAt: new Date().toISOString(), payload: { noteId, parentId, text: node.text },
-          })
-          await this.insertEvent(client, event)
-          await client.query(
-            `INSERT INTO note_projections(outline_id,id,parent_id,text_content,created_at) VALUES ($1,$2,$3,$4,$5)`,
-            [run.outline_id, noteId, parentId, node.text, event.occurredAt],
-          )
-          await this.applyProjection(client, run.outline_id, revision, event)
-          if (node.children?.length) await addNodes(node.children, noteId)
-        }
-      }
-      await addNodes(result.nodes, input.target.parentId)
-      if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
-      const settled = { firstRevision, lastRevision: revision, rootNoteIds }
+      const event = parseEventEnvelope({
+        id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
+        deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: 1,
+        documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+        baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
+        changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
+        payload: { runId, targetNodeId: input.target.parentId, nodes, sources: result.sources },
+      })
+      await this.insertEvent(client, event)
+      await this.applyProjection(client, run.outline_id, revision, event)
+      const settled = { firstRevision: revision, lastRevision: revision, rootNoteIds }
       await client.query('UPDATE outlines SET current_revision=$2 WHERE id=$1', [run.outline_id, revision])
+      const latest = await this.canonicalProjection(client, run.outline_id, true)
+      await this.rebuildNoteIndex(client, run.outline_id, latest.state, revision)
       await client.query(
         `INSERT INTO agent_run_results(run_id,result_identity,first_revision,last_revision,root_note_ids)
-         VALUES ($1,$2,$3,$4,$5)`, [runId, `result:${runId}`, firstRevision, revision, rootNoteIds],
+         VALUES ($1,$2,$3,$4,$5)`, [runId, `result:${runId}`, revision, revision, rootNoteIds],
       )
       await client.query(
         `UPDATE agent_run_attempts SET status='completed',finished_at=now() WHERE run_id=$1 AND attempt_number=$2`,
@@ -548,13 +614,86 @@ export class PostgresServerRepository implements ServerRepository {
         `UPDATE agent_runs SET status='completed',error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
         [runId],
       )
-      return settled
+      return { placement: 'placed' as const, ...settled }
     })
-    if (!committed) throw new RepositoryError('conflict', 'The target is unavailable.')
+    if (committed.placement === 'unplaced') {
+      await this.agentStore.completeUnplaced(runId, workerId, committed.reason)
+    }
     return committed
   }
 
-  private async requireCompletedAssets(client: PoolClient, principal: Principal, event: EventEnvelope): Promise<void> {
+  async placeAgentResult(principal: BoundPrincipal, runId: string, targetNodeId: string) {
+    return this.transaction(async (client) => {
+      const selected = await client.query<{
+        owner_id: string; outline_id: string; input_snapshot: unknown; status: string
+      }>('SELECT owner_id,outline_id,input_snapshot,status FROM agent_runs WHERE id=$1 AND outline_id=$2 FOR UPDATE', [runId, principal.outlineId])
+      const run = selected.rows[0]
+      if (!run) throw hiddenResourceError()
+      const existing = await client.query<{ first_revision: string; last_revision: string; root_note_ids: string[] }>(
+        'SELECT first_revision,last_revision,root_note_ids FROM agent_run_results WHERE run_id=$1', [runId],
+      )
+      if (existing.rows[0]) return {
+        firstRevision: Number(existing.rows[0].first_revision),
+        lastRevision: Number(existing.rows[0].last_revision),
+        rootNoteIds: existing.rows[0].root_note_ids,
+      }
+      if (run.status !== 'completed_unplaced') throw new RepositoryError('conflict', 'Run output is not awaiting placement.')
+      const output = await client.query<{ result_identity: string; structured_output: StructuredResult }>(
+        'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1 FOR UPDATE', [runId],
+      )
+      if (!output.rows[0]) throw new RepositoryError('conflict', 'Persisted run output is unavailable.')
+      const result = parseStructuredResult(output.rows[0].structured_output)
+      const projection = await this.canonicalProjection(client, run.outline_id, true)
+      requireLiveCanonicalNode(queryCanonicalOutline(projection.state), targetNodeId, 'target')
+      const imageIds = collectImageIds(result)
+      if (imageIds.length) {
+        const assets = await client.query(
+          'SELECT asset_id FROM assets WHERE owner_id=$1 AND completed_at IS NOT NULL AND asset_id = ANY($2::text[])',
+          [run.owner_id, imageIds],
+        )
+        if (assets.rowCount !== imageIds.length) throw new RepositoryError('conflict', 'Structured result references an unavailable asset.')
+      }
+      const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
+        'SELECT current_revision,document_version,schema_epoch FROM outlines WHERE id=$1 FOR UPDATE', [run.outline_id],
+      )
+      const revision = Number(outline.rows[0]!.current_revision) + 1
+      const input = runInputSchema.parse(run.input_snapshot)
+      const nodes = assignResultNodeIds(result.nodes, runId)
+      const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
+      if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
+      const event = parseEventEnvelope({
+        id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
+        deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: 1,
+        documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+        baseRevision: revision - 1, revision, origin: 'agent',
+        agentProvenance: {
+          runId, skillId: input.skill.id, ...(input.source.nodeId ? { sourceNodeId: input.source.nodeId } : {}),
+          sourceUrls: result.sources.map((source) => source.url).slice(0, 20),
+        },
+        changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
+        payload: { runId, targetNodeId, nodes, sources: result.sources },
+      })
+      await this.insertEvent(client, event)
+      await this.applyProjection(client, run.outline_id, revision, event)
+      await client.query('UPDATE outlines SET current_revision=$2 WHERE id=$1', [run.outline_id, revision])
+      const latest = await this.canonicalProjection(client, run.outline_id, true)
+      await this.rebuildNoteIndex(client, run.outline_id, latest.state, revision)
+      await client.query(
+        `INSERT INTO agent_run_results(run_id,result_identity,first_revision,last_revision,root_note_ids)
+         VALUES ($1,$2,$3,$3,$4)`, [runId, output.rows[0].result_identity, revision, rootNoteIds],
+      )
+      await client.query(
+        `UPDATE agent_run_outputs SET placed_at=now(),target_note_id=$2 WHERE run_id=$1`, [runId, targetNodeId],
+      )
+      await client.query(
+        `UPDATE agent_runs SET status='completed',placement_error=NULL,target_note_id=$2,updated_at=now() WHERE id=$1`,
+        [runId, targetNodeId],
+      )
+      return { firstRevision: revision, lastRevision: revision, rootNoteIds }
+    })
+  }
+
+  private async requireCompletedAssets(client: PoolClient, principal: BoundPrincipal, event: EventEnvelope): Promise<void> {
     const ids = referencedAssetIds(event.payload)
     if (ids.length === 0) return
     const result = await client.query<{ asset_id: string }>(
@@ -597,6 +736,49 @@ export class PostgresServerRepository implements ServerRepository {
       `UPDATE outline_projections SET revision = $2, state = $3, updated_at = now() WHERE outline_id = $1`,
       [outlineId, revision, next],
     )
+  }
+
+  private async rebuildNoteIndex(client: PoolClient, outlineId: string, state: OutlineState, revision: number): Promise<void> {
+    const notes = noteProjectionsFromState(state).map((note) => ({ id: note.id, parent_id: note.parentId, text_content: note.text }))
+    await client.query(
+      `INSERT INTO note_projection_status(outline_id,source_revision,schema_version,rebuild_status,updated_at)
+       VALUES ($1,$2,$3,'rebuilding',now())
+       ON CONFLICT (outline_id) DO UPDATE SET rebuild_status='rebuilding',updated_at=now()`,
+      [outlineId, revision, NOTE_PROJECTOR_SCHEMA_VERSION],
+    )
+    await client.query('DELETE FROM note_projections WHERE outline_id=$1', [outlineId])
+    await client.query(
+      `INSERT INTO note_projections(outline_id, id, parent_id, text_content, deleted, created_at)
+       SELECT $1, note.id, note.parent_id, note.text_content, false, now()
+       FROM jsonb_to_recordset($2::jsonb) AS note(id text, parent_id text, text_content text)
+       ON CONFLICT (outline_id, id) DO UPDATE SET
+         parent_id = EXCLUDED.parent_id,
+         text_content = EXCLUDED.text_content,
+         deleted = false`,
+      [outlineId, JSON.stringify(notes)],
+    )
+    await client.query(
+      `UPDATE note_projection_status SET source_revision=$2,schema_version=$3,rebuild_status='ready',updated_at=now()
+       WHERE outline_id=$1`,
+      [outlineId, revision, NOTE_PROJECTOR_SCHEMA_VERSION],
+    )
+  }
+
+  private async canonicalProjection(
+    connection: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
+    outlineId: string,
+    lock = false,
+  ): Promise<{ state: OutlineState; revision: number }> {
+    const result = await connection.query<{ state: OutlineState; revision: string }>(
+      `SELECT p.state, p.revision FROM outline_projections p
+       JOIN outlines o ON o.id=p.outline_id AND o.current_revision=p.revision
+       WHERE p.outline_id=$1${lock ? ' FOR UPDATE OF p' : ''}`,
+      [outlineId],
+    )
+    if (!result.rows[0]) {
+      throw new RepositoryError('outline_not_synchronized', 'The canonical outline projection is not synchronized.', 'synchronize_outline')
+    }
+    return { state: result.rows[0].state, revision: Number(result.rows[0].revision) }
   }
 
   private async transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -673,8 +855,33 @@ function collectImageIds(result: StructuredResult): string[] {
   return [...found]
 }
 
+function assignResultNodeIds(nodes: StructuredResult['nodes'], runId: string, prefix = ''): Array<
+  | { type: 'text'; nodeId: string; text: string; children?: ReturnType<typeof assignResultNodeIds> }
+  | { type: 'image'; assetId: string; alt: string }
+> {
+  return nodes.map((node, index) => node.type === 'image' ? node : ({
+    type: 'text' as const, nodeId: `note_${runId}_${prefix}${index}`.slice(0, 128), text: node.text,
+    ...(node.children?.length ? { children: assignResultNodeIds(node.children, runId, `${prefix}${index}_`) } : {}),
+  }))
+}
+
 function hiddenResourceError(): RepositoryError {
   return new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+}
+
+function canonicalNodeError(kind: 'source' | 'target', state: 'missing' | 'trashed'): RepositoryError {
+  const code = `${kind}_${state}` as 'source_missing' | 'source_trashed' | 'target_missing' | 'target_trashed'
+  return new RepositoryError(code, `The ${kind} node is ${state}.`, state === 'trashed' ? 'restore_or_choose_another' : 'choose_another')
+}
+
+function requireLiveCanonicalNode(
+  query: ReturnType<typeof queryCanonicalOutline>,
+  nodeId: string,
+  kind: 'source' | 'target',
+) {
+  const resolution = query.resolve(nodeId)
+  if (resolution.state !== 'live') throw canonicalNodeError(kind, resolution.state)
+  return resolution.node
 }
 
 function hashSecret(secret: string): string {

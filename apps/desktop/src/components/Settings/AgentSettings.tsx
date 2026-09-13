@@ -1,5 +1,4 @@
-import { useMemo, useState } from 'react'
-import { codexModelOptions } from '../../agent/client'
+import { useState } from 'react'
 import {
   type AgentDefinition,
   type AgentDraft,
@@ -12,7 +11,7 @@ import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ConfirmButton } from './ConfirmButton'
 
 const EMPTY_AGENT: AgentDraft = {
-  name: '', description: '', systemPrompt: '', modelId: '', toolIds: [],
+  name: '', description: '', systemPrompt: '', toolIds: [],
 }
 
 function AgentForm({ initial, tools, onSave, onCancel }: {
@@ -21,9 +20,7 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
   onSave: (draft: AgentDraft) => void
   onCancel: () => void
 }) {
-  const authMode = useSettingsStore((state) => state.authMode)
   const [draft, setDraft] = useState<AgentDraft>(initial)
-  const models = useMemo(() => codexModelOptions(authMode), [authMode])
   const update = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => {
     setDraft((valueBefore) => ({ ...valueBefore, [key]: value }))
   }
@@ -33,12 +30,6 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
       <label>Agent name<input aria-label="Agent name" value={draft.name} onChange={(event) => update('name', event.target.value)} /></label>
       <label>Description<input aria-label="Agent description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></label>
       <label>Instructions<textarea aria-label="Agent instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></label>
-      <label>Model
-        <select aria-label="Agent model" value={draft.modelId} onChange={(event) => update('modelId', event.target.value)}>
-          <option value="">Inherit global model</option>
-          {models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-        </select>
-      </label>
       <fieldset className="agent-tool-list"><legend>Allowed tools</legend>
         {tools.map((tool) => (
           <SwitchFieldInput
@@ -95,7 +86,7 @@ function AgentRow({ agent, onEdit, onRemove }: {
       <span>
         <strong>{agent.name}</strong>
         <small>{agent.description}</small>
-        <code>{agent.modelId || 'Global model'} · {agent.toolIds.length ? `${agent.toolIds.length} tool(s)` : 'No tools'}</code>
+        <code>{agent.toolIds.length ? `${agent.toolIds.length} tool(s)` : 'No tools'} · Uses active Compute model</code>
       </span>
       <div className="tool-setting-actions">
         <button type="button" onClick={onEdit}>Edit</button>

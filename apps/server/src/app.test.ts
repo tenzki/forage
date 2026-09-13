@@ -1,6 +1,28 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildServer, InMemoryServerRepository } from './index'
+import { buildServer, InMemoryServerRepository, requireBoundOutline } from './index'
+import { createInitialOutlineState } from '@forage/domain'
+import { repairSystemNodes } from '@forage/document'
+
+/** The document a freshly seeded outline starts from: Inbox, Daily Notes, one empty bullet. */
+export function seedDocumentState(ids: { inbox: string; daily: string; bullet: string }) {
+  const systemIds = [ids.inbox, ids.daily]
+  const repaired = repairSystemNodes({
+    type: 'doc',
+    content: [{
+      type: 'bulletList',
+      content: [{
+        type: 'listItem',
+        attrs: {
+          nodeId: ids.bullet, nodeType: 'user', collapsed: false, bulletKind: 'bullet',
+          completed: false, systemRole: null, dailyDate: null,
+        },
+        content: [{ type: 'paragraph' }],
+      }],
+    }],
+  }, () => systemIds.shift()!)
+  return createInitialOutlineState(repaired.doc)
+}
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,9 +35,19 @@ import { InMemoryProviderCredentialStore, ServerCredentialService } from './cred
 const servers: Array<ReturnType<typeof buildServer>> = []
 const assetRoots: string[] = []
 
-async function testServer() {
+async function testServer(options: { seed?: boolean } = {}) {
   const repository = new InMemoryServerRepository({ instanceId: 'instance-test' })
   const bootstrap = await repository.bootstrapOwner('owner@test.invalid')
+  const outlineId = 'outline_test'
+  const inboxId = 'note_inbox'
+  const unbound = await repository.authenticate(bootstrap.deviceToken, 'sync')
+  await repository.claimOutline(unbound, { outlineId, name: 'Notes' })
+  if (options.seed !== false) {
+    const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'sync'))
+    await repository.seedOutline(device, seedDocumentState({
+      inbox: inboxId, daily: 'note_daily', bullet: 'note_bullet',
+    }))
+  }
   const assetRoot = await mkdtemp(join(tmpdir(), 'forage-app-assets-'))
   assetRoots.push(assetRoot)
   const credentialService = new ServerCredentialService(new InMemoryProviderCredentialStore(), {
@@ -26,7 +58,7 @@ async function testServer() {
     assetStorage: new FileSystemAssetStorage(assetRoot), logger: false,
   })
   servers.push(app)
-  return { app, repository, ...bootstrap }
+  return { app, repository, outlineId, inboxId, ...bootstrap }
 }
 
 afterEach(async () => {
@@ -101,6 +133,7 @@ describe('Forage server', () => {
     const transform = new Transform(before)
       .setNodeMarkup(oldInboxPos, undefined, { ...before.nodeAt(oldInboxPos)!.attrs, systemRole: null })
       .setNodeMarkup(replacementPos, undefined, { ...before.nodeAt(replacementPos)!.attrs, systemRole: 'inbox' })
+      .replaceWith(replacementPos + 2, replacementPos + 2, before.type.schema.text('Updated desktop bullet'))
     const batch = captureStepBatch(before, transform.steps)
     const event = parseEventEnvelope({
       id: 'event-transfer-inbox', outlineId, actorId: ownerId, deviceId: 'device-test',
@@ -112,14 +145,16 @@ describe('Forage server', () => {
         afterHash: await sha256Hex(canonicalJson(transform.doc.toJSON())),
       },
     })
-    const device = await repository.authenticate(deviceToken, 'sync')
+    const device = requireBoundOutline(await repository.authenticate(deviceToken, 'sync'))
     await repository.acceptEvents(device, 0, [event])
-    const api = await repository.authenticate(apiToken, 'notes:create')
+    const api = requireBoundOutline(await repository.authenticate(apiToken, 'notes:create'))
 
     const created = await repository.createNote(api, 'role-routed', { text: 'Role routed' })
+    const admission = await repository.runAdmissionContext(device, replacementId, replacementId)
 
     expect(created.response.parentId).toBe(replacementId)
     expect(created.response.parentId).not.toBe(inboxId)
+    expect(admission.sourceText).toBe('Updated desktop bullet')
   })
 
   it('replays an identical idempotent retry and rejects changed input for the same key', async () => {
@@ -158,6 +193,29 @@ describe('Forage server', () => {
     await expect(repository.authenticate(apiToken, 'agents:read')).rejects.toThrow(/scope/i)
   })
 
+  it('reports readiness as independent capabilities and does not gate editing on compute', async () => {
+    const { app, deviceToken, outlineId, apiToken } = await testServer()
+    const readiness = await app.inject({
+      method: 'GET', url: `/api/v1/outlines/${outlineId}/readiness`,
+      headers: { authorization: `Bearer ${deviceToken}` },
+    })
+    expect(readiness.statusCode).toBe(200)
+    expect(readiness.json()).toMatchObject({
+      connection: { ready: true },
+      outlineSync: { ready: true, revision: 0 },
+      agentConfiguration: { ready: false, recoveryAction: 'provision_configuration' },
+      computeProfile: { ready: false, recoveryAction: 'configure_compute' },
+      worker: { ready: true },
+      noteIndex: { ready: true, revision: 0 },
+    })
+    const note = await app.inject({
+      method: 'POST', url: '/api/v1/notes',
+      headers: { authorization: `Bearer ${apiToken}`, 'idempotency-key': 'sync-without-compute' },
+      payload: { text: 'Editing still works' },
+    })
+    expect(note.statusCode).toBe(201)
+  })
+
   it('publishes server configuration, enrolls credentials, and manages a manual run without exposing secrets', async () => {
     const { app, apiToken, deviceToken, outlineId, inboxId } = await testServer()
     const headers = { authorization: `Bearer ${deviceToken}` }
@@ -184,6 +242,11 @@ describe('Forage server', () => {
     expect(enrolled.statusCode).toBe(201)
     expect(enrolled.body).not.toContain('very-long-secret')
     const credentialRef = enrolled.json().id
+    const compute = await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/compute-profile`, headers,
+      payload: { baseRevision: 0, profile: { version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef } },
+    })
+    expect(compute.statusCode).toBe(200)
 
     const admitted = await app.inject({
       method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`, headers: { ...headers, 'idempotency-key': 'manual-1' },
@@ -198,6 +261,141 @@ describe('Forage server', () => {
     expect(cancelled.json()).toMatchObject({ runId, status: 'cancelled' })
     const retry = await app.inject({ method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs/${runId}/retry`, headers })
     expect(retry.json()).toMatchObject({ retryOfRunId: runId, status: 'queued' })
+
+    const intent = {
+      version: 2, invocationId: 'invocation-stable', sourceNodeId: inboxId,
+      skillId: 'research', prompt: 'Use canonical context.', acknowledgedOutlineRevision: 0,
+    }
+    const firstIntent = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
+      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: intent,
+    })
+    const replayedIntent = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
+      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: intent,
+    })
+    expect(replayedIntent.json().runId).toBe(firstIntent.json().runId)
+    const changedIntent = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
+      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: { ...intent, prompt: 'Different.' },
+    })
+    expect(changedIntent.statusCode).toBe(409)
+
+    const missingSource = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
+      headers: { ...headers, 'idempotency-key': 'missing-source' },
+      payload: { ...intent, invocationId: 'missing-source', sourceNodeId: 'note_missing' },
+    })
+    expect(missingSource.statusCode).toBe(409)
+    expect(missingSource.json().error.code).toBe('source_missing')
+  })
+
+  it('uses the canonical outline when the in-memory search cache is missing a source', async () => {
+    const { repository, deviceToken, outlineId, inboxId } = await testServer()
+    const principal = requireBoundOutline(await repository.authenticate(deviceToken, 'agents:execute'))
+    ;(repository as unknown as { notes: Map<string, unknown> }).notes.delete(inboxId)
+    await expect(repository.runAdmissionContext(principal, inboxId, inboxId)).resolves.toMatchObject({ sourceText: 'Inbox' })
+    expect(await repository.currentRevision(outlineId)).toBe(0)
+  })
+
+  it('preserves desktop configuration for skills this server cannot execute yet', async () => {
+    const { app, deviceToken, outlineId } = await testServer()
+    const configuration = {
+      version: 1, revision: 1,
+      agents: [{
+        id: 'agent', name: 'Agent', description: 'Desktop agent', systemPrompt: 'Help.',
+        modelId: 'gpt-5', toolIds: ['web_read', 'generate_image'],
+      }],
+      skills: [{
+        id: 'image', label: 'image', description: 'Make an image', systemPrompt: 'Create it.',
+        agentId: 'agent', requiredToolIds: ['generate_image'],
+      }],
+      customTools: [], globallyEnabledToolIds: ['web_read', 'generate_image'],
+    }
+
+    const published = await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`,
+      headers: { authorization: `Bearer ${deviceToken}` },
+      payload: { baseRevision: 0, configuration },
+    })
+
+    expect(published.statusCode).toBe(200)
+    expect(published.json().configuration).toEqual({
+      ...configuration, version: 2,
+      agents: configuration.agents.map(({ modelId: _modelId, ...agent }) => agent),
+    })
+  })
+
+  it('imports a desktop ChatGPT credential without returning its tokens', async () => {
+    const { app, deviceToken, outlineId } = await testServer()
+    const imported = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-credentials/import`,
+      headers: { authorization: `Bearer ${deviceToken}` },
+      payload: {
+        provider: 'openai-codex', accessToken: 'access-token-that-is-long-enough',
+        refreshToken: 'refresh-token-that-is-long-enough', accountId: 'account-1',
+        expiresAt: '2026-09-14T08:00:00.000Z',
+      },
+    })
+
+    expect(imported.statusCode).toBe(201)
+    expect(imported.json()).toMatchObject({ provider: 'openai-codex', status: 'connected' })
+    expect(imported.body).not.toContain('access-token')
+    expect(imported.body).not.toContain('refresh-token')
+  })
+
+  it.each([
+    ['GET', '/api/v1/outlines/outline_test/checkpoint'],
+    ['GET', '/api/v1/outlines/outline_test/events?afterRevision=0'],
+    ['GET', '/api/v1/outlines/outline_test/agent-configuration'],
+  ])('refuses %s %s while the outline is seeding', async (method, url) => {
+    const { app, deviceToken } = await testServer({ seed: false })
+    const response = await app.inject({
+      method: method as 'GET', url, headers: { authorization: `Bearer ${deviceToken}` },
+    })
+    expect(response.statusCode).toBe(409)
+    expect(response.json().error.message).toMatch(/not been seeded/i)
+  })
+
+  it('refuses note capture while the outline is seeding', async () => {
+    const { app, apiToken } = await testServer({ seed: false })
+    const response = await app.inject({
+      method: 'POST', url: '/api/v1/notes',
+      headers: { authorization: `Bearer ${apiToken}`, 'idempotency-key': 'seed-1' },
+      payload: { text: 'hello' },
+    })
+    expect(response.statusCode).toBe(409)
+  })
+
+  it('claims and seeds a blank server over HTTP', async () => {
+    const repository = new InMemoryServerRepository({ instanceId: 'instance-blank' })
+    const bootstrap = await repository.bootstrapOwner('owner@test.invalid')
+    const assetRoot = await mkdtemp(join(tmpdir(), 'forage-app-assets-'))
+    assetRoots.push(assetRoot)
+    const app = buildServer({
+      repository, assetStorage: new FileSystemAssetStorage(assetRoot), logger: false,
+    })
+    servers.push(app)
+    const headers = { authorization: `Bearer ${bootstrap.deviceToken}` }
+
+    const claimed = await app.inject({
+      method: 'POST', url: '/api/v1/outlines', headers,
+      payload: { outlineId: 'outline_http', name: 'Notes' },
+    })
+    expect(claimed.statusCode).toBe(201)
+    expect(claimed.json()).toEqual({ outlineId: 'outline_http', state: 'seeding' })
+
+    const seeded = await app.inject({
+      method: 'PUT', url: '/api/v1/outlines/outline_http/seed', headers,
+      payload: { state: seedDocumentState({ inbox: 'note_inbox', daily: 'note_daily', bullet: 'note_bullet' }) },
+    })
+    expect(seeded.statusCode).toBe(200)
+    expect(seeded.json()).toMatchObject({ outlineId: 'outline_http', revision: 0 })
+
+    const checkpoint = await app.inject({
+      method: 'GET', url: '/api/v1/outlines/outline_http/checkpoint', headers,
+    })
+    expect(checkpoint.statusCode).toBe(200)
   })
 
   it('atomically admits de-duplicated automation only for new canonical Inbox captures', async () => {
@@ -205,23 +403,34 @@ describe('Forage server', () => {
       instanceId: 'automation', supportedAgentToolIds: ['youtube_transcript'], credentialAvailable: async () => true,
     })
     const bootstrap = await repository.bootstrapOwner('automation@test.invalid')
+    const outlineId = 'outline_automation'
+    await repository.claimOutline(await repository.authenticate(bootstrap.deviceToken, 'sync'), {
+      outlineId, name: 'Notes',
+    })
+    await repository.seedOutline(
+      requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'sync')),
+      seedDocumentState({ inbox: 'note_inbox', daily: 'note_daily', bullet: 'note_bullet' }),
+    )
     const configuration = {
       version: 1 as const, revision: 1,
       agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: ['youtube_transcript'], credentialRef: 'credential-1' }],
       skills: [{ id: 'summarize', label: 'summarize', description: 'Summarize', systemPrompt: 'Summarize.', agentId: 'agent', requiredToolIds: ['youtube_transcript'] }],
       customTools: [], globallyEnabledToolIds: ['youtube_transcript'],
     }
-    await repository.agentStore.publishConfiguration(bootstrap.outlineId, 0, configuration)
-    await repository.agentStore.publishAutomation(bootstrap.outlineId, 0, {
+    await repository.agentStore.publishConfiguration(outlineId, 0, configuration)
+    await repository.agentStore.publishComputeProfile(outlineId, 0, {
+      version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef: 'credential-1',
+    })
+    await repository.agentStore.publishAutomation(outlineId, 0, {
       version: 1, revision: 1, enabled: true, policies: [
         { id: 'high', name: 'YouTube', enabled: true, priority: 2, match: { urlTypes: ['youtube'] }, skillIds: ['summarize'], dispatcher: { enabled: false, allowedSkillIds: [] } },
         { id: 'duplicate', name: 'Duplicate', enabled: true, priority: 1, match: { urlHosts: ['www.youtube.com'] }, skillIds: ['summarize'], dispatcher: { enabled: false, allowedSkillIds: [] } },
       ],
     })
-    const principal = await repository.authenticate(bootstrap.apiToken, 'notes:create')
+    const principal = requireBoundOutline(await repository.authenticate(bootstrap.apiToken, 'notes:create'))
     const first = await repository.createNote(principal, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ', source: { kind: 'share' } })
     await repository.createNote(principal, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ', source: { kind: 'share' } })
-    const runs = await repository.agentStore.listRuns(bootstrap.outlineId, 10)
+    const runs = await repository.agentStore.listRuns(outlineId, 10)
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ trigger: 'inbox_automation', skillId: 'summarize', policyId: 'high' })
     expect(runs[0]?.input.target.parentId).toBe(first.response.noteId)

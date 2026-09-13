@@ -13,12 +13,10 @@ import { OpenAIImageAssetGenerator } from './imageGeneration.js'
 
 const config = loadServerConfig(process.env)
 const pool = new Pool({ connectionString: config.databaseUrl, max: 10 })
-const credentialService = config.agent.encryptionKeys.length ? new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+const credentialService = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
   encryptionKeys: config.agent.encryptionKeys,
-  ...(config.agent.oauth.clientId ? { oauth: {
-    deviceUrl: config.agent.oauth.deviceUrl, tokenUrl: config.agent.oauth.tokenUrl, clientId: config.agent.oauth.clientId,
-  } } : {}),
-}) : undefined
+  oauth: config.agent.oauth,
+})
 const transcript = config.agent.supadata ? new SupadataTranscriptProvider({
   apiUrl: config.agent.supadata.apiUrl, apiKey: config.agent.supadata.apiKey,
   deadlineMs: config.agent.oauth.timeoutSeconds * 1_000,
@@ -29,20 +27,21 @@ const assetStorage = new FileSystemAssetStorage(config.assetDir)
 const tools = createServerToolRegistry({
   reader, webSearch: (query, signal) => webSearch.search(query, signal), ...(transcript ? { transcript } : {}),
   outlineSearch: async () => [],
-  ...(credentialService ? { imageGeneration: async () => ({ available: true }) } : {}),
+  imageGeneration: async () => ({ available: true }),
 })
 const repository = new PostgresServerRepository(pool, {
   instanceId: config.instanceId, supportedAgentToolIds: tools.map((tool) => tool.id),
   agentMaxAttempts: config.agent.worker.maxAttempts,
-  ...(credentialService ? { dispatcherForAgent: async ({ ownerId, outlineId, agent }) => {
+  dispatcherForAgent: async ({ ownerId, outlineId, agent }) => {
     if (!agent.credentialRef) return undefined
     const credential = await credentialService.resolve(agent.credentialRef, ownerId, outlineId)
     return new OpenAIResponsesDispatcherClassifier({ credential, modelId: agent.modelId })
-  } } : {}),
+  },
 })
+await repository.reconcileNoteProjections()
 const app = buildServer({
   repository,
-  ...(credentialService ? { credentialService } : {}),
+  credentialService,
   supportedAgentToolIds: tools.map((tool) => tool.id),
   agentMaxAttempts: config.agent.worker.maxAttempts,
   assetStorage,
@@ -52,7 +51,7 @@ const app = buildServer({
   },
 })
 const workerId = `worker_${config.instanceId}_${process.pid}`.slice(0, 128)
-const runner = credentialService ? new ServerAgentRunner({
+const runner = new ServerAgentRunner({
   repository, credentials: credentialService,
   tools: (run, credential) => createServerToolRegistry({
     reader, webSearch: (query, signal) => webSearch.search(query, signal), ...(transcript ? { transcript } : {}),
@@ -69,19 +68,19 @@ const runner = credentialService ? new ServerAgentRunner({
   leaseMs: config.agent.worker.leaseSeconds * 1_000,
   maxBackoffMs: config.agent.worker.maxBackoffSeconds * 1_000,
   modelFactory: (credential, run) => new OpenAIResponsesModelAdapter({ credential, modelId: run.input.agent.modelId }),
-}) : null
-const worker = runner ? new ServerAgentWorker({
+})
+const worker = new ServerAgentWorker({
   store: repository.agentStore, runner, workerId,
   concurrency: config.agent.worker.concurrency, pollMs: config.agent.worker.pollMs,
   leaseMs: config.agent.worker.leaseSeconds * 1_000,
-}) : null
+})
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    void (worker?.stop() ?? Promise.resolve()).then(() => app.close()).then(() => pool.end()).finally(() => process.exit(0))
+    void worker.stop().then(() => app.close()).then(() => pool.end()).finally(() => process.exit(0))
   })
 }
 
 await app.listen({ host: config.host, port: config.port })
-if (config.agent.worker.enabled) worker!.start()
+worker.start()
 app.log.info({ config: publicConfigForLogging(config) }, 'Forage server started')

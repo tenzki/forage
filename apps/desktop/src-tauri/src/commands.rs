@@ -12,6 +12,84 @@ pub struct NativeState {
     pub http_client: reqwest::Client,
 }
 
+const SERVER_AGENT_CONFIGURATION_MIRROR_KEY: &str = "server_agent_configuration_mirror";
+const REMEMBERED_SERVER_RUNS_KEY: &str = "remembered_server_runs";
+const SERVER_PROVISIONING_STATE_KEY: &str = "server_provisioning_state";
+const REMEMBERED_SERVER_IDENTITY_KEY: &str = "remembered_server_identity";
+
+fn json_configuration(
+    state: State<'_, NativeState>,
+    key: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    state.event_store.app_configuration_value(key)
+        .map_err(command_error)?
+        .map(|value| serde_json::from_str(&value).map_err(command_error))
+        .transpose()
+}
+
+fn set_json_configuration(
+    state: State<'_, NativeState>,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    state.event_store.set_app_configuration_value(
+        key,
+        &serde_json::to_string(&value).map_err(command_error)?,
+    ).map_err(command_error)
+}
+
+#[tauri::command]
+pub fn server_agent_configuration_mirror(state: State<'_, NativeState>) -> Result<Option<serde_json::Value>, String> {
+    json_configuration(state, SERVER_AGENT_CONFIGURATION_MIRROR_KEY)
+}
+
+#[tauri::command]
+pub fn server_agent_set_configuration_mirror(
+    state: State<'_, NativeState>,
+    mirror: serde_json::Value,
+) -> Result<(), String> {
+    set_json_configuration(state, SERVER_AGENT_CONFIGURATION_MIRROR_KEY, mirror)
+}
+
+#[tauri::command]
+pub fn server_agent_remembered_runs(state: State<'_, NativeState>) -> Result<Option<serde_json::Value>, String> {
+    json_configuration(state, REMEMBERED_SERVER_RUNS_KEY)
+}
+
+#[tauri::command]
+pub fn server_agent_set_remembered_runs(
+    state: State<'_, NativeState>,
+    runs: serde_json::Value,
+) -> Result<(), String> {
+    set_json_configuration(state, REMEMBERED_SERVER_RUNS_KEY, runs)
+}
+
+#[tauri::command]
+pub fn server_provisioning_state(state: State<'_, NativeState>) -> Result<Option<serde_json::Value>, String> {
+    json_configuration(state, SERVER_PROVISIONING_STATE_KEY)
+}
+
+#[tauri::command]
+pub fn server_set_provisioning_state(
+    state: State<'_, NativeState>,
+    progress: serde_json::Value,
+) -> Result<(), String> {
+    set_json_configuration(state, SERVER_PROVISIONING_STATE_KEY, progress)
+}
+
+#[tauri::command]
+pub fn remembered_server_identity(state: State<'_, NativeState>) -> Result<Option<serde_json::Value>, String> {
+    json_configuration(state, REMEMBERED_SERVER_IDENTITY_KEY)
+}
+
+#[tauri::command]
+pub fn set_remembered_server_identity(
+    state: State<'_, NativeState>,
+    identity: serde_json::Value,
+) -> Result<(), String> {
+    set_json_configuration(state, REMEMBERED_SERVER_IDENTITY_KEY, identity)
+}
+
 fn command_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
@@ -86,6 +164,19 @@ pub fn event_store_events_after(
     state
         .event_store
         .events_after_sequence(&outline_id, local_sequence)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn event_store_events_before(
+    state: State<'_, NativeState>,
+    outline_id: String,
+    local_sequence: i64,
+    limit: i64,
+) -> Result<Vec<StoredEvent>, String> {
+    state
+        .event_store
+        .events_before_sequence(&outline_id, local_sequence, limit)
         .map_err(command_error)
 }
 
@@ -198,6 +289,18 @@ pub fn event_store_record_pulled(
     state
         .event_store
         .record_pulled_revision(&outline_id, revision)
+        .map_err(command_error)
+}
+
+#[tauri::command]
+pub fn event_store_mark_seeded(
+    state: State<'_, NativeState>,
+    outline_id: String,
+    checkpoint: CheckpointRecord,
+) -> Result<(), String> {
+    state
+        .event_store
+        .mark_seeded(&outline_id, &checkpoint)
         .map_err(command_error)
 }
 

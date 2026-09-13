@@ -162,7 +162,7 @@ describe('App view switching', () => {
           createdAt: '2026-08-30T12:00:00.000Z',
         }
       }
-      if (command === 'event_store_events_after') return []
+      if (command === 'event_store_events_after' || command === 'event_store_events_before') return []
       if (command === 'event_store_append') return 6
       return undefined
     })
@@ -216,7 +216,7 @@ describe('App view switching', () => {
         stateJson: JSON.stringify(legacyState), integrityHash: 'a'.repeat(64),
         createdAt: '2026-08-30T12:00:00.000Z',
       }
-      if (command === 'event_store_events_after') return []
+      if (command === 'event_store_events_after' || command === 'event_store_events_before') return []
       if (command === 'event_store_append') return 1
       return undefined
     })
@@ -248,6 +248,7 @@ describe('App view switching', () => {
         { localSequence: 6 },
         { localSequence: 9 },
       ]
+      if (command === 'event_store_events_before') return [{ localSequence: 9 }]
       return undefined
     })
     const user = userEvent.setup()
@@ -310,7 +311,8 @@ describe('App view switching', () => {
           createdAt: '2026-08-30T12:00:00.000Z',
         }
       }
-      if (command === 'event_store_events_after' || command === 'event_store_pending') return []
+      if (command === 'event_store_events_after' || command === 'event_store_events_before'
+        || command === 'event_store_pending') return []
       if (command === 'server_pull_events') {
         return { events: [], currentRevision: 0, nextAfterRevision: null }
       }
@@ -487,6 +489,12 @@ describe('App view switching', () => {
         const after = (input as { localSequence: number }).localSequence
         return records.filter((record) => Number(record.localSequence) > after)
       }
+      if (command === 'event_store_events_before') {
+        const { localSequence, limit } = input as { localSequence: number; limit: number }
+        return records
+          .filter((record) => Number(record.localSequence) <= localSequence)
+          .slice(-limit)
+      }
       if (command === 'event_store_append') {
         sequence += 1
         const event = (input as { event: { envelope: EventEnvelope } }).event.envelope
@@ -514,7 +522,7 @@ describe('App view switching', () => {
     expect(new Set(records.map((record) => record.id)).size).toBe(2)
   })
 
-  it('serializes periodic synchronization behind pending persistence', async () => {
+  it('serializes synchronization behind persistence without locking editing during network work', async () => {
     const user = userEvent.setup()
     let syncTick: (() => void) | null = null
     const intervalSpy = vi.spyOn(window, 'setInterval').mockImplementation(((handler: TimerHandler) => {
@@ -538,18 +546,14 @@ describe('App view switching', () => {
       expect(syncTick).not.toBeNull()
       syncTick!()
 
-      expect(editor.getAttribute('contenteditable')).toBe('false')
-      expect((container.querySelector('#app') as HTMLElement).inert).toBe(true)
+      expect(editor.getAttribute('contenteditable')).toBe('true')
+      expect((container.querySelector('#app') as HTMLElement).inert).not.toBe(true)
       await Promise.resolve()
       expect(nativeMocks.invoke.mock.calls.some(([command]) => command === 'event_store_storage_mode')).toBe(false)
 
       releaseDigest()
-      await waitFor(() => expect(nativeMocks.invoke.mock.calls
-        .some(([command]) => command === 'event_store_storage_mode')).toBe(true))
-      const commands = nativeMocks.invoke.mock.calls.map(([command]) => command)
-      expect(commands.indexOf('event_store_append')).toBeLessThan(commands.indexOf('event_store_storage_mode'))
       await waitFor(() => expect(editor.getAttribute('contenteditable')).toBe('true'))
-      expect((container.querySelector('#app') as HTMLElement).inert).toBe(false)
+      expect((container.querySelector('#app') as HTMLElement).inert).not.toBe(true)
     } finally {
       releaseDigest()
       digestSpy.mockRestore()
@@ -613,7 +617,7 @@ describe('App view switching', () => {
           }),
         }
       }
-      if (command === 'event_store_events_after') return []
+      if (command === 'event_store_events_after' || command === 'event_store_events_before') return []
       return undefined
     })
     const view = render(<App />)

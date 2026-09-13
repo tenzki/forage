@@ -99,6 +99,7 @@ function outlineStateFromCheckpoint(value: Record<string, unknown>): OutlineStat
 export class DesktopSyncEngine {
   state: SyncState = { kind: 'offline' }
   historyInvalidated = false
+  appliedEvents: EventEnvelope[] = []
 
   constructor(
     private readonly repository: SyncRepository,
@@ -109,6 +110,7 @@ export class DesktopSyncEngine {
 
   async sync(): Promise<void> {
     this.historyInvalidated = false
+    this.appliedEvents = []
     if (await this.repository.storageMode() === 'local') {
       this.transition({ kind: 'local-only' })
       return
@@ -183,6 +185,7 @@ export class DesktopSyncEngine {
       for (const event of page.events) {
         const parsed = parseEventEnvelope(event)
         requireSupportedAgentEvent(parsed)
+        this.appliedEvents.push(parsed)
         projected = reduceOutlineEvent(projected, parsed)
         await this.repository.append(parsed)
         if (invalidatesDocumentHistory(parsed)) this.historyInvalidated = true
@@ -227,6 +230,7 @@ export class DesktopSyncEngine {
         requireSupportedAgentEvent(parsed)
         validatedRemoteState = reduceOutlineEvent(validatedRemoteState, parsed)
         missingEvents.push(parsed)
+        this.appliedEvents.push(parsed)
         cursor = Math.max(cursor, parsed.revision ?? cursor)
       }
       replacementBase = page.currentRevision

@@ -57,7 +57,7 @@ export class ServerAgentRunner {
       try {
         await this.options.repository.agentStore.appendActivity(run.id, {
           id: `failure-${run.attemptCount}`, sequence: 1, phase: 'error', kind: 'error',
-          label: classified.code.replaceAll('_', ' '), status: 'error',
+          label: classified.code.replaceAll('_', ' '), detail: classified.detail, status: 'error',
         })
         await this.options.repository.agentStore.fail(
           run.id, this.options.workerId, classified.code, classified.retryable, new Date(), backoff,
@@ -69,14 +69,22 @@ export class ServerAgentRunner {
   }
 }
 
-export function classifyRunFailure(error: unknown): { code: string; retryable: boolean } {
-  if (error instanceof ProviderError) return { code: error.code, retryable: error.retryable }
-  if (error instanceof CredentialServiceError) return { code: 'authentication_required', retryable: false }
+export function classifyRunFailure(error: unknown): { code: string; retryable: boolean; detail: string } {
+  if (error instanceof ProviderError) return { code: error.code, retryable: error.retryable, detail: safeFailureDetail(error) }
+  if (error instanceof CredentialServiceError) return { code: 'authentication_required', retryable: false, detail: safeFailureDetail(error) }
   if (error instanceof AgentRuntimeError) {
-    if (error.code === 'required_tool_unavailable') return { code: 'unsupported_tool', retryable: false }
-    return { code: 'invalid_output', retryable: false }
+    if (error.code === 'required_tool_unavailable') return { code: 'unsupported_tool', retryable: false, detail: safeFailureDetail(error) }
+    return { code: 'invalid_output', retryable: false, detail: safeFailureDetail(error) }
   }
-  return { code: 'dependency_unavailable', retryable: true }
+  return { code: 'dependency_unavailable', retryable: true, detail: safeFailureDetail(error) }
+}
+
+function safeFailureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'Agent execution failed.'
+  return message
+    .replace(/(?:sk-[A-Za-z0-9_-]+|Bearer\s+\S+)/gi, '[redacted]')
+    .replace(/((?:refresh[_-]?token|access[_-]?token|api[_-]?key|device[_-]?code)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .trim().slice(0, 2_000) || 'Agent execution failed.'
 }
 
 function isAbortError(error: unknown): boolean { return error instanceof Error && error.name === 'AbortError' }

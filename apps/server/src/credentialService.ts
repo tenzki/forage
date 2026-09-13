@@ -60,7 +60,7 @@ export class CredentialServiceError extends Error {
 
 interface CodexSecret { kind: 'codex'; accessToken: string; refreshToken: string; accountId: string; expiresAt: string }
 interface ApiKeySecret { kind: 'api_key'; apiKey: string }
-interface DeviceSecret { kind: 'device'; deviceCode: string; expiresAt: string; pollIntervalSeconds: number }
+interface DeviceSecret { kind: 'device'; deviceAuthId: string; userCode: string; expiresAt: string; pollIntervalSeconds: number }
 type StoredSecret = CodexSecret | ApiKeySecret | DeviceSecret
 
 export type ResolvedModelCredential =
@@ -70,7 +70,15 @@ export type ResolvedModelCredential =
 interface CredentialServiceOptions {
   encryptionKeys: EncryptionKey[]
   fetch?: typeof globalThis.fetch
-  oauth?: { deviceUrl: string; tokenUrl: string; clientId: string }
+  oauth?: {
+    deviceUrl: string
+    deviceTokenUrl: string
+    tokenUrl: string
+    verificationUri: string
+    redirectUri: string
+    clientId: string
+    timeoutSeconds: number
+  }
 }
 
 export class ServerCredentialService {
@@ -99,21 +107,19 @@ export class ServerCredentialService {
     })
     const body = await responseJson(response)
     if (!response.ok) throw new CredentialServiceError('provider_rejected', 'Device authorization could not be started.')
-    const deviceCode = requiredString(body, 'device_code')
+    const deviceAuthId = requiredString(body, 'device_auth_id')
     const userCode = requiredString(body, 'user_code')
-    const verificationUri = requiredString(body, 'verification_uri')
-    const expiresIn = boundedNumber(body, 'expires_in', 30, 1_800, 600)
     const pollIntervalSeconds = boundedNumber(body, 'interval', 1, 60, 5)
     const now = new Date()
-    const expiresAt = new Date(now.getTime() + expiresIn * 1_000).toISOString()
+    const expiresAt = new Date(now.getTime() + oauth.timeoutSeconds * 1_000).toISOString()
     const record: ProviderCredentialRecord = {
       id: `credential_${randomUUID()}`, ownerId, outlineId, provider: 'openai-codex', status: 'pending',
-      encrypted: this.encrypt({ kind: 'device', deviceCode, expiresAt, pollIntervalSeconds }),
+      encrypted: this.encrypt({ kind: 'device', deviceAuthId, userCode, expiresAt, pollIntervalSeconds }),
       expiresAt, createdAt: now.toISOString(), updatedAt: now.toISOString(),
     }
     await this.store.insert(record)
     return deviceAuthorizationStartResponseSchema.parse({
-      authorizationId: record.id, verificationUri, userCode, expiresAt, pollIntervalSeconds,
+      authorizationId: record.id, verificationUri: oauth.verificationUri, userCode, expiresAt, pollIntervalSeconds,
     })
   }
 
@@ -129,21 +135,34 @@ export class ServerCredentialService {
         return { record: changed, result: deviceAuthorizationStatusSchema.parse({ state: 'expired', authorizationId: id }) }
       }
       const oauth = this.requireOauth()
-      const response = await this.fetch(oauth.tokenUrl, {
+      const response = await this.fetch(oauth.deviceTokenUrl, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ client_id: oauth.clientId, device_code: secret.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }),
+        body: JSON.stringify({ device_auth_id: secret.deviceAuthId, user_code: secret.userCode }),
       })
-      const body = await responseJson(response)
-      const error = optionalString(body, 'error')
-      if (!response.ok && (error === 'authorization_pending' || error === 'slow_down')) {
+      const { text, json: body } = await readBody(response)
+      if (!response.ok && isPendingApproval(response.status, text)) {
         return { record, result: deviceAuthorizationStatusSchema.parse({ state: 'pending', authorizationId: id }) }
       }
       if (!response.ok) {
-        const state = error === 'access_denied' ? 'denied' as const : 'failed' as const
+        const state = optionalString(body, 'error') === 'access_denied' ? 'denied' as const : 'failed' as const
         const changed = { ...record, status: 'authentication_required' as const, encrypted: null, updatedAt: new Date().toISOString() }
         return { record: changed, result: deviceAuthorizationStatusSchema.parse({ state, authorizationId: id }) }
       }
-      const codex = codexSecretFromToken(body)
+      const exchange = await this.fetch(oauth.tokenUrl, {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: oauth.clientId,
+          code: requiredString(body, 'authorization_code'),
+          code_verifier: requiredString(body, 'code_verifier'),
+          redirect_uri: oauth.redirectUri,
+        }).toString(),
+      })
+      if (!exchange.ok) {
+        const changed = { ...record, status: 'authentication_required' as const, encrypted: null, updatedAt: new Date().toISOString() }
+        return { record: changed, result: deviceAuthorizationStatusSchema.parse({ state: 'failed', authorizationId: id }) }
+      }
+      const codex = codexSecretFromToken(await responseJson(exchange))
       const changed: ProviderCredentialRecord = {
         ...record, status: 'connected', encrypted: this.encrypt(codex), accountLabel: codex.accountId,
         expiresAt: codex.expiresAt, updatedAt: new Date().toISOString(),
@@ -164,8 +183,10 @@ export class ServerCredentialService {
       }
       const oauth = this.requireOauth()
       const response = await this.fetch(oauth.tokenUrl, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ client_id: oauth.clientId, refresh_token: secret.refreshToken, grant_type: 'refresh_token' }),
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token', client_id: oauth.clientId, refresh_token: secret.refreshToken,
+        }).toString(),
       })
       const body = await responseJson(response)
       if (!response.ok) {
@@ -198,7 +219,7 @@ export class ServerCredentialService {
     })
   }
 
-  async importCodexCredentialForTest(ownerId: string, outlineId: string, secret: Omit<CodexSecret, 'kind'>): Promise<string> {
+  async importCodexCredential(ownerId: string, outlineId: string, secret: Omit<CodexSecret, 'kind'>): Promise<CredentialMetadata> {
     const now = new Date().toISOString()
     const record: ProviderCredentialRecord = {
       id: `credential_${randomUUID()}`, ownerId, outlineId, provider: 'openai-codex', status: 'connected',
@@ -206,7 +227,11 @@ export class ServerCredentialService {
       createdAt: now, updatedAt: now,
     }
     await this.store.insert(record)
-    return record.id
+    return metadata(record)
+  }
+
+  async importCodexCredentialForTest(ownerId: string, outlineId: string, secret: Omit<CodexSecret, 'kind'>): Promise<string> {
+    return (await this.importCodexCredential(ownerId, outlineId, secret)).id
   }
 
   private encrypt(secret: StoredSecret): EncryptedSecret { return encryptSecret(JSON.stringify(secret), this.options.encryptionKeys[0]!) }
@@ -232,9 +257,20 @@ function metadata(record: ProviderCredentialRecord): CredentialMetadata {
 }
 
 async function responseJson(response: Response): Promise<Record<string, unknown>> {
+  return (await readBody(response)).json
+}
+
+async function readBody(response: Response): Promise<{ text: string; json: Record<string, unknown> }> {
   const text = await response.text()
-  if (text.length > 100_000) return {}
-  try { const value: unknown = JSON.parse(text); return value && typeof value === 'object' ? value as Record<string, unknown> : {} } catch { return {} }
+  if (text.length > 100_000) return { text: '', json: {} }
+  try {
+    const value: unknown = JSON.parse(text)
+    return { text, json: value && typeof value === 'object' ? value as Record<string, unknown> : {} }
+  } catch { return { text, json: {} } }
+}
+
+function isPendingApproval(status: number, text: string): boolean {
+  return status === 403 || status === 404 || text.includes('deviceauth_authorization_pending') || text.includes('slow_down')
 }
 
 function requiredString(value: Record<string, unknown>, key: string): string {

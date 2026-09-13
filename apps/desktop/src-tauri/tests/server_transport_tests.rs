@@ -37,3 +37,32 @@ fn verifies_the_server_instance_after_initial_enrollment() {
         Err(TransportError::InstanceChanged)
     ));
 }
+
+#[test]
+fn passes_the_rebase_signal_through_and_reports_every_other_conflict() {
+    use forage_lib::sync_commands::interpret_response;
+    use serde_json::json;
+
+    let rebase = json!({ "status": "rebase_required", "currentRevision": 7, "pullAfterRevision": 4 });
+    assert_eq!(interpret_response(409, rebase.clone()), Ok(rebase));
+
+    assert_eq!(
+        interpret_response(
+            409,
+            json!({ "error": { "code": "conflict", "message": "This outline has not been seeded yet." } }),
+        ),
+        Err("conflict: This outline has not been seeded yet.".to_string()),
+    );
+
+    assert_eq!(
+        interpret_response(403, json!({ "error": { "code": "authorization_denied" } })),
+        Err("authorization_denied".to_string()),
+    );
+    assert_eq!(
+        interpret_response(500, json!({})),
+        Err("server_error".to_string()),
+    );
+
+    let accepted = json!({ "status": "accepted" });
+    assert_eq!(interpret_response(200, accepted.clone()), Ok(accepted));
+}

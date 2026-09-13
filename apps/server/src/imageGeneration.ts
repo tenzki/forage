@@ -1,6 +1,6 @@
 import { verifyAssetBytes, type AssetStorage } from './assets.js'
 import type { ResolvedModelCredential } from './credentialService.js'
-import type { Principal, ServerRepository } from './repository.js'
+import type { BoundPrincipal, ServerRepository } from './repository.js'
 import { ProviderError } from './transcript.js'
 
 const MAX_IMAGE_RESPONSE_CHARACTERS = 7_100_000
@@ -8,7 +8,7 @@ const MAX_IMAGE_RESPONSE_CHARACTERS = 7_100_000
 interface ImageGeneratorOptions {
   repository: ServerRepository
   storage: AssetStorage
-  principal: Principal
+  principal: BoundPrincipal
   credential: ResolvedModelCredential
   fetch?: typeof globalThis.fetch
   endpoint?: string

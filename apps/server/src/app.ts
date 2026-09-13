@@ -7,26 +7,43 @@ import {
   agentConfigurationPublishRequestSchema,
   agentConfigurationResponseSchema,
   agentRunAdmissionRequestSchema,
+  agentInvocationIntentSchema,
   agentRunAdmissionResponseSchema,
   agentRunCancelResponseSchema,
   agentRunDetailSchema,
   agentRunListQuerySchema,
   agentRunListResponseSchema,
   agentRunRetryResponseSchema,
+  agentRunPlacementRequestSchema,
+  agentRunPlacementResponseSchema,
+  outlineSearchQuerySchema,
+  outlineSearchResponseSchema,
   apiKeyEnrollmentRequestSchema,
+  credentialImportRequestSchema,
+  computeProfilePublishRequestSchema,
+  computeProfileResponseSchema,
+  serverReadinessSchema,
   automationPolicyPublishRequestSchema,
   notesCreateRequestSchema,
   assetCompleteRequestSchema,
   assetDownloadResponseSchema,
   assetInitiateRequestSchema,
+  claimOutlineRequestSchema,
+  claimOutlineResponseSchema,
+  seedOutlineRequestSchema,
+  seedOutlineResponseSchema,
   assetTransferResponseSchema,
   pullEventsQuerySchema,
   pushEventsRequestSchema,
   serverStatusSchema,
 } from '@forage/protocol'
-import { AgentRuntimeError, resolveEffectiveToolIds, type AgentConfiguration, type RunInput } from '@forage/agent-runtime'
-import type { ServerRepository, TokenScope } from './repository.js'
-import { RepositoryError } from './repository.js'
+import { canonicalJson, sha256Hex, type OutlineState } from '@forage/domain'
+import {
+  AgentRuntimeError, migrateLegacyAgentConfiguration, resolveEffectiveToolIds,
+  type PortableAgentConfiguration, type RunInput,
+} from '@forage/agent-runtime'
+import type { BoundPrincipal, ServerRepository, TokenScope } from './repository.js'
+import { RepositoryError, requireBoundOutline } from './repository.js'
 import { AgentStoreError, type AgentRunRecord } from './agentStore.js'
 import { CredentialServiceError, type ServerCredentialService } from './credentialService.js'
 import type { AssetStorage } from './assets.js'
@@ -40,6 +57,7 @@ export interface ServerOptions {
   credentialService?: ServerCredentialService
   supportedAgentToolIds?: string[]
   agentMaxAttempts?: number
+  workerAvailable?: boolean
 }
 
 export function buildServer(options: ServerOptions): FastifyInstance {
@@ -71,16 +89,20 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       'trash.entry_purged': [1], 'shortcut.created': [1], 'shortcut.updated': [1],
       'shortcut.deleted': [1], 'shortcuts.reordered': [1], 'asset.reference_added': [1],
       'document.schema_migrated': [1],
+      'agent.result_committed': [1],
     },
     agentOriginVersions: [1],
     minimumAgentClientVersion: '0.1.0',
     documentSchemaVersion: 1,
     minimumClientVersion: '0.1.0',
+    agentAdmissionVersions: [1, 2],
   }))
 
   app.post('/api/v1/notes', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'notes:create')
+      const principal = await requireReadyOutline(
+        repository, requireBoundOutline(await authorize(repository, request.headers.authorization, 'notes:create')),
+      )
       const key = idempotencyKey(request.headers['idempotency-key'])
       const input = notesCreateRequestSchema.parse(request.body)
       const result = await repository.createNote(principal, key, input)
@@ -89,6 +111,28 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     } catch (error) {
       return sendError(reply, error)
     }
+  })
+
+  app.post('/api/v1/outlines', async (request, reply) => {
+    try {
+      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const input = claimOutlineRequestSchema.parse(request.body)
+      const result = await repository.claimOutline(principal, input)
+      return reply.code(201).send(claimOutlineResponseSchema.parse(result))
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.put('/api/v1/outlines/:outlineId/seed', async (request, reply) => {
+    try {
+      // Seeding is the one outline route that must work before the outline is ready.
+      const principal = requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync'))
+      if (routeOutlineId(request.params) !== principal.outlineId) {
+        throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+      }
+      const input = seedOutlineRequestSchema.parse(request.body)
+      const result = await repository.seedOutline(principal, input.state as OutlineState)
+      return reply.code(200).send(seedOutlineResponseSchema.parse(result))
+    } catch (error) { return sendError(reply, error) }
   })
 
   app.get('/api/v1/outlines/:outlineId/agent-configuration', async (request, reply) => {
@@ -104,9 +148,86 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = agentConfigurationPublishRequestSchema.parse(request.body)
-      validateServerConfiguration(body.configuration, options.supportedAgentToolIds ?? [])
-      const published = await repository.agentStore.publishConfiguration(principal.outlineId, body.baseRevision, body.configuration, principal.tokenId)
+      const migrated = body.configuration.version === 1 ? migrateLegacyAgentConfiguration(body.configuration) : null
+      const published = await repository.agentStore.publishConfiguration(
+        principal.outlineId, body.baseRevision, migrated?.configuration ?? body.configuration, principal.tokenId,
+      )
+      if (migrated?.compute && !await repository.agentStore.currentComputeProfile(principal.outlineId)) {
+        const credential = await requireCredentialService(options).metadata(migrated.compute.credentialRef, principal.ownerId, principal.outlineId)
+        await repository.agentStore.publishComputeProfile(principal.outlineId, 0, {
+          ...migrated.compute, revision: 1, provider: credential.provider,
+        }, principal.tokenId)
+      }
       return agentConfigurationResponseSchema.parse(published)
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.get('/api/v1/outlines/:outlineId/compute-profile', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:read', request.params)
+      const current = await repository.agentStore.currentComputeProfile(principal.outlineId)
+      if (!current) throw new RepositoryError('compute_unavailable', 'No server compute profile is configured.', 'configure_compute')
+      const credential = await requireCredentialService(options).metadata(current.profile.credentialRef, principal.ownerId, principal.outlineId)
+      return computeProfileResponseSchema.parse({
+        ...current, credentialStatus: credential.status, ...(credential.accountLabel ? { credentialLabel: credential.accountLabel } : {}),
+      })
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.put('/api/v1/outlines/:outlineId/compute-profile', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
+      const body = computeProfilePublishRequestSchema.parse(request.body)
+      const credential = await requireCredentialService(options).metadata(body.profile.credentialRef, principal.ownerId, principal.outlineId)
+      if (credential.provider !== body.profile.provider) throw new RepositoryError('compute_unavailable', 'Compute provider does not match the selected credential.', 'choose_credential')
+      const current = await repository.agentStore.publishComputeProfile(principal.outlineId, body.baseRevision, body.profile, principal.tokenId)
+      return computeProfileResponseSchema.parse({
+        ...current, credentialStatus: credential.status, ...(credential.accountLabel ? { credentialLabel: credential.accountLabel } : {}),
+      })
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.get('/api/v1/outlines/:outlineId/readiness', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:read', request.params)
+      const [configuration, compute, noteIndex, outlineRevision] = await Promise.all([
+        repository.agentStore.currentConfiguration(principal.outlineId),
+        repository.agentStore.currentComputeProfile(principal.outlineId),
+        repository.noteIndexStatus(principal.outlineId),
+        repository.currentRevision(principal.outlineId),
+      ])
+      let computeReady = false
+      if (compute) {
+        const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
+        computeReady = credential.status === 'connected'
+      }
+      return serverReadinessSchema.parse({
+        connection: { ready: true },
+        outlineSync: { ready: true, revision: outlineRevision },
+        agentConfiguration: configuration
+          ? { ready: true, revision: configuration.configuration.revision }
+          : { ready: false, message: 'Portable agent configuration is not provisioned.', recoveryAction: 'provision_configuration' },
+        computeProfile: computeReady
+          ? { ready: true, revision: compute!.profile.revision }
+          : { ready: false, ...(compute ? { revision: compute.profile.revision } : {}), message: 'Server compute is not ready.', recoveryAction: 'configure_compute' },
+        worker: options.workerAvailable === false
+          ? { ready: false, message: 'The agent worker is unavailable.', recoveryAction: 'start_worker' }
+          : { ready: true },
+        noteIndex: noteIndex.ready
+          ? { ready: true, revision: noteIndex.sourceRevision }
+          : { ready: false, revision: noteIndex.sourceRevision, message: 'Search index is rebuilding.', recoveryAction: 'wait_for_projection' },
+        admissionProtocolVersions: [1, 2],
+      })
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.get('/api/v1/outlines/:outlineId/search', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:read', request.params)
+      const query = outlineSearchQuerySchema.parse(request.query)
+      return outlineSearchResponseSchema.parse({
+        results: await repository.searchOutline(principal.outlineId, query.query, query.limit),
+      })
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -137,6 +258,21 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = apiKeyEnrollmentRequestSchema.parse(request.body)
       return reply.code(201).send(await requireCredentialService(options).enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey))
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.post('/api/v1/outlines/:outlineId/agent-credentials/import', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
+      const body = credentialImportRequestSchema.parse(request.body)
+      const service = requireCredentialService(options)
+      const credential = body.provider === 'openai'
+        ? await service.enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey)
+        : await service.importCodexCredential(principal.ownerId, principal.outlineId, {
+          accessToken: body.accessToken, refreshToken: body.refreshToken,
+          accountId: body.accountId, expiresAt: body.expiresAt,
+        })
+      return reply.code(201).send(credential)
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -173,10 +309,13 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:execute', request.params)
       const key = idempotencyKey(request.headers['idempotency-key'])
-      const body = agentRunAdmissionRequestSchema.parse(request.body)
-      const input = await makeRunInput(repository, options, principal, body)
+      const parsedIntent = agentInvocationIntentSchema.safeParse(request.body)
+      const body = parsedIntent.success ? parsedIntent.data : agentRunAdmissionRequestSchema.parse(request.body)
+      if (options.workerAvailable === false) throw new RepositoryError('worker_unavailable', 'The agent worker is unavailable.', 'start_worker')
+      const admission = await makeRunInput(repository, options, principal, body, key)
       const run = await repository.agentStore.admitRun({
-        input, ownerId: principal.ownerId, trigger: 'manual', triggerIdentity: `manual:${principal.tokenId}:${key}`,
+        input: admission.input, ownerId: principal.ownerId, trigger: 'manual',
+        triggerIdentity: `manual:${admission.invocationId}`, invocationId: admission.invocationId, intentHash: admission.intentHash,
         maxAttempts: options.agentMaxAttempts ?? 3,
       })
       return reply.code(202).send(agentRunAdmissionResponseSchema.parse({ runId: run.id, status: 'queued', admittedAt: run.admittedAt }))
@@ -231,19 +370,35 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const previous = await repository.agentStore.getRun(principal.outlineId, runId)
       if (!previous) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
       const configuration = await requireConfiguration(repository, principal.outlineId)
+      const compute = await repository.agentStore.currentComputeProfile(principal.outlineId)
+      if (!compute) throw new RepositoryError('compute_unavailable', 'No server compute profile is configured.', 'configure_compute')
+      const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
+      if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
       const context = await repository.runAdmissionContext(principal, previous.input.source.nodeId ?? '', previous.input.target.parentId)
       const input = buildInputFromConfiguration(options, configuration, {
         ...previous.input, runId: `run_${randomUUID()}`, baseRevision: context.baseRevision,
         configurationRevision: configuration.revision, source: { ...previous.input.source, text: context.sourceText }, context: context.context,
-      }, previous.skillId, previous.credentialReference)
+      }, previous.skillId, compute.profile.credentialRef, compute.profile.modelId)
       const retry = await repository.agentStore.retry(principal.outlineId, runId, input, options.agentMaxAttempts ?? 3)
       return agentRunRetryResponseSchema.parse({ runId: retry.id, retryOfRunId: runId, status: 'queued' })
     } catch (error) { return sendError(reply, error) }
   })
 
+  app.post('/api/v1/outlines/:outlineId/agent-runs/:runId/place', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:execute', request.params)
+      const runId = routeIdentifier(request.params, 'runId')
+      const body = agentRunPlacementRequestSchema.parse(request.body)
+      const result = await repository.placeAgentResult(principal, runId, body.targetNodeId)
+      return agentRunPlacementResponseSchema.parse({ runId, status: 'completed', result })
+    } catch (error) { return sendError(reply, error) }
+  })
+
   app.get('/api/v1/outlines/:outlineId/checkpoint', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = await requireReadyOutline(
+        repository, requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync')),
+      )
       const outlineId = routeOutlineId(request.params)
       if (outlineId !== principal.outlineId) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
       return { checkpoint: await repository.checkpoint(outlineId) }
@@ -252,7 +407,9 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.get('/api/v1/outlines/:outlineId/events', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = await requireReadyOutline(
+        repository, requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync')),
+      )
       const outlineId = routeOutlineId(request.params)
       if (outlineId !== principal.outlineId) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
       const query = pullEventsQuerySchema.parse(request.query)
@@ -265,7 +422,9 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.post('/api/v1/outlines/:outlineId/events', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = await requireReadyOutline(
+        repository, requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync')),
+      )
       const outlineId = routeOutlineId(request.params)
       if (outlineId !== principal.outlineId) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
       const baseRevision = z.object({ baseRevision: z.number().int().nonnegative() }).passthrough().parse(request.body).baseRevision
@@ -281,7 +440,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.post('/api/v1/assets/initiate', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync'))
       const input = assetInitiateRequestSchema.parse(request.body)
       const record = await repository.initiateAsset(principal, input)
       return assetTransferResponseSchema.parse({
@@ -293,7 +452,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.post('/api/v1/assets/:assetId/complete', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync'))
       const assetId = routeAssetId(request.params)
       const pending = await repository.initiateAsset(principal, {
         assetId,
@@ -326,7 +485,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
 
   app.get('/api/v1/assets/:assetId', async (request, reply) => {
     try {
-      const principal = await authorize(repository, request.headers.authorization, 'sync')
+      const principal = requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync'))
       const assetId = routeAssetId(request.params)
       const record = await repository.asset(principal, assetId)
       const bytes = await options.assetStorage.read(assetId)
@@ -362,10 +521,25 @@ function routeAssetId(params: unknown): string {
   return z.object({ assetId: z.string().regex(/^[a-f0-9]{64}$/) }).parse(params).assetId
 }
 
-async function authorizeOutline(repository: ServerRepository, authorization: string | undefined, scope: TokenScope, params: unknown) {
-  const principal = await authorize(repository, authorization, scope)
-  if (routeOutlineId(params) !== principal.outlineId) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+async function requireReadyOutline(
+  repository: ServerRepository,
+  principal: BoundPrincipal,
+): Promise<BoundPrincipal> {
+  if (await repository.outlineState(principal.outlineId) !== 'ready') {
+    throw new RepositoryError('conflict', 'This outline has not been seeded yet.')
+  }
   return principal
+}
+
+async function authorizeOutline(
+  repository: ServerRepository,
+  authorization: string | undefined,
+  scope: TokenScope,
+  params: unknown,
+): Promise<BoundPrincipal> {
+  const principal = requireBoundOutline(await authorize(repository, authorization, scope))
+  if (routeOutlineId(params) !== principal.outlineId) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+  return requireReadyOutline(repository, principal)
 }
 
 function routeIdentifier(params: unknown, key: string): string {
@@ -377,61 +551,62 @@ function requireCredentialService(options: ServerOptions): ServerCredentialServi
   return options.credentialService
 }
 
-async function requireConfiguration(repository: ServerRepository, outlineId: string, revision?: number): Promise<AgentConfiguration> {
+async function requireConfiguration(repository: ServerRepository, outlineId: string, revision?: number): Promise<PortableAgentConfiguration> {
   const published = await repository.agentStore.currentConfiguration(outlineId)
   if (!published || (revision !== undefined && published.configuration.revision !== revision)) {
-    throw new RepositoryError('conflict', 'The requested agent configuration revision is unavailable.')
+    throw new RepositoryError('configuration_unavailable', 'The portable agent configuration is unavailable.', 'provision_configuration')
   }
   return published.configuration
-}
-
-function validateServerConfiguration(configuration: AgentConfiguration, supportedToolIds: string[]): void {
-  for (const skill of configuration.skills) {
-    const agent = configuration.agents.find((candidate) => candidate.id === skill.agentId)!
-    try {
-      resolveEffectiveToolIds({
-        agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
-        globallyEnabledToolIds: configuration.globallyEnabledToolIds,
-        policyAllowedToolIds: configuration.globallyEnabledToolIds,
-        executorSupportedToolIds: supportedToolIds,
-      })
-    } catch (error) {
-      if (error instanceof AgentRuntimeError) throw new RepositoryError('conflict', error.message)
-      throw error
-    }
-  }
 }
 
 async function makeRunInput(
   repository: ServerRepository,
   options: ServerOptions,
-  principal: Awaited<ReturnType<typeof authorize>>,
-  body: z.infer<typeof agentRunAdmissionRequestSchema>,
-): Promise<RunInput> {
-  const configuration = await requireConfiguration(repository, principal.outlineId, body.configurationRevision)
+  principal: BoundPrincipal,
+  body: z.infer<typeof agentRunAdmissionRequestSchema> | z.infer<typeof agentInvocationIntentSchema>,
+  legacyInvocationId: string,
+): Promise<{ input: RunInput; invocationId: string; intentHash: string }> {
+  const configuration = await requireConfiguration(repository, principal.outlineId)
   const skill = configuration.skills.find((candidate) => candidate.id === body.skillId)
   const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
-  if (!skill || !agent) throw new RepositoryError('conflict', 'The selected skill is unavailable.')
-  const credentialRef = body.credentialRef ?? agent.credentialRef
-  if (!credentialRef) throw new RepositoryError('conflict', 'The selected agent has no server credential reference.')
+  if (!skill || !agent) throw new RepositoryError('configuration_unavailable', 'The selected skill is unavailable.', 'open_agent_settings')
+  const compute = await repository.agentStore.currentComputeProfile(principal.outlineId)
+  if (!compute) throw new RepositoryError('compute_unavailable', 'No server compute profile is configured.', 'configure_compute')
+  const credentialRef = compute.profile.credentialRef
   const credential = await requireCredentialService(options).metadata(credentialRef, principal.ownerId, principal.outlineId)
-  if (credential.status !== 'connected') throw new RepositoryError('authentication_required', 'Provider authentication is required.')
-  const context = await repository.runAdmissionContext(principal, body.sourceNodeId, body.targetParentId)
-  return buildInputFromConfiguration(options, configuration, {
+  if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
+  if (credential.provider !== compute.profile.provider) throw new RepositoryError('compute_unavailable', 'The compute profile credential provider does not match.', 'configure_compute')
+  const acknowledgedRevision = 'acknowledgedOutlineRevision' in body ? body.acknowledgedOutlineRevision : undefined
+  const currentRevision = await repository.currentRevision(principal.outlineId)
+  if (acknowledgedRevision !== undefined && currentRevision < acknowledgedRevision) {
+    throw new RepositoryError('outline_not_synchronized', 'The server has not received the acknowledged outline revision.', 'synchronize_outline')
+  }
+  const targetParentId = 'targetParentId' in body ? body.targetParentId : body.sourceNodeId
+  const context = await repository.runAdmissionContext(principal, body.sourceNodeId, targetParentId)
+  const resolvedAgent = { ...agent, modelId: compute.profile.modelId, credentialRef }
+  const invocationId = 'invocationId' in body ? body.invocationId : `legacy-${legacyInvocationId}`
+  const intentHash = await sha256Hex(canonicalJson({
+    version: 2, invocationId, sourceNodeId: body.sourceNodeId, skillId: body.skillId,
+    prompt: body.prompt, acknowledgedOutlineRevision: acknowledgedRevision ?? context.baseRevision,
+  }))
+  const input = buildInputFromConfiguration(options, configuration, {
     version: 1, runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: principal.outlineId,
-    source: { nodeId: body.sourceNodeId, text: context.sourceText }, target: { parentId: body.targetParentId },
+    source: { nodeId: body.sourceNodeId, text: context.sourceText }, target: { parentId: targetParentId },
     baseRevision: context.baseRevision, configurationRevision: configuration.revision, credentialRef,
-    agent, skill, effectiveToolIds: [], prompt: body.prompt, context: context.context,
+    agent: resolvedAgent, skill, effectiveToolIds: [], prompt: body.prompt, context: context.context,
     customTools: configuration.customTools,
-  }, skill.id, credentialRef)
+  }, skill.id, credentialRef, compute.profile.modelId)
+  input.target.parentId = targetParentId
+  return { input, invocationId, intentHash }
 }
 
 function buildInputFromConfiguration(
   options: ServerOptions,
-  configuration: AgentConfiguration,
+  configuration: PortableAgentConfiguration,
   base: RunInput,
   skillId: string,
   credentialRef: string,
+  modelId?: string,
 ): RunInput {
   const skill = configuration.skills.find((candidate) => candidate.id === skillId)
   const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
@@ -445,11 +620,12 @@ function buildInputFromConfiguration(
       executorSupportedToolIds: options.supportedAgentToolIds ?? [],
     })
   } catch (error) {
-    if (error instanceof AgentRuntimeError) throw new RepositoryError('conflict', error.message)
+    if (error instanceof AgentRuntimeError) throw new RepositoryError('capability_unavailable', error.message, 'adjust_tool_policy')
     throw error
   }
   return {
-    ...base, configurationRevision: configuration.revision, credentialRef, agent, skill, effectiveToolIds,
+    ...base, configurationRevision: configuration.revision, credentialRef,
+    agent: { ...agent, modelId: modelId ?? '', credentialRef }, skill, effectiveToolIds,
     customTools: configuration.customTools,
   }
 }
@@ -467,6 +643,7 @@ function runDetail(run: AgentRunRecord) {
     ...runSummary(run),
     error: run.errorCode ? publicRunError(run.errorCode) : null,
     result: run.result,
+    placementError: run.placementError,
   }
 }
 
@@ -491,8 +668,14 @@ function sendError(reply: { code: (status: number) => { send: (body: unknown) =>
   if (error instanceof RepositoryError) {
     const status = error.code === 'authentication_required' ? 401
       : error.code === 'authorization_denied' ? 403
-        : error.code === 'upgrade_required' ? 426 : 409
-    return reply.code(status).send({ error: { code: error.code, message: error.message, retryable: false } })
+        : error.code === 'upgrade_required' ? 426
+          : ['compute_unavailable', 'configuration_unavailable', 'capability_unavailable'].includes(error.code) ? 422
+            : ['projection_rebuilding', 'worker_unavailable'].includes(error.code) ? 503 : 409
+    const retryable = ['outline_not_synchronized', 'projection_rebuilding', 'worker_unavailable'].includes(error.code)
+    return reply.code(status).send({ error: {
+      code: error.code, message: error.message, retryable,
+      ...(error.recoveryAction ? { recoveryAction: error.recoveryAction } : {}),
+    } })
   }
   if (error instanceof z.ZodError) {
     return reply.code(400).send({ error: { code: 'invalid_request', message: error.issues[0]?.message ?? 'Invalid request.', retryable: false } })

@@ -106,7 +106,7 @@ describe('portable agent runtime', () => {
       description: 'Reads a public webpage.',
       execute,
     }]
-    const activities: Array<{ sequence: number; phase: string; kind: string }> = []
+    const activities: Array<{ sequence: number; phase: string; kind: string; detail?: string }> = []
 
     const result = await runAgent(runInput(), {
       model,
@@ -117,10 +117,46 @@ describe('portable agent runtime', () => {
     expect(result.nodes[0]).toMatchObject({ type: 'text', text: 'Verified summary' })
     expect(execute).toHaveBeenCalledOnce()
     expect(requests).toHaveLength(2)
-    expect(activities.map((event) => event.sequence)).toEqual([1, 2, 3, 4])
+    expect(activities.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5])
     expect(activities.map(({ phase, kind }) => `${kind}:${phase}`)).toEqual([
-      'thinking:start', 'tool:start', 'tool:complete', 'output:complete',
+      'thinking:start', 'thinking:complete', 'tool:start', 'tool:complete', 'output:complete',
     ])
+    expect(activities[2]?.detail).toBe('url: https://example.com')
+    expect(activities[3]?.detail).toBe('url: https://example.com')
+  })
+
+  it('keeps citations only for successfully read source material', async () => {
+    let invocation = 0
+    const model: ModelAdapter = {
+      invoke: async () => {
+        invocation += 1
+        if (invocation === 1) {
+          return { type: 'tool_calls', calls: [{ id: 'call-1', toolId: 'web_fetch', arguments: { url: 'https://verified.example/article' } }] }
+        }
+        return {
+          type: 'structured_result',
+          result: {
+            version: 1,
+            nodes: [{ type: 'text', text: 'Verified summary' }],
+            sources: [
+              { url: 'https://verified.example/article', label: 'Verified' },
+              { url: 'https://search-only.example/', label: 'Search result only' },
+            ],
+          },
+        }
+      },
+    }
+    const result = await runAgent(runInput(), {
+      model,
+      tools: [{
+        id: 'web_fetch', name: 'Read webpage', description: 'Reads.',
+        execute: async () => ({
+          trust: 'untrusted', sourceType: 'webpage', canonicalUrl: 'https://verified.example/article', content: 'Source body',
+        }),
+      }],
+    })
+
+    expect(result.sources).toEqual([{ url: 'https://verified.example/article', label: 'Verified' }])
   })
 
   it('does not execute an unauthorized model tool call', async () => {

@@ -9,7 +9,6 @@ describe('agent and skill definitions', () => {
       name: 'Researcher',
       description: 'Finds sources',
       systemPrompt: 'Verify claims.',
-      modelId: '',
       toolIds: ['web_search', 'unknown', 'web_search'],
     }, BUILTIN_TOOL_OPTIONS)
 
@@ -21,7 +20,6 @@ describe('agent and skill definitions', () => {
       name: 'Illustrator',
       description: 'Creates visuals',
       systemPrompt: 'Use images only when requested.',
-      modelId: '',
       toolIds: ['generate_image', 'unknown'],
     }, BUILTIN_TOOL_OPTIONS)
 
@@ -34,7 +32,6 @@ describe('agent and skill definitions', () => {
       name: 'General',
       description: 'General assistant',
       systemPrompt: 'Help the user.',
-      modelId: '',
       toolIds: [],
     }, BUILTIN_TOOL_OPTIONS)
 
@@ -58,7 +55,6 @@ describe('agent and skill definitions', () => {
       name: 'General',
       description: 'General assistant',
       systemPrompt: 'Help the user.',
-      modelId: '',
       toolIds: [],
     }, BUILTIN_TOOL_OPTIONS)
     const skill = validateSkillDraft({
@@ -86,7 +82,6 @@ describe('agent and skill definitions', () => {
       name: 'Researcher',
       description: 'Research assistant',
       systemPrompt: 'Research.',
-      modelId: '',
       toolIds: ['web_fetch'],
     }, BUILTIN_TOOL_OPTIONS)
 

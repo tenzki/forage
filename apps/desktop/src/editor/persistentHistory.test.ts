@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseEventEnvelope, type EventEnvelope } from '@forage/domain'
-import { rebuildPersistentHistory } from './persistentHistory'
+import { loadPersistentHistory, mergeLoadedHistory, rebuildPersistentHistory } from './persistentHistory'
 
 function event(
   type: 'document.steps_applied' | 'document.undo_applied' | 'document.redo_applied',
@@ -82,5 +82,85 @@ describe('persistent compensating history', () => {
     })
 
     expect(rebuildPersistentHistory([userEdit, trashed])).toEqual({ undo: [], redo: [] })
+  })
+})
+
+describe('bounded history loading', () => {
+  function record(envelope: EventEnvelope, localSequence: number, supersededBy: string | null = null) {
+    return { localSequence, supersededBy, envelope }
+  }
+
+  function pagedLog(log: Array<ReturnType<typeof record>>) {
+    const reads: Array<{ before: number; limit: number }> = []
+    return {
+      reads,
+      load: async (before: number, limit: number) => {
+        reads.push({ before, limit })
+        return log.filter((entry) => entry.localSequence <= before).slice(-limit)
+      },
+    }
+  }
+
+  it('reads only back to the most recent history boundary', async () => {
+    const log = [
+      ...Array.from({ length: 40 }, (_, index) => record(event('document.steps_applied', `old-${index}`), index + 1)),
+      record(event('document.steps_applied', 'boundary', undefined, 'system:daily-note'), 41),
+      record(event('document.steps_applied', 'kept', undefined, 'kept-group'), 42),
+    ]
+    const source = pagedLog(log)
+
+    const history = await loadPersistentHistory(source.load, 42, 'device', 10)
+
+    expect(history).toMatchObject({ undo: [{ id: 'kept-group' }], redo: [] })
+    expect(source.reads).toEqual([{ before: 42, limit: 10 }])
+  })
+
+  it('matches a full-log rebuild when no boundary exists', async () => {
+    const log = Array.from({ length: 25 }, (_, index) =>
+      record(event('document.steps_applied', `edit-${index}`, undefined, `group-${index}`), index + 1))
+    const source = pagedLog(log)
+
+    const history = await loadPersistentHistory(source.load, 25, 'device', 10)
+
+    expect(history).toEqual(rebuildPersistentHistory(log.map((entry) => entry.envelope), 'device'))
+    expect(history.undo).toHaveLength(25)
+    expect(source.reads.map((read) => read.before)).toEqual([25, 15, 5])
+  })
+
+  it('ignores superseded records the way a full rebuild does', async () => {
+    const log = [
+      record(event('document.steps_applied', 'kept', undefined, 'kept-group'), 1),
+      record(event('document.steps_applied', 'replaced', undefined, 'dropped-group'), 2, 'kept'),
+    ]
+
+    const history = await loadPersistentHistory(pagedLog(log).load, 2, 'device', 10)
+
+    expect(history).toMatchObject({ undo: [{ id: 'kept-group' }], redo: [] })
+  })
+
+  it('returns empty history for an empty log', async () => {
+    expect(await loadPersistentHistory(async () => [], 0, 'device', 10)).toEqual({ undo: [], redo: [] })
+  })
+})
+
+describe('history loaded behind the first frame', () => {
+  const group = (id: string) => ({ id, events: [] })
+
+  it('keeps recorded history under the history it was still loading', () => {
+    const merged = mergeLoadedHistory(
+      { undo: [group('older')], redo: [group('redoable')] },
+      { undo: [], redo: [] },
+    )
+
+    expect(merged).toEqual({ undo: [group('older')], redo: [group('redoable')] })
+  })
+
+  it('keeps an edit made before the load finished newest, and drops the stale redo', () => {
+    const merged = mergeLoadedHistory(
+      { undo: [group('older')], redo: [group('redoable')] },
+      { undo: [group('typed')], redo: [] },
+    )
+
+    expect(merged).toEqual({ undo: [group('older'), group('typed')], redo: [] })
   })
 })

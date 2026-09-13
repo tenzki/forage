@@ -117,7 +117,7 @@ export async function generateWithPi(
   try {
     await client.start({
       provider: resolvedAuth.mode === 'subscription' ? 'openai-codex' : 'openai',
-      modelId: input.agent?.modelId || auth.modelId,
+      modelId: auth.modelId,
       apiKey: resolvedAuth.accessToken,
       accountId: resolvedAuth.mode === 'subscription' ? resolvedAuth.accountId : '',
       ...(resolvedAuth.mode === 'subscription' ? { oauthExpires: resolvedAuth.expires } : {}),

@@ -39,7 +39,6 @@ function setLoadedSettings() {
       name: 'General assistant',
       description: 'General-purpose outline assistant',
       systemPrompt: 'Be useful.',
-      modelId: '',
       toolIds: ['web_search'],
     }],
     skills: [{

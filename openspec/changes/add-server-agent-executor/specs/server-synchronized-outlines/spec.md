@@ -11,6 +11,20 @@ The authoritative server SHALL append successful agent output as immutable outli
 - **WHEN** the authoritative outline advances while a run is executing
 - **THEN** completion locks and applies against the latest server projection rather than overwriting or using stale last-writer-wins state
 
+### Requirement: Canonical document authority and disposable indexes
+Correctness-critical operations SHALL resolve stable node IDs from the canonical outline projection at the current outline revision. Flattened note projections SHALL be treated only as a disposable search index with versioned readiness and deterministic startup repair.
+
+#### Scenario: Search index omits a live source
+- **WHEN** a live canonical source node is absent from the flattened note index
+- **THEN** agent admission and note placement still succeed, and reconciliation rebuilds the index without changing immutable events or requiring database truncation
+
+### Requirement: Independent server readiness
+The server SHALL report connection, outline synchronization, portable configuration, compute profile, worker, and note-index readiness independently. Outline synchronization readiness SHALL be sufficient for editing even when compute is unavailable.
+
+#### Scenario: Connect without server compute
+- **WHEN** outline and configuration provisioning are complete but the owner skips credential setup
+- **THEN** editing and synchronization remain ready while agent admission reports the specific compute recovery action
+
 ### Requirement: Agent event compatibility negotiation
 The server SHALL advertise support for agent-origin event versions and SHALL prevent worker output when a configured minimum client cannot safely interpret them. Clients SHALL reject unknown agent event versions without advancing acknowledged revision.
 

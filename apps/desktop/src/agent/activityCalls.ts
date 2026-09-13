@@ -75,7 +75,9 @@ export function applyActivityEvent(
 export function fromRuntimeEvent(event: RuntimeActivityEvent, callId: string): ActivityEvent {
   return {
     id: event.id,
-    callId: event.callId ?? callId,
+    // Runtime `callId` identifies an individual tool invocation. The sidebar's
+    // `callId` identifies the parent execution, so every event must use the run ID.
+    callId,
     phase: event.phase === 'progress' ? 'start' : event.phase,
     kind: event.kind === 'status' ? 'thinking' : event.kind,
     label: event.label,

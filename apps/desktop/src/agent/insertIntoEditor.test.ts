@@ -159,7 +159,7 @@ describe('agent output insertion', () => {
       editor,
       { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
       { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general', requiredToolIds: [] },
-      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
+      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', toolIds: [] },
       'question',
     )).toThrow(/no longer exists/)
     expect(bulletTexts(editor)).toEqual(['Missing topic'])
@@ -176,7 +176,7 @@ describe('agent output insertion', () => {
       editor,
       { mode: 'api_key', apiKey: '', oauthCredential: null, modelId: 'gpt-5.1' },
       { id: 'ask', label: 'ask', description: 'Ask', systemPrompt: 'Answer.', agentId: 'general', requiredToolIds: [] },
-      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', modelId: '', toolIds: [] },
+      { id: 'general', name: 'General', description: 'General', systemPrompt: 'Help.', toolIds: [] },
       'question',
       [],
       [],

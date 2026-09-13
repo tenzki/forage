@@ -108,6 +108,76 @@ describe('desktop synchronization state machine', () => {
     expect(repo.calls.saveCheckpoint).toHaveBeenCalledOnce()
   })
 
+  it('exposes an atomic agent result pulled during the synchronization', async () => {
+    const repo = repository('server')
+    const resultEvent: EventEnvelope = {
+      id: 'agent-result-1', outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'agent-server-1',
+      type: 'agent.result_committed', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+      baseRevision: 0, revision: 1, origin: 'agent', occurredAt: '2026-09-13T12:00:00.000Z',
+      changeGroupId: 'run_run-1',
+      agentProvenance: { runId: 'run-1', skillId: 'research', sourceNodeId: 'inbox', sourceUrls: [] },
+      payload: {
+        runId: 'run-1', targetNodeId: 'inbox',
+        nodes: [{ type: 'text', nodeId: 'result-node-1', text: 'Agent result' }],
+        sources: [],
+      },
+    }
+    const transport: SyncTransport = {
+      status: async () => ({ ...status, eventVersions: { 'agent.result_committed': [1] } }),
+      checkpoint: async () => ({ checkpoint: {
+        id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        revision: 0, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState,
+      } }),
+      pull: async () => ({ events: [resultEvent], currentRevision: 1, nextAfterRevision: null }),
+      push: async () => { throw new Error('no pending events') },
+    }
+
+    const engine = new DesktopSyncEngine(repo, transport)
+    await engine.sync()
+
+    expect(engine.state).toEqual({ kind: 'up-to-date', revision: 1 })
+    expect(engine.historyInvalidated).toBe(false)
+    expect(engine.appliedEvents).toEqual([resultEvent])
+  })
+
+  it('pushes nothing and pulls from revision 0 after a seed', async () => {
+    const repo = repository('server')
+    // After adoption the device already holds the seeded state at revision 0 and its
+    // outbox is settled, so the first sync must not re-push the local history.
+    repo.loadReplayInput = async () => ({
+      checkpoint: {
+        id: 'checkpoint-seed', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        localSequence: 7, serverRevision: 0, stateJson: JSON.stringify(initialState),
+        integrityHash: await sha256Hex(canonicalJson(initialState)),
+        createdAt: '2026-09-12T12:00:00.000Z',
+      },
+      state: initialState,
+      events: [],
+    })
+    const pull = vi.fn(async () => ({ events: [], currentRevision: 0, nextAfterRevision: null }))
+    const transport: SyncTransport = {
+      status: async () => status,
+      // The engine reads the server checkpoint to learn the outline id, then skips the
+      // bootstrap branch because this device already has a replay for it.
+      checkpoint: async () => ({
+        checkpoint: {
+          id: 'checkpoint-server', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+          revision: 0, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState,
+        },
+      }),
+      pull,
+      push: vi.fn(async () => { throw new Error('nothing may be pushed after a seed') }),
+    } as unknown as SyncTransport
+
+    const engine = new DesktopSyncEngine(repo, transport)
+    await engine.sync()
+
+    expect(engine.state.kind).toBe('up-to-date')
+    expect(transport.push).not.toHaveBeenCalled()
+    expect(pull).toHaveBeenCalledWith(0, 100)
+    expect(repo.calls.saveCheckpoint).not.toHaveBeenCalled()
+  })
+
   it('does not append or acknowledge an unknown agent-origin event version', async () => {
     const repo = repository('server')
     const incompatible: EventEnvelope = {

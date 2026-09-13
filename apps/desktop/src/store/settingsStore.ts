@@ -26,6 +26,7 @@ import {
   type CustomHttpToolDraft,
   type ToolOption,
 } from '../agent/tools'
+import type { PortableAgentConfiguration } from '@forage/agent-runtime'
 
 const STORE_FILE = 'settings.json'
 const AUTH_MODE_FIELD = 'codexAuthMode'
@@ -78,6 +79,7 @@ interface SettingsState {
   saveSkill: (draft: SkillDraft) => Promise<void>
   removeSkill: (skillId: string) => Promise<void>
   resetAgentConfiguration: () => Promise<void>
+  replaceAgentConfiguration: (configuration: PortableAgentConfiguration) => Promise<void>
 }
 
 function message(error: unknown): string {
@@ -417,6 +419,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await store.save()
     } catch (error) {
       set({ agents: previousAgents, skills: previousSkills, error: message(error) })
+      throw error
+    }
+  },
+
+  replaceAgentConfiguration: async (configuration) => {
+    const previous = {
+      agents: get().agents,
+      skills: get().skills,
+      customTools: get().customTools,
+      enabledToolIds: get().enabledToolIds,
+    }
+    const customTools = validCustomTools(configuration.customTools)
+    const agents = validAgents(configuration.agents, toolOptions(customTools))
+    const skills = validSkills(configuration.skills, agents)
+    const enabledToolIds = [...configuration.globallyEnabledToolIds]
+    set({ agents, skills, customTools, enabledToolIds, error: null })
+    try {
+      const store = await getStore()
+      await store.set(AGENTS_FIELD, agents)
+      await store.set(SKILLS_FIELD, skills)
+      await store.set(CUSTOM_TOOLS_FIELD, customTools)
+      await store.set(ENABLED_TOOLS_FIELD, enabledToolIds)
+      await store.save()
+    } catch (error) {
+      set({ ...previous, error: message(error) })
       throw error
     }
   },

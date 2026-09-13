@@ -24,9 +24,9 @@ const skill = {
   systemPrompt: 'Summarize it.', agentId: agent.id, requiredToolIds: ['web_fetch'],
 }
 const configuration = {
-  version: 1 as const,
+  version: 2 as const,
   revision: 4,
-  agents: [agent],
+  agents: [{ ...agent, modelId: undefined }].map(({ modelId: _modelId, ...portable }) => portable),
   skills: [skill],
   customTools: [],
   globallyEnabledToolIds: ['web_fetch'],
