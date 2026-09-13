@@ -14,9 +14,11 @@ flowchart LR
     IPC --> ASSETS[(Local content-addressed assets)]
     IPC --> VAULT[Local credential storage in SQLite]
     IPC --> TRANSPORT[Origin-pinned server transport]
+    IPC --> STREAM[Origin-pinned outline stream client]
     APP --> SIDECAR[Local Node.js Pi SDK sidecar]
     SIDECAR --> MODELS[User-selected model provider]
     TRANSPORT --> SERVER[Optional Fastify server]
+    STREAM --> SERVER
     SERVER --> POSTGRES[(Authoritative PostgreSQL event store)]
     SERVER --> SERVER_ASSETS[(Server content-addressed assets)]
     SERVER --> WORKER[Durable server agent executor]
@@ -53,6 +55,10 @@ In server mode, PostgreSQL is authoritative and assigns the global event revisio
 3. Safe ProseMirror changes are rebased; unsafe transformations enter an explicit conflict state rather than overwriting either side silently.
 4. Accepted server events and acknowledgements are recorded locally, preserving readable offline state.
 5. Referenced assets are signature- and hash-verified independently and transferred through the corresponding content-addressed stores.
+
+Remote changes arrive over a WebSocket rather than by frequent polling. The connection lives in Rust because it carries the server credential and the pinned origin; the frontend receives validated frames as Tauri events. A frame whose range begins exactly at the local cursor is applied through the same validate, project, and persist path as a pull. Anything else - a gap, an unacknowledged local edit, a reconnection - falls back to a normal synchronization, so a dropped frame costs a pull rather than correctness. Whether the stream is currently delivering is published as a single piece of client state, and everything that would otherwise poll reads it: while the stream is live, outline synchronization and agent run observation ask the server nothing and wait only on a slow backstop that catches a socket which died without saying so; while it is down, refused, or absent from an older server, they fall back to intervals short enough to serve as the observation themselves. A reconnection wakes every in-flight run observer at once, because no frame reports what was missed while the socket was gone.
+
+Fan-out runs through PostgreSQL `LISTEN`/`NOTIFY`. The agent worker is a separate process, so a notification inside the API process would never observe work the worker commits. Database triggers publish the outline identifier and revision only; subscribers read the events themselves.
 
 A freshly bootstrapped server holds an owner and credentials but no outline. The first desktop to enrol claims the server and seeds it with that device's own replayed document state, so the operator's existing local notes become the server's content; later devices pull that outline and leave their own local outlines parked. Outlines are never merged (ADR-0015).
 

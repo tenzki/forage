@@ -14,9 +14,10 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.3.0",
     "@forage/agent-runtime": "0.1.0",
-    "@forage/domain": "0.1.0",
     "@forage/document": "0.1.0",
+    "@forage/domain": "0.1.0",
     "@forage/protocol": "0.1.0",
     "fastify": "^5.6.0",
     "pg": "^8.16.3",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.23.12",
     "typescript": "^5",
     "vitest": "^4.1.1"

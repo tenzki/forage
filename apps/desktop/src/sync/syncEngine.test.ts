@@ -108,6 +108,32 @@ describe('desktop synchronization state machine', () => {
     expect(repo.calls.saveCheckpoint).toHaveBeenCalledOnce()
   })
 
+  it('learns from the status response whether the server offers a stream', async () => {
+    const bootstrap = async () => ({
+      checkpoint: { id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1,
+        schemaEpoch: 1, revision: 0, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState },
+    })
+    const transport = (streamVersions?: number[]): SyncTransport => ({
+      status: async () => ({ ...status, ...(streamVersions ? { streamVersions } : {}) }),
+      checkpoint: bootstrap,
+      pull: async () => ({ events: [], currentRevision: 0, nextAfterRevision: null }),
+      push: async () => { throw new Error('no pending events') },
+    })
+
+    const streaming = new DesktopSyncEngine(repository('server'), transport([1]))
+    expect(streaming.streamSupported).toBeNull()
+    await streaming.sync()
+    expect(streaming.streamSupported).toBe(true)
+
+    const older = new DesktopSyncEngine(repository('server'), transport())
+    await older.sync()
+    expect(older.streamSupported).toBe(false)
+
+    const future = new DesktopSyncEngine(repository('server'), transport([2]))
+    await future.sync()
+    expect(future.streamSupported).toBe(false)
+  })
+
   it('exposes an atomic agent result pulled during the synchronization', async () => {
     const repo = repository('server')
     const resultEvent: EventEnvelope = {
@@ -793,5 +819,147 @@ describe('desktop synchronization state machine', () => {
     document.check()
     expect(document.textContent).toContain('InboxR')
     expect(document.textContent).toContain('L')
+  })
+})
+
+function streamRepository(options: {
+  mode?: 'local' | 'server'
+  localRevision?: number
+  pending?: EventEnvelope[]
+} = {}): SyncRepository & { appended: EventEnvelope[]; pulledRevisions: number[] } {
+  const localRevision = options.localRevision ?? 4
+  const appended: EventEnvelope[] = []
+  const pulledRevisions: number[] = []
+  return {
+    appended,
+    pulledRevisions,
+    storageMode: async () => options.mode ?? 'server',
+    loadReplayInput: async () => ({
+      checkpoint: {
+        id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        localSequence: 0, serverRevision: localRevision,
+        stateJson: JSON.stringify(initialState),
+        integrityHash: 'unused', createdAt: '2026-09-13T12:00:00.000Z',
+      },
+      state: initialState,
+      events: [],
+    }),
+    eventsAfter: async () => [],
+    commitRebase: async () => undefined,
+    saveCheckpoint: async () => undefined,
+    append: async (event) => { appended.push(event as EventEnvelope); return appended.length },
+    pending: async () => (options.pending ?? []).map((envelope, index) => ({
+      id: envelope.id, outlineId: 'outline-1', localSequence: index + 1,
+      status: 'pending' as const, envelope, supersededBy: null,
+    })) as never,
+    acknowledge: async () => undefined,
+    supersede: async () => undefined,
+    syncState: async () => ({ lastAckedRevision: localRevision, lastPulledRevision: localRevision }),
+    recordPulled: async (_outlineId, revision) => { pulledRevisions.push(revision) },
+  }
+}
+
+function unreachableTransport(): SyncTransport {
+  const fail = () => { throw new Error('the streamed batch should not have contacted the server') }
+  return { status: fail, checkpoint: fail, pull: fail, push: fail } as unknown as SyncTransport
+}
+
+function pullingTransport(): SyncTransport & { pulls: number; pushes: number } {
+  const transport = {
+    pulls: 0,
+    pushes: 0,
+    status: async () => status,
+    checkpoint: async () => ({ checkpoint: {
+      id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+      revision: 4, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState,
+    } }),
+    pull: async () => {
+      transport.pulls += 1
+      return { events: [], currentRevision: 4, nextAfterRevision: null }
+    },
+    push: async (_baseRevision: number, events: EventEnvelope[]) => {
+      transport.pushes += 1
+      return {
+        status: 'accepted' as const,
+        acknowledgements: events.map((event, index) => ({ eventId: event.id, revision: 5 + index })),
+        currentRevision: 4 + events.length,
+      }
+    },
+  }
+  return transport as unknown as SyncTransport & { pulls: number; pushes: number }
+}
+
+describe('streamed event ingest', () => {
+  it('applies a contiguous batch without contacting the server', async () => {
+    const repo = streamRepository({ localRevision: 4 })
+    const states: string[] = []
+    const engine = new DesktopSyncEngine(repo, unreachableTransport(), (state) => states.push(state.kind))
+
+    await engine.sync({
+      outlineId: 'outline-1', fromRevision: 4, toRevision: 6,
+      events: [noteEvent('event-5', 'note-5', 5), noteEvent('event-6', 'note-6', 6)],
+    })
+
+    expect(states).toEqual(['syncing', 'up-to-date'])
+    expect(engine.state).toEqual({ kind: 'up-to-date', revision: 6 })
+    expect(repo.appended.map((event) => event.id)).toEqual(['event-5', 'event-6'])
+    expect(repo.pulledRevisions).toEqual([6])
+    expect(engine.appliedEvents.map((event) => event.id)).toEqual(['event-5', 'event-6'])
+    expect(engine.historyInvalidated).toBe(true)
+  })
+
+  it('pulls instead of applying when the batch leaves a gap', async () => {
+    const repo = streamRepository({ localRevision: 4 })
+    const transport = pullingTransport()
+    const engine = new DesktopSyncEngine(repo, transport)
+
+    await engine.sync({
+      outlineId: 'outline-1', fromRevision: 7, toRevision: 8,
+      events: [noteEvent('event-8', 'note-8', 8)],
+    })
+
+    expect(transport.pulls).toBeGreaterThan(0)
+    expect(repo.appended).toEqual([])
+  })
+
+  it('pulls instead of applying when the batch was already seen', async () => {
+    const repo = streamRepository({ localRevision: 6 })
+    const transport = pullingTransport()
+    const engine = new DesktopSyncEngine(repo, transport)
+
+    await engine.sync({
+      outlineId: 'outline-1', fromRevision: 4, toRevision: 6,
+      events: [noteEvent('event-5', 'note-5', 5), noteEvent('event-6', 'note-6', 6)],
+    })
+
+    expect(transport.pulls).toBeGreaterThan(0)
+    expect(repo.appended).toEqual([])
+  })
+
+  it('pulls instead of applying while a local edit is still unacknowledged', async () => {
+    const repo = streamRepository({ localRevision: 4, pending: [noteEvent('local-1', 'note-local')] })
+    const transport = pullingTransport()
+    const engine = new DesktopSyncEngine(repo, transport)
+
+    await engine.sync({
+      outlineId: 'outline-1', fromRevision: 4, toRevision: 5,
+      events: [noteEvent('event-5', 'note-5', 5)],
+    })
+
+    expect(transport.pushes).toBe(1)
+    expect(repo.appended.map((event) => event.id)).not.toContain('event-5')
+  })
+
+  it('ignores a streamed batch entirely in local-only mode', async () => {
+    const repo = streamRepository({ mode: 'local', localRevision: 4 })
+    const engine = new DesktopSyncEngine(repo, unreachableTransport())
+
+    await engine.sync({
+      outlineId: 'outline-1', fromRevision: 4, toRevision: 5,
+      events: [noteEvent('event-5', 'note-5', 5)],
+    })
+
+    expect(engine.state).toEqual({ kind: 'local-only' })
+    expect(repo.appended).toEqual([])
   })
 })

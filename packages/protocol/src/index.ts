@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { eventEnvelopeSchema } from '../../domain/src'
 
 export * from './agent'
+export * from './siteDomain'
 
 const boundedId = z.string().trim().min(1).max(128)
 const revision = z.number().int().nonnegative()
@@ -141,7 +142,34 @@ export const serverStatusSchema = z.object({
   documentSchemaVersion: z.number().int().positive(),
   minimumClientVersion: z.string().trim().min(1).max(50),
   agentAdmissionVersions: z.array(z.number().int().positive()).min(1).optional(),
+  streamVersions: z.array(z.number().int().positive()).min(1).optional(),
 }).strict()
+
+export const outlineStreamClientFrameSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('hello'), afterRevision: revision, deviceId: boundedId }).strict(),
+  z.object({ type: z.literal('ping') }).strict(),
+])
+
+/** Frames the server may send on the outline stream. */
+export const outlineStreamServerFrameSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('ready'), currentRevision: revision }).strict(),
+  z.object({
+    type: z.literal('events'),
+    fromRevision: revision,
+    toRevision: revision,
+    events: z.array(eventEnvelopeSchema).min(1).max(200),
+  }).strict(),
+  z.object({ type: z.literal('resync'), currentRevision: revision }).strict(),
+  z.object({
+    type: z.literal('agent'),
+    runId: boundedId,
+    activitySeq: z.number().int().nonnegative(),
+    status: z.string().trim().min(1).max(50),
+  }).strict(),
+  z.object({ type: z.literal('pong') }).strict(),
+])
+
+export type OutlineStreamServerFrame = z.infer<typeof outlineStreamServerFrameSchema>
 
 export type ServerStatus = z.infer<typeof serverStatusSchema>
 

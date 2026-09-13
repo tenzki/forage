@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RunInput } from '@forage/agent-runtime'
 import { ServerAgentExecutor, TauriServerAgentTransport } from './serverExecutor'
+import { AGENT_POLL_MS, AGENT_STREAM_BACKSTOP_MS, AgentRunSignals } from './agentRunSignals'
+import { StreamLivenessTracker } from '../sync/streamLiveness'
 
 function input(): RunInput {
   return {
@@ -32,6 +34,37 @@ describe('server agent executor', () => {
     await expect(handle.completion).resolves.toMatchObject({ status: 'completed', result: { firstRevision: 4 } })
     expect(activity).toHaveBeenCalledWith(expect.objectContaining({ sequence: 1 }))
     expect(invoke).toHaveBeenCalledWith('server_agent_invoke', expect.objectContaining({ idempotencyKey: 'run-client' }))
+  })
+
+  it('stops asking while the stream is live and resumes polling the moment it drops', async () => {
+    let status = 'running'
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'server_agent_invoke') return { runId: 'run-server', status: 'queued', admittedAt: '2026-08-31T10:00:00.000Z' }
+      if (command === 'server_agent_activity') return { events: [], nextCursor: null, status }
+      if (command === 'server_agent_run') return {
+        id: 'run-server', outlineId: 'outline-1', trigger: 'manual', status, skillId: 'skill', configurationRevision: 2,
+        policyId: null, attemptCount: 1, admittedAt: '2026-08-31T10:00:00.000Z', updatedAt: '2026-08-31T10:01:00.000Z', retryOfRunId: null,
+        error: null, result: null,
+      }
+      throw new Error(`unexpected ${command}`)
+    })
+    const liveness = new StreamLivenessTracker()
+    liveness.set('live')
+    const waits: number[] = []
+    const executor = new ServerAgentExecutor(new TauriServerAgentTransport(invoke), {
+      liveness,
+      signals: new AgentRunSignals(),
+      delay: async (milliseconds) => {
+        waits.push(milliseconds)
+        // The stream drops while the observer is waiting on it.
+        if (waits.length === 1) liveness.set('down')
+        else status = 'completed'
+      },
+    })
+    const handle = await executor.invoke(input())
+    await expect(handle.completion).resolves.toMatchObject({ status: 'completed' })
+
+    expect(waits).toEqual([AGENT_STREAM_BACKSTOP_MS, AGENT_POLL_MS])
   })
 
   it('rejects local snapshots and never falls back when native admission fails', async () => {

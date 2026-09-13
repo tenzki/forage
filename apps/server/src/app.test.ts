@@ -452,6 +452,44 @@ describe('Forage server', () => {
     expect(runs[0]?.input.target.parentId).toBe(first.response.noteId)
   })
 
+  it('admits only the first matching site rule for subdomain captures', async () => {
+    const repository = new InMemoryServerRepository({
+      instanceId: 'site-rules', supportedAgentToolIds: [], credentialAvailable: async () => true,
+    })
+    const bootstrap = await repository.bootstrapOwner('sites@test.invalid')
+    const outlineId = 'outline_sites'
+    await repository.claimOutline(await repository.authenticate(bootstrap.deviceToken, 'sync'), { outlineId, name: 'Notes' })
+    await repository.seedOutline(
+      requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'sync')),
+      seedDocumentState({ inbox: 'note_inbox', daily: 'note_daily', bullet: 'note_bullet' }),
+    )
+    const skill = (id: string) => ({ id, label: id, description: id, systemPrompt: id, agentId: 'agent', requiredToolIds: [] })
+    await repository.agentStore.publishConfiguration(outlineId, 0, {
+      version: 1 as const, revision: 1,
+      agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: [], credentialRef: 'credential-1' }],
+      skills: [skill('document-repo'), skill('research')],
+      customTools: [], globallyEnabledToolIds: [],
+    })
+    await repository.agentStore.publishComputeProfile(outlineId, 0, {
+      version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef: 'credential-1',
+    })
+    await repository.agentStore.publishAutomation(outlineId, 0, {
+      version: 1, revision: 1, enabled: true, policies: [
+        { id: 'github', name: 'GitHub', enabled: true, priority: 2, match: { urlHosts: ['github.com'] }, skillIds: ['document-repo'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+        { id: 'any', name: 'Any link', enabled: true, priority: 1, match: { urlTypes: ['youtube', 'x', 'webpage'] }, skillIds: ['research'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+      ],
+    })
+    const principal = requireBoundOutline(await repository.authenticate(bootstrap.apiToken, 'notes:create'))
+    const gist = await repository.createNote(principal, 'gist', { text: 'https://gist.github.com/someone/abc', source: { kind: 'share' } })
+    const article = await repository.createNote(principal, 'article', { text: 'https://example.com/post', source: { kind: 'share' } })
+
+    const runs = await repository.agentStore.listRuns(outlineId, 10)
+    expect(runs.map((run) => [run.input.target.parentId, run.skillId, run.policyId]).sort()).toEqual([
+      [article.response.noteId, 'research', 'any'],
+      [gist.response.noteId, 'document-repo', 'github'],
+    ].sort())
+  })
+
   it('returns rebase_required for a stale push without advancing the outline revision', async () => {
     const { app, apiToken, deviceToken, outlineId } = await testServer()
     await app.inject({

@@ -25,6 +25,7 @@ import {
   NativeSyncTransport,
   DesktopSyncEngine,
   type SyncRepository,
+  type StreamedBatch,
   type SyncState,
   type SyncTransport,
 } from '../sync/syncEngine'
@@ -46,6 +47,7 @@ export interface OutlineSessionStatus {
   storageBackend: StorageBackend
   saveError: string | null
   maintenanceError: string | null
+  streamSupported: boolean | null
 }
 
 export interface OutlineEventContext extends LocalIdentity {
@@ -72,7 +74,8 @@ export interface SessionSyncEngine {
   state: SyncState
   historyInvalidated: boolean
   appliedEvents?: EventEnvelope[]
-  sync(): Promise<void>
+  streamSupported?: boolean | null
+  sync(streamed?: StreamedBatch): Promise<void>
 }
 
 interface OutlineSessionOptions {
@@ -100,6 +103,7 @@ export class OutlineSession {
     storageBackend: { kind: 'local' },
     saveError: null,
     maintenanceError: null,
+    streamSupported: null,
   }
 
   constructor(
@@ -114,6 +118,12 @@ export class OutlineSession {
   }
 
   getSnapshot = (): OutlineSessionStatus => this.status
+
+  private recordStreamSupport(engine: SessionSyncEngine): void {
+    const supported = engine.streamSupported
+    if (supported === undefined || supported === null) return
+    this.updateStatus({ streamSupported: supported })
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -162,7 +172,9 @@ export class OutlineSession {
     if (mode === 'server') {
       this.updateStatus({ syncState: { kind: 'connecting' } })
       if (!replay) {
-        await this.createSyncEngine().sync()
+        const engine = this.createSyncEngine()
+        await engine.sync()
+        this.recordStreamSupport(engine)
         replay = await this.repository.loadReplayInput(activeIdentity.outlineId)
       }
     } else {
@@ -321,13 +333,15 @@ export class OutlineSession {
 
   async synchronize(
     applyProjection?: (projection: SynchronizedOutline) => void | Promise<void>,
+    streamed?: StreamedBatch,
   ): Promise<SynchronizedOutline | null> {
     if (this.activeSynchronization) return this.activeSynchronization
     const synchronization = this.appendQueue.then(async () => {
       if (this.persistenceBlocked || !this.identityValue) return null
       try {
         const engine = this.createSyncEngine()
-        await engine.sync()
+        await engine.sync(streamed)
+        this.recordStreamSupport(engine)
         if (engine.state.kind !== 'up-to-date') return null
         this.serverRevision = engine.state.revision
         const replay = await this.repository.loadReplayInput(this.identityValue.outlineId)

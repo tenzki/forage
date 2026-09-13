@@ -10,6 +10,7 @@ import { SupadataTranscriptProvider } from './transcript.js'
 import { OpenAIResponsesDispatcherClassifier, OpenAIResponsesModelAdapter } from './serverModel.js'
 import { ServerAgentRunner, ServerAgentWorker } from './serverRunner.js'
 import { OpenAIImageAssetGenerator } from './imageGeneration.js'
+import { PostgresOutlineChangeNotifier } from './outlineStream.js'
 
 const config = loadServerConfig(process.env)
 const pool = new Pool({ connectionString: config.databaseUrl, max: 10 })
@@ -39,8 +40,13 @@ const repository = new PostgresServerRepository(pool, {
   },
 })
 await repository.reconcileNoteProjections()
+const outlineChangeNotifier = new PostgresOutlineChangeNotifier(
+  config.databaseUrl,
+  (error) => app.log.error({ error }, 'Outline change notifications interrupted'),
+)
 const app = buildServer({
   repository,
+  outlineChangeNotifier,
   credentialService,
   supportedAgentToolIds: tools.map((tool) => tool.id),
   agentMaxAttempts: config.agent.worker.maxAttempts,
@@ -50,6 +56,7 @@ const app = buildServer({
     redact: ['req.headers.authorization', 'req.headers.cookie', 'headers.authorization'],
   },
 })
+await outlineChangeNotifier.start()
 const workerId = `worker_${config.instanceId}_${process.pid}`.slice(0, 128)
 const runner = new ServerAgentRunner({
   repository, credentials: credentialService,
@@ -77,7 +84,11 @@ const worker = new ServerAgentWorker({
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    void worker.stop().then(() => app.close()).then(() => pool.end()).finally(() => process.exit(0))
+    void worker.stop()
+      .then(() => app.close())
+      .then(() => outlineChangeNotifier.close())
+      .then(() => pool.end())
+      .finally(() => process.exit(0))
   })
 }
 

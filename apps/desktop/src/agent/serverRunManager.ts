@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ActivityEvent, RunStatus } from '@forage/agent-runtime'
 import type { ServerInvocationIntent } from './serverExecutor'
 import { TauriServerAgentTransport, type ServerAgentTransport } from './serverExecutor'
+import { AGENT_POLL_MS, agentRunSignals, agentWaitMs, waitForAgentRunSignal, type AgentRunSignals } from './agentRunSignals'
+import { streamLiveness, type StreamLivenessTracker } from '../sync/streamLiveness'
 
 export interface RememberedServerRun {
   runId: string
@@ -49,8 +51,17 @@ export class ServerRunManager {
   constructor(
     private readonly transport: ServerAgentTransport,
     private readonly memory: ServerRunMemory,
-    private readonly options: { pollMs?: number; delay?: (milliseconds: number) => Promise<void> } = {},
+    private readonly options: {
+      pollMs?: number
+      delay?: (milliseconds: number) => Promise<void>
+      signals?: AgentRunSignals
+      liveness?: StreamLivenessTracker
+    } = {},
   ) {}
+
+  private waitMs(): number {
+    return this.options.pollMs ?? agentWaitMs((this.options.liveness ?? streamLiveness).get())
+  }
 
   async restore(onActivity?: (event: ActivityEvent, runId: string) => void | Promise<void>): Promise<void> {
     for (const run of await this.memory.load()) this.runs.set(run.runId, run)
@@ -112,7 +123,7 @@ export class ServerRunManager {
       } catch {
         // The run remains remote and durable while the desktop is offline or
         // deliberately disconnected. Keep observing so reconnect needs no UI owner.
-        await delay(Math.max(250, this.options.pollMs ?? 1_000))
+        await delay(Math.max(250, this.options.pollMs ?? AGENT_POLL_MS))
         continue
       }
       let sequence = remembered?.lastSequence ?? 0
@@ -130,7 +141,11 @@ export class ServerRunManager {
       await this.persist()
       await onActivity?.(runStatusEvent(this.runs.get(runId)!), runId)
       if (terminal.has(run.status)) return run
-      await delay(Math.max(0, this.options.pollMs ?? 1_000))
+      await waitForAgentRunSignal(
+        this.options.signals ?? agentRunSignals,
+        runId,
+        delay(Math.max(0, this.waitMs())),
+      )
     }
   }
 

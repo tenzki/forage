@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { invoke } from '@tauri-apps/api/core'
 import { ServerAgentSettings } from './ServerAgentSettings'
@@ -35,6 +35,7 @@ describe('server agent settings', () => {
         nextCursor: null, status: 'running',
       }
       if (command === 'server_agent_cancel') return { runId: 'run-1', status: 'running' }
+      if (command === 'server_agent_automation') return { published: null }
       throw new Error(`unexpected command ${command}`)
     })
   })
@@ -51,20 +52,28 @@ describe('server agent settings', () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('server_agent_cancel', { runId: 'run-1' }))
   })
 
-  it('configures distinct skills and explicit ordering for each link type', async () => {
-    useSettingsStore.setState({
-      skills: [
-        { id: 'transcribe', label: 'transcribe', description: 'Transcript', systemPrompt: 'Transcribe', agentId: 'agent', requiredToolIds: [] },
-        { id: 'research', label: 'research', description: 'Research', systemPrompt: 'Research', agentId: 'agent', requiredToolIds: [] },
-      ],
+  it('offers published server skills in the Inbox link rules', async () => {
+    const fallback = vi.mocked(invoke).getMockImplementation()!
+    vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+      if (command === 'server_agent_configuration') return {
+        configuration: {
+          version: 2, revision: 3, customTools: [], globallyEnabledToolIds: [],
+          agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Help.', toolIds: [] }],
+          skills: [{ id: 'document-repo', label: 'document-repo', description: 'Document', systemPrompt: 'Document', agentId: 'agent', requiredToolIds: [] }],
+        },
+        publishedAt: timestamp,
+      }
+      if (command === 'server_agent_compute_profile') throw new Error('not configured')
+      if (command === 'server_agent_automation') return { published: null }
+      return fallback(command, arguments_)
     })
     const user = userEvent.setup()
     render(<ServerAgentSettings />)
 
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Skill for YouTube links' }), 'transcribe')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Skill for Web links' }), 'research')
-    await user.click(screen.getByRole('button', { name: 'Move Web links up' }))
-    const rows = within(screen.getByTestId('automation-policy-order')).getAllByRole('listitem')
-    expect(rows.map((row) => row.textContent?.match(/YouTube|X links|Web links/)?.[0])).toEqual(['YouTube', 'Web links', 'X links'])
+    await user.click(await screen.findByRole('button', { name: 'Edit GitHub' }))
+    await user.click(screen.getByRole('combobox', { name: 'Add skill to GitHub' }))
+    expect(screen.getByRole('option', { name: '/document-repo' })).toBeTruthy()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Publish link rules' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.queryByRole('combobox', { name: /Skill for/ })).toBeNull()
   })
 })

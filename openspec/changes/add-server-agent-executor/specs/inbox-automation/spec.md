@@ -12,15 +12,19 @@ The server SHALL evaluate automation only for a newly committed Notes API captur
 - **THEN** the server creates the note and admits no automatic run
 
 ### Requirement: Declarative policy matching
-The owner SHALL be able to publish ordered, versioned, enabled or disabled policies using bounded source equality, source kind, URL host/type, and related declarative predicates. Matching SHALL be deterministic, repeated skills SHALL be de-duplicated in priority order, and a policy MAY select multiple configured skills.
+The owner SHALL be able to publish ordered, versioned, enabled or disabled policies using bounded source equality, source kind, URL host/type, and related declarative predicates. Matching SHALL be deterministic: policies are evaluated in priority order and only the first enabled matching policy contributes skills. A policy MAY select multiple configured skills, which SHALL be de-duplicated in listed order. A URL host predicate SHALL match the listed domain and its subdomains.
 
 #### Scenario: Match a YouTube policy
 - **WHEN** source metadata contains a valid known YouTube video URL matching an enabled policy
 - **THEN** the matcher resolves the policy's ordered skills once each without invoking a model for routing
 
-#### Scenario: Multiple policies repeat a skill
-- **WHEN** multiple matching policies select the same skill plus distinct skills
-- **THEN** the repeated skill is admitted once and distinct skills retain deterministic priority order
+#### Scenario: Multiple policies match
+- **WHEN** a capture satisfies more than one enabled policy
+- **THEN** only the highest-priority matching policy's skills are admitted, each once, in listed order
+
+#### Scenario: Match a site and its subdomains
+- **WHEN** a policy lists `github.com` and a capture contains a `gist.github.com` link
+- **THEN** the policy matches, while a `github.community` link does not match it
 
 #### Scenario: Disabled policy matches
 - **WHEN** capture properties satisfy a disabled policy

@@ -16,6 +16,7 @@ import { ActivitySidebar, type ActivityCall } from './components/Agent/ActivityS
 import type { ActivityEvent } from './agent/activity'
 import { applyActivityEvent, callsFromHistory, fromRuntimeEvent } from './agent/activityCalls'
 import { serverRunManager } from './agent/serverRunManager'
+import { agentRunSignals } from './agent/agentRunSignals'
 import {
   captureDocumentEvent,
   DOMAIN_MUTATION_META,
@@ -43,11 +44,18 @@ import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
 import { OutlineSession } from './application/OutlineSession'
+import { connectServerStream } from './sync/serverStream'
+import { streamLiveness } from './sync/streamLiveness'
+import type { StreamedBatch } from './sync/syncEngine'
 import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
+
+const SAFETY_SYNC_INTERVAL_MS = 5 * 60_000
+
+const UNSTREAMED_SYNC_INTERVAL_MS = 15_000
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -98,7 +106,8 @@ export default function App() {
   const persistentHistory = useRef<PersistentHistoryState>({ undo: [], redo: [] })
   const activeChangeGroup = useRef<{ id: string; at: number; key: string } | null>(null)
   const syncInProgress = useRef(false)
-  const synchronizeNow = useRef<() => Promise<void>>(async () => undefined)
+  const synchronizeNow = useRef<(streamed?: StreamedBatch) => Promise<void>>(async () => undefined)
+  const streamUnsupported = sessionStatus.streamSupported === false
 
   const handleActivity = useCallback((event: ActivityEvent) => {
     setActivityCalls((current) => applyActivityEvent(current, event))
@@ -166,7 +175,7 @@ export default function App() {
   useEffect(() => {
     if (!editor || !session.context()) return
     let disposed = false
-    const synchronize = async (): Promise<void> => {
+    const synchronize = async (streamed?: StreamedBatch): Promise<void> => {
       if (syncInProgress.current) {
         await new Promise<void>((resolve) => {
           const wait = window.setInterval(() => {
@@ -239,7 +248,7 @@ export default function App() {
               if (!editor.isDestroyed) editor.setEditable(wasEditable)
               if (application) application.inert = false
             }
-          })
+          }, streamed)
         } finally {
           syncInProgress.current = false
         }
@@ -248,13 +257,65 @@ export default function App() {
     }
     synchronizeNow.current = synchronize
     void synchronize()
-    const timer = window.setInterval(() => { void synchronize() }, 15_000)
+    let timer = 0
+    const scheduleSync = () => {
+      const streamed = session.getSnapshot().storageBackend.kind !== 'server'
+        || streamLiveness.get() === 'live'
+      const wait = streamed ? SAFETY_SYNC_INTERVAL_MS : UNSTREAMED_SYNC_INTERVAL_MS
+      timer = window.setTimeout(() => { void synchronize().finally(scheduleSync) }, wait)
+    }
+    scheduleSync()
+    const synchronizeOnWake = () => { void synchronize() }
+    window.addEventListener('focus', synchronizeOnWake)
+    window.addEventListener('online', synchronizeOnWake)
     return () => {
       disposed = true
       if (synchronizeNow.current === synchronize) synchronizeNow.current = async () => undefined
-      window.clearInterval(timer)
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', synchronizeOnWake)
+      window.removeEventListener('online', synchronizeOnWake)
     }
   }, [editor, session])
+
+  useEffect(() => {
+    if (sessionStatus.storageBackend.kind !== 'server') return
+    if (streamUnsupported) {
+      streamLiveness.set('unsupported')
+      return
+    }
+    const context = session.context()
+    if (!context) return
+    let disposed = false
+    let disconnect: (() => void) | null = null
+    void connectServerStream(context.baseRevision, {
+      onBatch: (batch) => {
+        if (disposed) return
+        void synchronizeNow.current({ outlineId: context.outlineId, ...batch })
+      },
+      onResync: () => { if (!disposed) void synchronizeNow.current() },
+      onAgent: (signal) => agentRunSignals.notify(signal.runId),
+      onConnected: () => {
+        if (disposed) return
+        streamLiveness.set('live')
+        agentRunSignals.notifyAll()
+        void synchronizeNow.current()
+      },
+      onDisconnected: () => { if (!disposed) streamLiveness.set('down') },
+      onAuthFailed: () => {
+        if (disposed) return
+        streamLiveness.set('unsupported')
+        void synchronizeNow.current()
+      },
+    }).then((stop) => {
+      if (disposed) stop()
+      else disconnect = stop
+    }).catch(() => streamLiveness.set('down'))
+    return () => {
+      disposed = true
+      streamLiveness.set('down')
+      disconnect?.()
+    }
+  }, [session, sessionStatus.storageBackend.kind, streamUnsupported])
 
   useEffect(() => {
     const handleSystemNodeRejection = (event: Event) => {

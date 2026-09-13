@@ -16,15 +16,37 @@ const policies: AutomationPolicySet = {
 }
 
 describe('Inbox automation policy matching', () => {
-  it('matches deterministic facts in priority order and de-duplicates skills', () => {
+  it('admits only the first matching policy in priority order and de-duplicates its skills', () => {
     expect(matchAutomationPolicies(policies, {
       source: { app: 'shortcuts', kind: 'share' },
       urls: [{ type: 'youtube', host: 'www.youtube.com' }],
     })).toEqual([
       { skillId: 'transcribe', policyId: 'youtube' },
       { skillId: 'shared', policyId: 'youtube' },
+    ])
+  })
+
+  it('skips a disabled or non-matching higher policy and falls through to the next match', () => {
+    expect(matchAutomationPolicies(policies, {
+      source: { app: 'other' },
+      urls: [{ type: 'youtube', host: 'www.youtube.com' }],
+    })).toEqual([
+      { skillId: 'shared', policyId: 'host' },
       { skillId: 'document', policyId: 'host' },
     ])
+  })
+
+  it('matches a site domain and its subdomains but not look-alike hosts', () => {
+    const set: AutomationPolicySet = { ...policies, policies: [
+      { id: 'github', name: 'GitHub', enabled: true, priority: 2, match: { urlHosts: ['github.com'] }, skillIds: ['document-repo'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+      { id: 'any', name: 'Any link', enabled: true, priority: 1, match: { urlTypes: ['youtube', 'x', 'webpage'] }, skillIds: ['research'], dispatcher: { enabled: false, allowedSkillIds: [] } },
+    ] }
+    const skillFor = (host: string) => matchAutomationPolicies(set, { source: {}, urls: [{ type: 'webpage', host }] })
+    expect(skillFor('github.com')).toEqual([{ skillId: 'document-repo', policyId: 'github' }])
+    expect(skillFor('www.github.com')).toEqual([{ skillId: 'document-repo', policyId: 'github' }])
+    expect(skillFor('gist.github.com')).toEqual([{ skillId: 'document-repo', policyId: 'github' }])
+    expect(skillFor('github.community')).toEqual([{ skillId: 'research', policyId: 'any' }])
+    expect(skillFor('notgithub.com')).toEqual([{ skillId: 'research', policyId: 'any' }])
   })
 
   it('matches source kind and source equality using conjunctive predicates', () => {
@@ -50,8 +72,8 @@ describe('Inbox automation policy matching', () => {
     )).resolves.toEqual(['research'])
   })
 
-  it('uses a dispatcher only for explicitly configured policies and keeps global de-duplication', async () => {
-    const classify = async () => ['document', 'invented', 'shared']
+  it('uses a dispatcher only for explicitly configured policies and stops at that first match', async () => {
+    const classify = async () => ['document', 'invented', 'shared', 'document']
     const set: AutomationPolicySet = { ...policies, policies: [{
       id: 'ambiguous', name: 'Ambiguous', enabled: true, priority: 30,
       match: { sourceKinds: ['share'] }, skillIds: ['document', 'shared'],
@@ -63,7 +85,11 @@ describe('Inbox automation policy matching', () => {
     )).resolves.toEqual([
       { skillId: 'document', policyId: 'ambiguous' },
       { skillId: 'shared', policyId: 'ambiguous' },
-      { skillId: 'research', policyId: 'web' },
     ])
+    await expect(resolveAutomationMatches(
+      set, { source: { kind: 'share' }, urls: [{ type: 'webpage', host: 'example.com' }] },
+      { text: 'mixed', source: { kind: 'share' } }, { classify: async () => [] }, new AbortController().signal,
+    )).resolves.toEqual([])
+    expect(matchAutomationPolicies(set, { source: { kind: 'share' }, urls: [{ type: 'webpage', host: 'example.com' }] })).toEqual([])
   })
 })

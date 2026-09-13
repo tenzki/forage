@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { ComboboxFieldInput } from './ComboboxFieldInput'
 import { SearchInput } from './SearchInput'
 import { SegmentedControl } from './SegmentedControl'
 import { SwitchFieldInput } from './SwitchFieldInput'
@@ -63,6 +64,29 @@ describe('OpenSourceUI adaptations', () => {
     const checkbox = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Web search' })
     await user.click(checkbox)
     expect(checkbox.checked).toBe(true)
+  })
+
+  it('picks a combobox option from the keyboard and clears the query when used as an add picker', async () => {
+    const user = userEvent.setup()
+    const onValueChange = vi.fn()
+    render(
+      <ComboboxFieldInput
+        label="Add skill"
+        clearOnSelect
+        value=""
+        options={[{ value: 'research', label: '/research' }, { value: 'transcribe', label: '/transcribe' }]}
+        onValueChange={onValueChange}
+      />,
+    )
+
+    const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Add skill' })
+    await user.type(input, 'trans')
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['/transcribe'])
+    await user.keyboard('{Enter}')
+
+    expect(onValueChange).toHaveBeenCalledWith('transcribe')
+    expect(input.value).toBe('')
+    expect(screen.queryByRole('listbox')).toBeNull()
   })
 
   it('delegates alert dismissal to application state', async () => {

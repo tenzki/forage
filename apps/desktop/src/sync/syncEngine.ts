@@ -69,6 +69,20 @@ export interface SyncTransport {
   >
 }
 
+/** The outline stream protocol version this client speaks. */
+export const STREAM_VERSION = 1
+
+/**
+ * A contiguous run of authoritative events delivered over the server stream.
+ * `fromRevision` is the revision the batch follows, not its first event.
+ */
+export interface StreamedBatch {
+  outlineId: string
+  fromRevision: number
+  toRevision: number
+  events: EventEnvelope[]
+}
+
 export class NativeSyncTransport implements SyncTransport {
   async status(): Promise<ServerStatus> {
     return serverStatusSchema.parse(await invoke('server_test_connection'))
@@ -100,6 +114,11 @@ export class DesktopSyncEngine {
   state: SyncState = { kind: 'offline' }
   historyInvalidated = false
   appliedEvents: EventEnvelope[] = []
+  /**
+   * Whether the server offers an outline stream this client understands, or
+   * `null` when no synchronization has reached the status endpoint yet.
+   */
+  streamSupported: boolean | null = null
 
   constructor(
     private readonly repository: SyncRepository,
@@ -108,16 +127,18 @@ export class DesktopSyncEngine {
     private readonly clientVersion = '0.1.0',
   ) {}
 
-  async sync(): Promise<void> {
+  async sync(streamed?: StreamedBatch): Promise<void> {
     this.historyInvalidated = false
     this.appliedEvents = []
     if (await this.repository.storageMode() === 'local') {
       this.transition({ kind: 'local-only' })
       return
     }
+    if (streamed && await this.ingestStreamed(streamed)) return
     this.transition({ kind: 'connecting' })
     try {
       const status = await this.transport.status()
+      this.streamSupported = (status.streamVersions ?? []).includes(STREAM_VERSION)
       if (!status.apiVersions.includes(1) || status.documentSchemaVersion !== 1 || compareVersions(this.clientVersion, status.minimumClientVersion) < 0) {
         this.transition({ kind: 'upgrade-required', message: 'This server requires a newer Forage client.' })
         return
@@ -175,6 +196,53 @@ export class DesktopSyncEngine {
     }
   }
 
+  /**
+   * Applies stream-delivered events without contacting the server.
+   *
+   * Returns false when the batch cannot be trusted to stand alone - a gap, an
+   * unsynchronized local edit, or a missing checkpoint - leaving the caller to
+   * run a full synchronization instead.
+   */
+  private async ingestStreamed(batch: StreamedBatch): Promise<boolean> {
+    if (batch.events.length === 0) return false
+    const pending = await this.repository.pending(batch.outlineId, 1)
+    if (pending.length > 0) return false
+    const replay = await this.repository.loadReplayInput(batch.outlineId)
+    if (!replay) return false
+    const localRevision = Math.max(
+      replay.checkpoint.serverRevision,
+      ...replay.events.map((event) => event.revision ?? 0),
+    )
+    if (batch.fromRevision !== localRevision) return false
+    this.transition({ kind: 'syncing' })
+    const projected = replayOutlineEvents(replay.state, replay.events)
+    const applied = await this.applyRemoteEvents(batch.outlineId, localRevision, projected, batch.events)
+    this.transition({ kind: 'up-to-date', revision: Math.max(applied.cursor, batch.toRevision) })
+    return true
+  }
+
+  /** The single validate, project, and persist path for authoritative remote events. */
+  private async applyRemoteEvents(
+    outlineId: string,
+    after: number,
+    state: OutlineState,
+    events: EventEnvelope[],
+  ): Promise<{ cursor: number; projected: OutlineState }> {
+    let cursor = after
+    let projected = state
+    for (const event of events) {
+      const parsed = parseEventEnvelope(event)
+      requireSupportedAgentEvent(parsed)
+      this.appliedEvents.push(parsed)
+      projected = reduceOutlineEvent(projected, parsed)
+      await this.repository.append(parsed)
+      if (invalidatesDocumentHistory(parsed)) this.historyInvalidated = true
+      cursor = Math.max(cursor, parsed.revision ?? cursor)
+    }
+    await this.repository.recordPulled(outlineId, cursor)
+    return { cursor, projected }
+  }
+
   private async pullAll(outlineId: string, after: number, replayInput?: ReplayInput): Promise<number> {
     let cursor = after
     const replay = replayInput ?? await this.repository.loadReplayInput(outlineId)
@@ -182,16 +250,9 @@ export class DesktopSyncEngine {
     let projected = replayOutlineEvents(replay.state, replay.events)
     for (;;) {
       const page = await this.transport.pull(cursor, 100)
-      for (const event of page.events) {
-        const parsed = parseEventEnvelope(event)
-        requireSupportedAgentEvent(parsed)
-        this.appliedEvents.push(parsed)
-        projected = reduceOutlineEvent(projected, parsed)
-        await this.repository.append(parsed)
-        if (invalidatesDocumentHistory(parsed)) this.historyInvalidated = true
-        cursor = Math.max(cursor, parsed.revision ?? cursor)
-      }
-      await this.repository.recordPulled(outlineId, cursor)
+      const applied = await this.applyRemoteEvents(outlineId, cursor, projected, page.events)
+      cursor = applied.cursor
+      projected = applied.projected
       if (page.nextAfterRevision === null) return Math.max(cursor, page.currentRevision)
       cursor = page.nextAfterRevision
     }

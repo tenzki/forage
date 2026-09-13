@@ -6,18 +6,12 @@ import { useSettingsStore } from '../../store/settingsStore'
 import type { ServerConnectionInfo } from '../../persistence/eventStore'
 import { invoke } from '@tauri-apps/api/core'
 import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
-import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { InboxLinkRules } from './InboxLinkRules'
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 type RunDetail = Awaited<ReturnType<TauriServerAgentTransport['run']>>
 type RunSummary = Awaited<ReturnType<TauriServerAgentTransport['runs']>>['runs'][number]
 type RunActivity = Awaited<ReturnType<TauriServerAgentTransport['activity']>>['events'][number]
-type LinkPolicyId = 'youtube' | 'x' | 'web'
-const linkPolicies: Record<LinkPolicyId, { id: string; label: string; urlType: LinkPolicyId | 'webpage' }> = {
-  youtube: { id: 'youtube-links', label: 'YouTube links', urlType: 'youtube' },
-  x: { id: 'x-links', label: 'X links', urlType: 'x' },
-  web: { id: 'web-links', label: 'Web links', urlType: 'webpage' },
-}
 
 export function ServerAgentSettings() {
   const agents = useSettingsStore((state) => state.agents)
@@ -28,11 +22,7 @@ export function ServerAgentSettings() {
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [revision, setRevision] = useState(0)
   const [credential, setCredential] = useState<CredentialMetadata | null>(null)
-  const [policyOrder, setPolicyOrder] = useState<LinkPolicyId[]>(['youtube', 'x', 'web'])
-  const [policySkills, setPolicySkills] = useState<Record<LinkPolicyId, string>>({
-    youtube: skills[0]?.id ?? '', x: skills[0]?.id ?? '', web: skills[0]?.id ?? '',
-  })
-  const [automationEnabled, setAutomationEnabled] = useState(false)
+  const [publishedSkills, setPublishedSkills] = useState<Array<{ id: string; label: string }>>([])
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null)
   const [runActivity, setRunActivity] = useState<RunActivity[]>([])
@@ -50,6 +40,7 @@ export function ServerAgentSettings() {
       try {
         const published = await transport.configuration()
         setRevision(published.configuration.revision)
+        setPublishedSkills(published.configuration.skills)
         const compute = await transport.computeProfile()
         setCredential(await transport.credential(compute.profile.credentialRef))
       } catch { /* the first publication starts at revision zero */ }
@@ -69,31 +60,8 @@ export function ServerAgentSettings() {
         ),
       })
       setRevision(published.configuration.revision)
+      setPublishedSkills(published.configuration.skills)
       setStatus(`Published server agent configuration revision ${published.configuration.revision}.`)
-    } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
-  }
-
-  async function publishAutomation() {
-    if (policyOrder.some((kind) => !policySkills[kind])) return setStatus('Choose a skill for every captured link type.')
-    setBusy(true); setStatus(null)
-    try {
-      const current = await transport.automation() as { published?: { policies?: { revision?: number } } | null }
-      const baseRevision = current.published?.policies?.revision ?? 0
-      await transport.publishAutomation({
-        baseRevision,
-        policies: {
-          version: 1, revision: baseRevision + 1, enabled: automationEnabled,
-          policies: policyOrder.map((kind, index) => {
-            const policy = linkPolicies[kind]
-            return {
-              id: policy.id, name: policy.label, enabled: automationEnabled,
-              priority: policyOrder.length - index, match: { urlTypes: [policy.urlType] },
-              skillIds: [policySkills[kind]], dispatcher: { enabled: false, allowedSkillIds: [] },
-            }
-          }),
-        },
-      })
-      setStatus(automationEnabled ? 'Inbox link automation enabled.' : 'Disabled link policies published.')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
   }
 
@@ -158,17 +126,6 @@ export function ServerAgentSettings() {
     if (targetId) window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, { detail: { targetId } }))
   }
 
-  function movePolicy(kind: LinkPolicyId, direction: -1 | 1) {
-    setPolicyOrder((current) => {
-      const from = current.indexOf(kind)
-      const to = from + direction
-      if (from < 0 || to < 0 || to >= current.length) return current
-      const next = [...current]
-      ;[next[from], next[to]] = [next[to]!, next[from]!]
-      return next
-    })
-  }
-
   if (!connection) return null
   return (
     <div className="auth-card server-agent-settings">
@@ -180,27 +137,7 @@ export function ServerAgentSettings() {
         {credential?.status === 'connected' && <button className="settings-secondary" disabled={busy} onClick={() => void disconnectCredential()}>Disconnect credential</button>}
       </div>
       <hr />
-      <strong>Ordered link policies</strong>
-      <ol data-testid="automation-policy-order">{policyOrder.map((kind, index) => {
-        const policy = linkPolicies[kind]
-        const selectId = `automation-skill-${kind}`
-        return <li key={kind}>
-          <label htmlFor={selectId}>Skill for {policy.label}</label>
-          <select id={selectId} value={policySkills[kind]} onChange={(event) => setPolicySkills((current) => ({ ...current, [kind]: event.target.value }))}>
-            <option value="">Choose a skill</option>
-            {skills.map((skill) => <option key={skill.id} value={skill.id}>/{skill.label}</option>)}
-          </select>
-          <button className="settings-secondary" disabled={index === 0} aria-label={`Move ${policy.label} up`} onClick={() => movePolicy(kind, -1)}>↑</button>
-          <button className="settings-secondary" disabled={index === policyOrder.length - 1} aria-label={`Move ${policy.label} down`} onClick={() => movePolicy(kind, 1)}>↓</button>
-        </li>
-      })}</ol>
-      <SwitchFieldInput
-        checked={automationEnabled}
-        label="Enable Inbox link automation"
-        hint="Run the selected skill automatically when a matching link reaches the Inbox."
-        onCheckedChange={setAutomationEnabled}
-      />
-      <button className="settings-save" disabled={busy || revision === 0} onClick={() => void publishAutomation()}>Publish link policies</button>
+      <InboxLinkRules skills={publishedSkills} transport={transport} canPublish={revision > 0} />
       {runs.length > 0 && <div><strong>Recent runs</strong><ul>{runs.map((run) => <li key={run.id}>
         <button className="settings-secondary" disabled={busy} onClick={() => void inspectRun(run.id)} aria-label={`View /${run.skillId} ${run.status}`}>
           /{run.skillId} · {run.status} · {new Date(run.admittedAt).toLocaleString()}

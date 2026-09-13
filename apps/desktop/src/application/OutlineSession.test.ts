@@ -653,6 +653,35 @@ describe('OutlineSession synchronization', () => {
     })
   })
 
+  it('publishes whether the server offers a stream, and keeps the last answer', async () => {
+    const repo = repository()
+    let supported: boolean | null = true
+    const session = new OutlineSession(repo.value, undefined, {
+      createSyncEngine: (onState) => ({
+        state: { kind: 'offline' }, historyInvalidated: false,
+        get streamSupported() { return supported },
+        async sync() {
+          this.state = { kind: 'up-to-date', revision: 1 }
+          onState(this.state)
+        },
+      }),
+    })
+    await session.open()
+    expect(session.getSnapshot().streamSupported).toBeNull()
+
+    await session.synchronize()
+    expect(session.getSnapshot().streamSupported).toBe(true)
+
+    // An engine that never reached the status endpoint must not erase it.
+    supported = null
+    await session.synchronize()
+    expect(session.getSnapshot().streamSupported).toBe(true)
+
+    supported = false
+    await session.synchronize()
+    expect(session.getSnapshot().streamSupported).toBe(false)
+  })
+
   it('lets an agent sync barrier wait for synchronization already in progress', async () => {
     const repo = repository()
     let release!: () => void

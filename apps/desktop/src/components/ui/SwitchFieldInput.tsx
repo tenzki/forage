@@ -1,5 +1,6 @@
-import { useId, useRef, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { cn } from './cn'
+import { Switch } from './Switch'
 
 export interface SwitchFieldInputProps {
   checked: boolean
@@ -25,7 +26,6 @@ export function SwitchFieldInput({
 }: SwitchFieldInputProps) {
   const id = useId()
   const hintId = `${id}-hint`
-  const hasInteracted = useRef(false)
 
   return (
     <div
@@ -38,38 +38,15 @@ export function SwitchFieldInput({
         {hint ? <div id={hintId} className="mt-0.5 text-xs leading-5 text-neutral-500">{hint}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <label className={cn(
-          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-forage-600',
-          disabled && 'cursor-not-allowed opacity-50',
-        )}>
-          <input
-            id={id}
-            type="checkbox"
-            checked={checked}
-            disabled={disabled}
-            aria-label={switchAriaLabel}
-            aria-labelledby={switchAriaLabel ? undefined : `${id}-label`}
-            aria-describedby={hint ? hintId : undefined}
-            onChange={(event) => {
-              hasInteracted.current = true
-              onCheckedChange(event.target.checked)
-            }}
-            className="peer sr-only"
-          />
-          <span
-            aria-hidden="true"
-            data-on={String(checked)}
-            className={cn(
-              't-toggle absolute inset-0 rounded-full border-2 transition-[background-color,border-color] duration-200 peer-checked:border-neutral-900 peer-checked:bg-neutral-900 [--toggle-travel:20px]',
-              hasInteracted.current && 'is-init',
-              checked ? 'border-neutral-900 bg-neutral-900' : 'border-neutral-200 bg-neutral-100',
-            )}
-          >
-            <span
-              className="t-toggle-thumb pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-xs"
-            />
-          </span>
-        </label>
+        <Switch
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          aria-label={switchAriaLabel}
+          aria-labelledby={switchAriaLabel ? undefined : `${id}-label`}
+          aria-describedby={hint ? hintId : undefined}
+          onCheckedChange={onCheckedChange}
+        />
         {actions}
       </div>
     </div>

@@ -57,6 +57,19 @@ impl PinnedServer {
         Ok(endpoint)
     }
 
+    pub fn websocket_endpoint(&self, path: &str) -> Result<Url, TransportError> {
+        let mut endpoint = self.endpoint(path)?;
+        let scheme = match endpoint.scheme() {
+            "https" => "wss",
+            "http" => "ws",
+            _ => return Err(TransportError::InvalidOrigin),
+        };
+        endpoint
+            .set_scheme(scheme)
+            .map_err(|_| TransportError::InvalidOrigin)?;
+        Ok(endpoint)
+    }
+
     pub fn verify_response_url(&self, value: &str) -> Result<(), TransportError> {
         let response = Url::parse(value).map_err(|_| TransportError::OriginChanged)?;
         self.verify_url(&response)

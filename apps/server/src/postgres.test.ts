@@ -8,6 +8,12 @@ import { createInitialOutlineState } from '@forage/domain'
 import { repairSystemNodes } from '@forage/document'
 import { parseEventEnvelope } from '@forage/domain'
 import { PostgresProviderCredentialStore } from './postgresCredentialStore'
+import {
+  AGENT_ACTIVITY_CHANNEL,
+  OUTLINE_CHANGED_CHANNEL,
+  PostgresOutlineChangeNotifier,
+  type OutlineChangeSignal,
+} from './outlineStream'
 import { ServerCredentialService } from './credentialService'
 
 const connectionString = process.env.TEST_DATABASE_URL ?? 'postgres://forage:forage@127.0.0.1:55437/forage_contract_test'
@@ -63,7 +69,7 @@ const describePostgres = process.env.TEST_DATABASE_URL ? describe : describe.ski
 
 describePostgres('PostgreSQL server repository', () => {
   beforeAll(async () => {
-    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql']) {
+    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql', '0005_outline_stream.sql']) {
       await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), 'utf8'))
     }
   })
@@ -410,5 +416,79 @@ describePostgres('PostgreSQL server repository', () => {
     await repository.agentStore.requestCancellation(bootstrap.outlineId, 'run-cancel', new Date())
     await expect(repository.commitAgentResult('run-cancel', 'worker', structured)).rejects.toThrow(/cancellation/i)
     expect(await repository.agentStore.getRun(bootstrap.outlineId, 'run-cancel')).toMatchObject({ status: 'running' })
+  })
+  it('notifies subscribers when any process advances the outline revision', async () => {
+    const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
+    const bootstrap = await bootstrapSeeded(repository)
+    const notifier = new PostgresOutlineChangeNotifier(connectionString)
+    await notifier.start()
+    try {
+      const signals: OutlineChangeSignal[] = []
+      notifier.subscribe(bootstrap.outlineId, (signal) => { signals.push(signal) })
+
+      // A second pool stands in for the agent worker: a separate connection an
+      // in-process emitter in the API would never observe.
+      const worker = new Pool({ connectionString })
+      try {
+        await worker.query('UPDATE outlines SET current_revision = current_revision + 1 WHERE id = $1', [bootstrap.outlineId])
+      } finally {
+        await worker.end()
+      }
+
+      await vi.waitFor(() => expect(signals).toHaveLength(1))
+      expect(signals[0]).toMatchObject({ kind: 'outline', outlineId: bootstrap.outlineId })
+    } finally {
+      await notifier.close()
+    }
+  })
+
+  it('stays silent when an outline is updated without changing its revision', async () => {
+    const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
+    const bootstrap = await bootstrapSeeded(repository)
+    const listener = await pool.connect()
+    try {
+      const payloads: string[] = []
+      listener.on('notification', (notification) => { payloads.push(notification.payload ?? '') })
+      await listener.query(`LISTEN ${OUTLINE_CHANGED_CHANNEL}`)
+      await pool.query('UPDATE outlines SET name = $2 WHERE id = $1', [bootstrap.outlineId, 'Renamed'])
+      await pool.query('UPDATE outlines SET current_revision = current_revision + 1 WHERE id = $1', [bootstrap.outlineId])
+      await vi.waitFor(() => expect(payloads).toHaveLength(1))
+    } finally {
+      listener.release()
+    }
+  })
+
+  it('notifies subscribers when a worker appends agent activity', async () => {
+    const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
+    const bootstrap = await bootstrapSeeded(repository)
+    const listener = await pool.connect()
+    try {
+      const payloads: unknown[] = []
+      listener.on('notification', (notification) => { payloads.push(JSON.parse(notification.payload ?? '{}')) })
+      await listener.query(`LISTEN ${AGENT_ACTIVITY_CHANNEL}`)
+
+      await pool.query(
+        `INSERT INTO agent_provider_credentials(id, owner_id, outline_id, provider, status)
+         VALUES ('cred_1', $1, $2, 'openai', 'connected')`,
+        [bootstrap.ownerId, bootstrap.outlineId],
+      )
+      await pool.query(
+        `INSERT INTO agent_runs(
+           id, owner_id, outline_id, trigger_kind, trigger_identity, target_note_id,
+           input_snapshot, definition_snapshot, configuration_revision, credential_reference, status
+         ) VALUES ('run_1', $1, $2, 'manual', 'trigger_1', $3, '{}', '{}', 1, 'cred_1', 'queued')`,
+        [bootstrap.ownerId, bootstrap.outlineId, bootstrap.inboxId],
+      )
+      await pool.query(
+        `INSERT INTO agent_run_events(run_id, sequence, event) VALUES ('run_1', 1, '{"type":"started"}')`,
+      )
+
+      await vi.waitFor(() => expect(payloads.length).toBeGreaterThanOrEqual(1))
+      expect(payloads).toContainEqual({
+        outlineId: bootstrap.outlineId, runId: 'run_1', activitySeq: 1, status: 'queued',
+      })
+    } finally {
+      listener.release()
+    }
   })
 })

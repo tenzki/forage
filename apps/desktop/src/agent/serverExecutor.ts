@@ -23,6 +23,8 @@ import {
   outlineSearchResponseSchema,
 } from '@forage/protocol'
 import { runInputSchema, type ActivityEvent, type RunInput, type RunStatus } from '@forage/agent-runtime'
+import { agentRunSignals, agentWaitMs, waitForAgentRunSignal, type AgentRunSignals } from './agentRunSignals'
+import { streamLiveness, type StreamLivenessTracker } from '../sync/streamLiveness'
 
 type RunDetail = z.infer<typeof agentRunDetailSchema>
 type ActivityPage = z.infer<typeof agentActivityPageSchema>
@@ -119,14 +121,28 @@ export interface ServerExecutionHandle {
 export interface ServerInvocationOptions { onActivity?: (event: ActivityEvent) => void | Promise<void> }
 
 export class ServerAgentExecutor {
-  private readonly pollMs: number
+  private readonly pollMs: number | null
   private readonly delay: (milliseconds: number) => Promise<void>
+  private readonly signals: AgentRunSignals
+  private readonly liveness: StreamLivenessTracker
   constructor(
     private readonly transport: ServerAgentTransport,
-    options: { pollMs?: number; delay?: (milliseconds: number) => Promise<void> } = {},
+    options: {
+      pollMs?: number
+      delay?: (milliseconds: number) => Promise<void>
+      signals?: AgentRunSignals
+      liveness?: StreamLivenessTracker
+    } = {},
   ) {
-    this.pollMs = Math.max(0, options.pollMs ?? 1_000)
+    this.pollMs = options.pollMs === undefined ? null : Math.max(0, options.pollMs)
     this.delay = options.delay ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))
+    this.signals = options.signals ?? agentRunSignals
+    this.liveness = options.liveness ?? streamLiveness
+  }
+
+  /** Read per wait, so a stream that drops mid-run tightens the loop at once. */
+  private waitMs(): number {
+    return this.pollMs ?? agentWaitMs(this.liveness.get())
   }
 
   async invoke(rawInput: ServerInvocationIntent | RunInput, options: ServerInvocationOptions = {}): Promise<ServerExecutionHandle> {
@@ -164,7 +180,7 @@ export class ServerAgentExecutor {
       if (['failed', 'cancelled', 'interrupted'].includes(run.status)) {
         throw new ServerAgentExecutionError(run)
       }
-      await this.delay(this.pollMs)
+      await waitForAgentRunSignal(this.signals, runId, this.delay(this.waitMs()))
     }
   }
 }

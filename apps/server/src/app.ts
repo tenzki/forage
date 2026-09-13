@@ -49,6 +49,7 @@ import { CredentialServiceError, type ServerCredentialService } from './credenti
 import type { AssetStorage } from './assets.js'
 import { verifyAssetBytes } from './assets.js'
 import { redactSecrets } from './credentialCrypto.js'
+import { registerOutlineStream, type OutlineChangeNotifier } from './outlineStream.js'
 
 export interface ServerOptions {
   repository: ServerRepository
@@ -58,11 +59,30 @@ export interface ServerOptions {
   supportedAgentToolIds?: string[]
   agentMaxAttempts?: number
   workerAvailable?: boolean
+  /**
+   * Live change fan-out for connected desktops. The outline stream endpoint is
+   * registered only when one is supplied, so a deployment without it keeps
+   * working over polling alone.
+   */
+  outlineChangeNotifier?: OutlineChangeNotifier
 }
 
 export function buildServer(options: ServerOptions): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 7_500_000 })
   const { repository } = options
+
+  if (options.outlineChangeNotifier) {
+    registerOutlineStream(app, {
+      repository,
+      notifier: options.outlineChangeNotifier,
+      authorize: async (request) => {
+        const principal = await requireReadyOutline(
+          repository, requireBoundOutline(await authorize(repository, request.headers.authorization, 'sync')),
+        )
+        return principal.outlineId
+      },
+    })
+  }
 
   app.get('/health/live', async () => ({ status: 'live' }))
   app.get('/health/ready', async (_request, reply) => {
@@ -96,6 +116,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     documentSchemaVersion: 1,
     minimumClientVersion: '0.1.0',
     agentAdmissionVersions: [1, 2],
+    ...(options.outlineChangeNotifier ? { streamVersions: [1] } : {}),
   }))
 
   app.post('/api/v1/notes', async (request, reply) => {

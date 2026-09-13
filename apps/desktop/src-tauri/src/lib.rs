@@ -1,6 +1,7 @@
 pub mod assets;
 pub mod commands;
 pub mod persistence;
+pub mod server_stream;
 pub mod server_transport;
 pub mod sync_commands;
 
@@ -31,6 +32,7 @@ pub fn run() {
                 asset_store,
                 http_client,
             });
+            app.manage(server_stream::ServerStreamState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -77,6 +79,8 @@ pub fn run() {
             commands::event_store_mark_seeded,
             sync_commands::server_test_connection,
             sync_commands::server_checkpoint,
+            server_stream::server_stream_connect,
+            server_stream::server_stream_disconnect,
             sync_commands::server_pull_events,
             sync_commands::server_push_events,
             sync_commands::server_upload_asset,

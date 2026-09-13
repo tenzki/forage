@@ -658,7 +658,7 @@ async fn agent_request(
     .await
 }
 
-fn connection(
+pub(crate) fn connection(
     state: &State<'_, NativeState>,
 ) -> Result<(ServerConfiguration, PinnedServer, String), String> {
     let configuration = state

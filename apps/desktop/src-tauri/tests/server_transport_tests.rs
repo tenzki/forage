@@ -66,3 +66,28 @@ fn passes_the_rebase_signal_through_and_reports_every_other_conflict() {
     let accepted = json!({ "status": "accepted" });
     assert_eq!(interpret_response(200, accepted.clone()), Ok(accepted));
 }
+
+#[test]
+fn derives_stream_urls_from_the_pinned_origin_only() {
+    let pinned = PinnedServer::parse("https://notes.example", "instance-1").expect("pinned origin");
+    assert_eq!(
+        pinned
+            .websocket_endpoint("/api/v1/outlines/outline_1/stream")
+            .expect("stream endpoint")
+            .as_str(),
+        "wss://notes.example/api/v1/outlines/outline_1/stream",
+    );
+
+    let loopback = PinnedServer::parse("http://127.0.0.1:4000", "instance-1").expect("loopback");
+    assert_eq!(
+        loopback
+            .websocket_endpoint("/api/v1/outlines/outline_1/stream")
+            .expect("stream endpoint")
+            .as_str(),
+        "ws://127.0.0.1:4000/api/v1/outlines/outline_1/stream",
+    );
+
+    // A caller cannot redirect the stream off the pinned origin through the path.
+    assert!(pinned.websocket_endpoint("//evil.example/stream").is_err());
+    assert!(pinned.websocket_endpoint("api/v1/stream").is_err());
+}
