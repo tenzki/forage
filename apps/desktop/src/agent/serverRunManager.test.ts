@@ -48,4 +48,24 @@ describe('server run manager', () => {
     expect(stored[0]?.status).toBe('completed')
     expect(transport.activity).toHaveBeenCalledTimes(2)
   })
+
+  it('clears finished history while retaining active runs for restart recovery', async () => {
+    let stored: RememberedServerRun[] = [
+      { runId: 'done', invocationId: 'done-invocation', lastSequence: 3, status: 'completed', updatedAt: '2026-09-13T10:00:03.000Z' },
+    ]
+    const memory: ServerRunMemory = { load: async () => stored, save: async (runs) => { stored = structuredClone(runs) } }
+    const transport = {
+      invoke: vi.fn(async () => ({ runId: 'active', status: 'queued' as const, admittedAt: '2026-09-13T10:00:04.000Z' })),
+      activity: vi.fn(() => new Promise<never>(() => undefined)),
+      run: vi.fn(), cancel: vi.fn(), retry: vi.fn(),
+    } as unknown as ServerAgentTransport
+    const manager = new ServerRunManager(transport, memory)
+
+    await manager.restore()
+    await manager.invoke({ version: 2, invocationId: 'active-invocation', sourceNodeId: 'node', skillId: 'skill', prompt: '', acknowledgedOutlineRevision: 1 })
+    await manager.clearFinishedHistory()
+
+    expect(stored).toEqual([expect.objectContaining({ runId: 'active', status: 'queued' })])
+    expect(manager.remembered()).toEqual([expect.objectContaining({ runId: 'active' })])
+  })
 })

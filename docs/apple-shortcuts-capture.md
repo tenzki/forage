@@ -45,7 +45,7 @@ YouTube, X, and webpage rules can each select a different published skill and ca
 
 YouTube, X/Twitter, and webpage policies are disabled by default. Enable them only after publishing compatible server skills and enrolling a server credential. A typical YouTube skill requires `youtube_transcript` and asks for a summary plus transcript notes; an X or webpage research skill uses `x_read`, `web_fetch`, and optionally `web_search`. Output is attached below the stable capture and synchronized as ordinary agent-provenance notes.
 
-`Idempotency-Key` is mandatory. Repeating the exact request with the same key returns the original result; reusing that key with changed content returns `409 Conflict`. Generate the key once near the start of the Shortcut and reuse that variable if the workflow contains an explicit retry branch.
+`Idempotency-Key` is optional but recommended for retry-safe capture. Repeating the exact request with the same key returns the original result; reusing that key with changed content returns `409 Conflict`. Without it, every request creates a new note. Generate the key once near the start of the Shortcut and reuse that variable if the workflow contains an explicit retry branch.
 
 The API accepts plain text only. Empty text, HTML, ProseMirror JSON, nested children, attachments, and text over 100,000 characters are rejected. The optional `source` dictionary accepts up to 20 string fields; keys are limited to 100 characters and values to 2,000 characters.
 

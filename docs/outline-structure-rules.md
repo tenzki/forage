@@ -109,9 +109,9 @@ covered by `bulletNote.ts` and is out of scope.
 | ID | Rule |
 |----|------|
 | BSP-01 | Empty bullet with **no** children, a previous visible bullet exists → the bullet is **deleted** and the cursor moves to the **end** of the previous visible bullet. Never outdented: an empty bullet's depth is not a thing Backspace edits. The previous visible bullet may be a deeper descendant of the previous sibling, or — for a first child — the **parent**. |
-| BSP-02 | Empty bullet **with** children → no-op. Deleting would silently reshape a subtree. *Forage decision; Workflowy's behavior here is unverified.* |
+| BSP-02 | Empty bullet **with** children → delete the empty wrapper and promote its children one level, preserving their order. The cursor moves to the start of the first promoted child. |
 | BSP-03 | Non-empty bullet, cursor at offset 0, bullet has no children, previous visible bullet has no children → the two bullets merge: this bullet's text appends to the previous visible bullet, this bullet is removed, and the cursor sits at the join point. |
-| BSP-04 | Cursor at offset 0 of a bullet that **has** children → no-op, whether or not the bullet has text. Consistent with BSP-02. |
+| BSP-04 | Cursor at offset 0 of a **non-empty** bullet that has children → no-op. Backspace never merges a branch into the previous bullet. |
 | BSP-05 | Cursor at offset 0 of the **first** bullet in the outline → no-op. There is nothing above to merge into. |
 | BSP-06 | The last remaining bullet is never deleted. If the outline would become empty, a single empty bullet remains and keeps the cursor (INV-03). |
 | BSP-07 | Backspace never deletes or merges a system node; the operation is rejected (INV-08). An empty non-system child of a system node is removable. |
@@ -204,7 +204,7 @@ offset-0 case and swallows the key so the default cannot run.
 - **ENT-01.** *"Press Enter to create a new node at the same
   level."* ([Workflowy help: Add, edit and
   format](https://workflowy.com/help/add-edit-format/))
-- **IND-08, BSP-02, MOV-03, MOV-04** are Forage decisions taken where
+- **IND-08, MOV-03, MOV-04** are Forage decisions taken where
   Workflowy's behavior could not be verified from documentation. They are
   marked as such above and are the rules most worth revisiting if a Workflowy
   comparison contradicts them.

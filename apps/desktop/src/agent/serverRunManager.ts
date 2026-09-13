@@ -85,6 +85,13 @@ export class ServerRunManager {
     return [...this.runs.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   }
 
+  async clearFinishedHistory(): Promise<void> {
+    for (const [runId, run] of this.runs) {
+      if (terminal.has(run.status)) this.runs.delete(runId)
+    }
+    await this.persist()
+  }
+
   private observe(runId: string, onActivity?: (event: ActivityEvent, runId: string) => void | Promise<void>) {
     const existing = this.observations.get(runId)
     if (existing) return existing

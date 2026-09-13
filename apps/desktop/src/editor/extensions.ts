@@ -217,9 +217,23 @@ function handleStructuralBackspace(editor: Editor): boolean {
   const index = entries.findIndex((entry) => entry.id === currentId)
   const entry = entries[index]
   if (!entry) return false
-  // BSP-07 / BSP-02 / BSP-04: never delete a system node, a bullet with
-  // children, or a bullet whose note would silently disappear with it.
-  if (entry.systemRole || entry.noteText || bulletHasChildren(entry.node)) return true
+  // BSP-07: never delete a system node or a bullet whose note would silently
+  // disappear with it.
+  if (entry.systemRole || entry.noteText) return true
+
+  if (!entry.text && bulletHasChildren(entry.node)) {
+    // BSP-02: remove an empty structural wrapper without deleting its branch.
+    // Its children take its place in the surrounding list and keep their order.
+    const childList = Array.from({ length: entry.node.childCount }, (_, childIndex) => entry.node.child(childIndex))
+      .find((child) => child.type === state.schema.nodes.bulletList)
+    if (!childList) return true
+    const transaction = state.tr.replaceWith(entry.pos, entry.pos + entry.node.nodeSize, childList.content)
+    transaction.setSelection(TextSelection.create(transaction.doc, entry.pos + 2))
+    view.dispatch(transaction.scrollIntoView())
+    return true
+  }
+  // BSP-04: a non-empty branch is never merged upward.
+  if (bulletHasChildren(entry.node)) return true
 
   const previous = previousVisibleBullet(entries, index)
   // BSP-05: nothing above to merge into.
@@ -228,7 +242,7 @@ function handleStructuralBackspace(editor: Editor): boolean {
   const transaction = state.tr
   const range = bulletRemovalRange(editor, entry)
   if (entry.text) {
-    // BSP-03: merge upward only into a plain, childless bullet. A parent, a
+    // BSP-03 / BSP-04: merge upward only into a plain, childless bullet. A parent, a
     // collapsed branch, or a system title keeps its shape instead.
     if (previous.systemRole || previous.noteText || bulletHasChildren(previous.node)) return true
     const joinAt = previous.pos + 2 + (previous.node.firstChild?.content.size ?? 0)

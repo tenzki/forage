@@ -174,6 +174,22 @@ describe('Forage server', () => {
     expect(conflict.json().error.code).toBe('idempotency_conflict')
   })
 
+  it('accepts note captures without an idempotency key as independent requests', async () => {
+    const { app, apiToken } = await testServer()
+    const request = {
+      method: 'POST' as const, url: '/api/v1/notes',
+      headers: { authorization: `Bearer ${apiToken}` },
+      payload: { text: 'Capture without retry identity' },
+    }
+
+    const first = await app.inject(request)
+    const second = await app.inject(request)
+
+    expect(first.statusCode).toBe(201)
+    expect(second.statusCode).toBe(201)
+    expect(second.json().noteId).not.toBe(first.json().noteId)
+  })
+
   it('does not disclose outline resources to invalid or insufficiently scoped tokens', async () => {
     const { app, deviceToken } = await testServer()
     const request = (token: string) => app.inject({
@@ -249,7 +265,7 @@ describe('Forage server', () => {
     expect(compute.statusCode).toBe(200)
 
     const admitted = await app.inject({
-      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`, headers: { ...headers, 'idempotency-key': 'manual-1' },
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`, headers,
       payload: { sourceNodeId: inboxId, targetParentId: inboxId, skillId: 'research', prompt: 'Research this.', configurationRevision: 1, credentialRef },
     })
     expect(admitted.statusCode).toBe(202)
@@ -268,16 +284,16 @@ describe('Forage server', () => {
     }
     const firstIntent = await app.inject({
       method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
-      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: intent,
+      headers, payload: intent,
     })
     const replayedIntent = await app.inject({
       method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
-      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: intent,
+      headers, payload: intent,
     })
     expect(replayedIntent.json().runId).toBe(firstIntent.json().runId)
     const changedIntent = await app.inject({
       method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`,
-      headers: { ...headers, 'idempotency-key': intent.invocationId }, payload: { ...intent, prompt: 'Different.' },
+      headers, payload: { ...intent, prompt: 'Different.' },
     })
     expect(changedIntent.statusCode).toBe(409)
 

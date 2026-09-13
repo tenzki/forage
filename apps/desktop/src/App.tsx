@@ -114,7 +114,10 @@ export default function App() {
 
   const clearActivity = useCallback(() => {
     setActivityCalls([])
-    void session.clearAgentRunHistory().catch(() => undefined)
+    void Promise.all([
+      session.clearAgentRunHistory(),
+      serverRunManager.clearFinishedHistory(),
+    ]).catch((error) => setAgentError(errorMessage(error)))
   }, [session])
 
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])

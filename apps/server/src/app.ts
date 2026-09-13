@@ -507,8 +507,9 @@ async function authorize(repository: ServerRepository, authorization: string | u
 }
 
 function idempotencyKey(value: string | string[] | undefined): string {
+  if (value === undefined) return randomUUID()
   if (typeof value !== 'string' || !value.trim() || value.length > 255) {
-    throw new z.ZodError([{ code: 'custom', path: ['Idempotency-Key'], message: 'Idempotency-Key is required.' }])
+    throw new z.ZodError([{ code: 'custom', path: ['Idempotency-Key'], message: 'Idempotency-Key must be a non-empty string of at most 255 characters.' }])
   }
   return value
 }

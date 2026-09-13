@@ -869,20 +869,45 @@ describe('outline structure rules', () => {
       expect(caretBulletId(editor)).toBe('first')
     })
 
-    it('BSP-02: an empty bullet with children is not deleted', () => {
+    it('BSP-02: deletes an empty wrapper and promotes its children', () => {
       editor = makeEditor(outline`
         a
         ${EMPTY}
           child
+          second
+        b
       `)
       place(editor, EMPTY, 0)
       press(editor, 'Backspace')
 
       expect(render(editor)).toBe(outline`
         a
-        ${EMPTY}
-          child
+        child
+        second
+        b
       `)
+      expect(caretBulletId(editor)).toBe('child')
+      expect(caretOffset(editor)).toBe(0)
+    })
+
+    it('BSP-02: promotes children of an empty first child within its parent', () => {
+      editor = makeEditor(outline`
+        parent
+          ${EMPTY}
+            first
+            second
+          last
+      `)
+      place(editor, EMPTY, 0)
+      press(editor, 'Backspace')
+
+      expect(render(editor)).toBe(outline`
+        parent
+          first
+          second
+          last
+      `)
+      expect(caretBulletId(editor)).toBe('first')
     })
 
     it('BSP-03: merges a childless bullet into the previous visible childless bullet', () => {

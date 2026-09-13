@@ -56,7 +56,7 @@ npm run tokens --workspace @forage/server -- revoke TOKEN_ID
 
 ## Add a note from another application
 
-`POST /api/v1/notes` accepts plain text only. `Idempotency-Key` is mandatory and scoped to the token. Repeating the same key and input returns the original note; reusing it with different input returns `409`.
+`POST /api/v1/notes` accepts plain text only. `Idempotency-Key` is optional and scoped to the token. When supplied, repeating the same key and input returns the original note, while reusing it with different input returns `409`. Without the header, each request creates a new note.
 
 ```bash
 curl --request POST https://notes.example.com/api/v1/notes \
