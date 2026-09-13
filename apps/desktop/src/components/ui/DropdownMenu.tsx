@@ -7,8 +7,9 @@ export const DropdownMenu = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
     <div
       ref={ref}
       data-slot="dropdown-menu"
+      data-origin="top-left"
       className={cn(
-        'fixed z-80 flex w-52 flex-col rounded-xl border border-neutral-200 bg-white p-1 font-sans shadow-[0_18px_50px_-12px_rgba(0,0,0,0.22)]',
+        't-dropdown is-open fixed z-80 flex w-52 flex-col rounded-xl border border-neutral-200 bg-white p-1 font-sans shadow-[0_18px_50px_-12px_rgba(0,0,0,0.22)]',
         className,
       )}
       {...props}

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Compass, Keyboard, ListTree, PencilLine, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import type { MotionPresenceState } from './ui/useMotionPresence'
 
 interface ShortcutItem {
   label: string
@@ -83,7 +84,13 @@ function ShortcutKeys({ chords }: { chords: string[][] }) {
   )
 }
 
-export function KeyboardShortcutsPanel({ onClose }: { onClose: () => void }) {
+export function KeyboardShortcutsPanel({
+  onClose,
+  motionState = 'is-open',
+}: {
+  onClose: () => void
+  motionState?: MotionPresenceState
+}) {
   const dialogRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -116,12 +123,17 @@ export function KeyboardShortcutsPanel({ onClose }: { onClose: () => void }) {
   }, [onClose])
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-neutral-950/25 p-5 backdrop-blur-[2px] max-sm:p-2" onMouseDown={onClose}>
+    <div
+      className={`t-backdrop ${motionState} fixed inset-0 z-[100] grid place-items-center bg-neutral-950/25 p-5 backdrop-blur-[2px] max-sm:p-2`}
+      aria-hidden={motionState === 'is-closing' || undefined}
+      inert={motionState === 'is-closing' || undefined}
+      onMouseDown={onClose}
+    >
       <section
         ref={dialogRef}
-        className="flex max-h-[88vh] w-full max-w-[780px] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_80px_-20px_rgb(0_0_0/0.38)] outline-none"
-        role="dialog"
-        aria-modal="true"
+        className={`t-modal ${motionState} flex max-h-[88vh] w-full max-w-[780px] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_80px_-20px_rgb(0_0_0/0.38)] outline-none`}
+        role={motionState === 'is-closing' ? undefined : 'dialog'}
+        aria-modal={motionState === 'is-closing' ? undefined : 'true'}
         aria-labelledby="keyboard-shortcuts-title"
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}

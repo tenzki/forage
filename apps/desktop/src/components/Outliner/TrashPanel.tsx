@@ -48,7 +48,7 @@ export function TrashPanel({ editor, entries, onClose, onChange, onRestore, onPu
   }
 
   return (
-    <div className="secondary-view">
+    <div className="secondary-view t-panel-slide" data-open="true">
       <SecondaryViewHeader title="Trash" onBack={onClose} />
       <section className="trash-page" aria-label="Trash contents">
         <p className="trash-description">Deleted branches remain here until permanently removed.</p>

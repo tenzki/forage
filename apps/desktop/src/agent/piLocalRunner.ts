@@ -57,7 +57,10 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
       outlineSnapshot: input.outlineSnapshot,
     }, {
       signal: options.signal,
-      onDelta: (nextText) => { text = nextText },
+      onDelta: (nextText) => {
+        text = nextText
+        options.onDelta?.(nextText)
+      },
       onOutline: async (nodes) => { outline = nodes },
       onActivity: (event) => { activityWrites.push(activity(event)) },
     })

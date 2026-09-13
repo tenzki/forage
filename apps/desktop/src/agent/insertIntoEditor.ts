@@ -25,6 +25,7 @@ import type { ActivityReporter } from './activity'
 import { NativeAssetRepository } from '../persistence/assetStore'
 import type { GeneratedImageReference } from '../editor/generatedImage'
 import type { StructuredResult, StructuredResultNode } from '@forage/agent-runtime'
+import { clearStreamingText, showStreamingText, type StreamingTextRange } from '../editor/agentStreamingText'
 
 function contextText(item: ProseMirrorNode): string {
   const title = item.firstChild?.textContent?.trim() ?? ''
@@ -129,9 +130,25 @@ export function removeCurrentSlashCommand(editor: Editor, label: string): void {
 export function insertAiChild(editor: Editor): string | null {
   const li = currentListItem(editor)
   if (!li) return null
+  return insertAiChildAt(editor, li.pos, li.node)
+}
+
+export function insertAiChildUnder(editor: Editor, parentNodeId: string): string | null {
+  let parent: { pos: number; node: ProseMirrorNode } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'listItem' || node.attrs.nodeId !== parentNodeId) return
+    parent = { pos, node }
+    return false
+  })
+  if (!parent) return null
+  const target = parent as { pos: number; node: ProseMirrorNode }
+  return insertAiChildAt(editor, target.pos, target.node)
+}
+
+function insertAiChildAt(editor: Editor, parentPos: number, parentNode: ProseMirrorNode): string {
   const nodeId = newNodeId()
   // Position just inside the end of the current listItem (after its paragraph).
-  const insertPos = li.pos + li.node.nodeSize - 1
+  const insertPos = parentPos + parentNode.nodeSize - 1
   editor
     .chain()
     .setMeta('forageOrigin', 'agent')
@@ -174,7 +191,7 @@ function findAiList(
 }
 
 /** Remove failed generated output without adding cleanup to the undo history. */
-function removeAiList(editor: Editor, rootNodeId: string): void {
+export function removeAiList(editor: Editor, rootNodeId: string): void {
   const list = findAiList(editor, rootNodeId)
   if (!list) return
   const transaction = editor.state.tr.delete(list.pos, list.pos + list.node.nodeSize)
@@ -305,6 +322,7 @@ export function writeAiText(
   editor: Editor,
   rootNodeId: string,
   text: string,
+  previousText?: string,
 ): void {
   const list = findAiList(editor, rootNodeId)
   if (!list) return
@@ -320,6 +338,34 @@ export function writeAiText(
     ),
   )
   replaceAiList(editor, list, items)
+  if (previousText !== undefined) {
+    showStreamingText(editor, streamingRanges(editor, rootNodeId, previousText))
+  }
+}
+
+function commonPrefixLength(left: string, right: string): number {
+  const limit = Math.min(left.length, right.length)
+  let index = 0
+  while (index < limit && left[index] === right[index]) index += 1
+  return index
+}
+
+function streamingRanges(editor: Editor, rootNodeId: string, previousText: string): StreamingTextRange[] {
+  const list = findAiList(editor, rootNodeId)
+  if (!list) return []
+  const previousLines = toLines(previousText)
+  const ranges: StreamingTextRange[] = []
+  list.node.forEach((child, offset, index) => {
+    if (child.type.name !== 'listItem') return
+    const paragraph = child.firstChild
+    const currentText = paragraph?.textContent ?? ''
+    const priorText = previousLines[index] ?? ''
+    const startOffset = commonPrefixLength(currentText, priorText)
+    if (startOffset >= currentText.length) return
+    const paragraphStart = list.pos + 1 + offset + 2
+    ranges.push({ from: paragraphStart + startOffset, to: paragraphStart + currentText.length })
+  })
+  return ranges
 }
 
 /** Replace the generated placeholder with validated nested outline nodes. */
@@ -410,9 +456,84 @@ export function commitStructuredAgentResult(
   transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
   transaction.setMeta('forageOrigin', 'agent')
   editor.view.dispatch(transaction)
-  return items
+  const nodeIds = items
     .map((item) => item.attrs.nodeId)
     .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
+  revealAgentResult(editor, nodeIds)
+  return nodeIds
+}
+
+export function commitStructuredAgentResultInto(
+  editor: Editor,
+  invocationNodeId: string,
+  rootNodeId: string,
+  skillLabel: string,
+  result: StructuredResult,
+): string[] {
+  let invocation: { pos: number; node: ProseMirrorNode } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (invocation || node.type.name !== 'listItem' || node.attrs.nodeId !== invocationNodeId) return
+    invocation = { pos, node }
+    return false
+  })
+  const list = findAiList(editor, rootNodeId)
+  if (!invocation || !list) throw new Error('The live agent output is no longer available.')
+  const target = invocation as { pos: number; node: ProseMirrorNode }
+  const existingIds: string[] = []
+  list.node.forEach((child) => {
+    if (child.type.name === 'listItem' && typeof child.attrs.nodeId === 'string') existingIds.push(child.attrs.nodeId)
+  })
+  let existingIndex = 0
+  const items = result.nodes.flatMap((node) => {
+    const nodeId = node.type === 'image' ? newNodeId() : existingIds[existingIndex++] ?? newNodeId()
+    return createAiOutlineItem(editor, structuredToStored(node), nodeId)
+  })
+  if (!items.length) throw new Error('The agent returned no outline nodes.')
+
+  const paragraph = target.node.firstChild
+  const text = paragraph?.textContent ?? ''
+  const prefix = `/${skillLabel}`
+  let prefixLength = text.startsWith(prefix) ? prefix.length : 0
+  while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
+  const transaction = editor.state.tr
+  if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
+  const mappedFrom = transaction.mapping.map(list.pos, -1)
+  const mappedTo = transaction.mapping.map(list.pos + list.node.nodeSize, 1)
+  transaction.replaceWith(mappedFrom, mappedTo, editor.schema.nodes.bulletList.create(list.node.attrs, items))
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', rootNodeId)
+  editor.view.dispatch(transaction)
+
+  const nodeIds = items
+    .map((item) => item.attrs.nodeId)
+    .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
+  revealAgentResult(editor, nodeIds)
+  return nodeIds
+}
+
+function revealAgentResult(editor: Editor, nodeIds: string[]): void {
+  const ids = new Set(nodeIds)
+  const ranges: StreamingTextRange[] = []
+  let wordIndex = 0
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'listItem' || !ids.has(String(node.attrs.nodeId))) return
+    const paragraph = node.firstChild
+    if (!paragraph || paragraph.type.name !== 'paragraph') return false
+    for (const match of paragraph.textContent.matchAll(/\S+/gu)) {
+      const start = match.index ?? 0
+      ranges.push({
+        from: pos + 2 + start,
+        to: pos + 2 + start + match[0].length,
+        delayMs: Math.min(wordIndex * 24, 360),
+      })
+      wordIndex += 1
+    }
+    return false
+  })
+  if (!ranges.length) return
+  showStreamingText(editor, ranges)
+  const clearAfter = 350 + Math.min(Math.max(0, wordIndex - 1) * 24, 360)
+  window.setTimeout(() => clearStreamingText(editor), clearAfter)
 }
 
 function structuredToStored(node: StructuredResultNode): StoredOutlineNode {
@@ -479,6 +600,7 @@ export function runSkillIntoEditor(
   if (!nodeId) throw new Error('Could not find a bullet to generate under.')
   const activityId = `skill-${nodeId}`
   const startedAt = Date.now()
+  let streamedText = ''
   onActivity?.({
     id: activityId,
     phase: 'start',
@@ -497,7 +619,8 @@ export function runSkillIntoEditor(
           signal: controller.signal,
           onDelta: (textSoFar) => {
             setAgentActivity(editor, nodeId, [], cancel)
-            writeAiText(editor, nodeId, textSoFar)
+            writeAiText(editor, nodeId, textSoFar, streamedText)
+            streamedText = textSoFar
           },
           onToolActivity: (notes) => setAgentActivity(editor, nodeId, notes, cancel),
           onOutline: async (nodes) => {

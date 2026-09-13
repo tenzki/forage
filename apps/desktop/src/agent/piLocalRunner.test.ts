@@ -57,17 +57,24 @@ describe('Pi local runtime adapter', () => {
   })
 
   it('uses final text only when no structured outline was emitted', async () => {
+    const deltas: string[] = []
     const runner = createPiLocalRunner({
       resolveCredential: async () => ({ mode: 'api_key', apiKey: 'secret', oauthCredential: null, modelId: '' }),
-      generate: async () => 'First line\n\nSecond line',
+      generate: async (_auth, _input, options) => {
+        options.onDelta('First line')
+        options.onDelta('First line\n\nSecond line')
+        return 'First line\n\nSecond line'
+      },
       assets: { ingestGeneratedImage: async () => { throw new Error('unused') } },
     })
     await expect(runner(input(), {
       signal: new AbortController().signal,
       onActivity: async () => undefined,
+      onDelta: (text) => deltas.push(text),
     })).resolves.toMatchObject({
       nodes: [{ type: 'text', text: 'First line' }, { type: 'text', text: 'Second line' }],
     })
+    expect(deltas).toEqual(['First line', 'First line\n\nSecond line'])
   })
 
   it('does not settle before emitted activity is durably handled', async () => {

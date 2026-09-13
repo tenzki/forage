@@ -60,6 +60,23 @@ describe('LocalAgentExecutor', () => {
     )
   })
 
+  it('forwards live model text without storing it as activity', async () => {
+    const repo = repository()
+    const runner = vi.fn(async (_input: RunInput, options: { onDelta?: (text: string) => void }) => {
+      options.onDelta?.('First')
+      options.onDelta?.('First second')
+      return result
+    })
+    const deltas: string[] = []
+    const executor = new LocalAgentExecutor(repo, runner)
+
+    const handle = await executor.invoke(input(), { onDelta: (text) => deltas.push(text) })
+    await handle.completion
+
+    expect(deltas).toEqual(['First', 'First second'])
+    expect(repo.appendAgentActivity).not.toHaveBeenCalled()
+  })
+
   it('durably cancels and aborts an active runtime', async () => {
     const repo = repository()
     const runner = vi.fn((_input: RunInput, options: { signal: AbortSignal }) => new Promise<StructuredResult>((_resolve, reject) => {

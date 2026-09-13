@@ -45,6 +45,7 @@ import { setEditorMutationLocked } from './editor/extensions'
 import { OutlineSession } from './application/OutlineSession'
 import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
+import { useMotionPresence } from './components/ui/useMotionPresence'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -81,10 +82,14 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [view, setView] = useState<View>('outliner')
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const shortcutsPresence = useMotionPresence(shortcutsOpen, 150)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
+  const visibleAgentError = useRef<string | null>(null)
+  if (agentError) visibleAgentError.current = agentError
+  const agentErrorPresence = useMotionPresence(Boolean(agentError), 250)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
   const loadSettings = useSettingsStore((state) => state.load)
@@ -455,11 +460,12 @@ export default function App() {
       >
         {storageBackendLabel}
       </div>
-      {agentError && (
+      {agentErrorPresence.mounted && visibleAgentError.current && (
         <SystemAlertBanner
           title="Agent error"
-          description={agentError}
+          description={visibleAgentError.current}
           onDismiss={() => setAgentError(null)}
+          motionState={agentErrorPresence.motionState}
         />
       )}
 
@@ -542,7 +548,9 @@ export default function App() {
           onOpenNode={openActivityNode}
         />
       </main>
-      {shortcutsOpen && <KeyboardShortcutsPanel onClose={closeShortcuts} />}
+      {shortcutsPresence.mounted && (
+        <KeyboardShortcutsPanel onClose={closeShortcuts} motionState={shortcutsPresence.motionState} />
+      )}
     </div>
   )
 }

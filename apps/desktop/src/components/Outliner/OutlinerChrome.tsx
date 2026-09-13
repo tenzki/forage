@@ -52,6 +52,7 @@ import { NodeActions } from './NodeActions'
 import { SearchInput } from '../ui/SearchInput'
 import { IconButton } from '../ui/IconButton'
 import { validateSystemNodeAction } from '../../editor/systemNodeGuards'
+import { useMotionPresence, type MotionPresenceState } from '../ui/useMotionPresence'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -121,9 +122,10 @@ function Toolbar({
           label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick={onToggleSidebar}
         >
-          {sidebarCollapsed
-            ? <PanelLeftOpen size={17} aria-hidden="true" />
-            : <PanelLeftClose size={17} aria-hidden="true" />}
+          <span className="t-icon-swap" data-state={sidebarCollapsed ? 'a' : 'b'}>
+            <span className="t-icon" data-icon="a"><PanelLeftOpen size={17} aria-hidden="true" /></span>
+            <span className="t-icon" data-icon="b"><PanelLeftClose size={17} aria-hidden="true" /></span>
+          </span>
         </IconButton>
         <div className="flex shrink-0 items-center gap-0.5" aria-label="Navigation history">
           <IconButton
@@ -149,9 +151,10 @@ function Toolbar({
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <button className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-500 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:bg-neutral-100 focus-visible:text-neutral-900" onClick={onToggleCompleted}>
-          {hideCompleted
-            ? <Eye size={15} aria-hidden="true" />
-            : <EyeOff size={15} aria-hidden="true" />}
+          <span className="t-icon-swap" data-state={hideCompleted ? 'a' : 'b'}>
+            <span className="t-icon" data-icon="a"><Eye size={15} aria-hidden="true" /></span>
+            <span className="t-icon" data-icon="b"><EyeOff size={15} aria-hidden="true" /></span>
+          </span>
           {hideCompleted ? 'Show completed' : 'Hide completed'}
         </button>
         <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-600 shadow-xs outline-none transition-[border-color,color,box-shadow] hover:border-neutral-300 hover:text-neutral-900 focus-visible:border-neutral-400 focus-visible:shadow-sm" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
@@ -162,9 +165,10 @@ function Toolbar({
           label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
           onClick={onToggleActivitySidebar}
         >
-          {activitySidebarCollapsed
-            ? <PanelRightOpen size={17} aria-hidden="true" />
-            : <PanelRightClose size={17} aria-hidden="true" />}
+          <span className="t-icon-swap" data-state={activitySidebarCollapsed ? 'a' : 'b'}>
+            <span className="t-icon" data-icon="a"><PanelRightOpen size={17} aria-hidden="true" /></span>
+            <span className="t-icon" data-icon="b"><PanelRightClose size={17} aria-hidden="true" /></span>
+          </span>
         </IconButton>
       </div>
     </div>
@@ -327,6 +331,7 @@ function OutlineSearch({
   onOpenSettings,
   onOpenTrash,
   onClose,
+  motionState,
 }: {
   editor: Editor
   initialQuery: string
@@ -338,6 +343,7 @@ function OutlineSearch({
   onOpenSettings: () => void
   onOpenTrash: () => void
   onClose: () => void
+  motionState: MotionPresenceState
 }) {
   const [query, setQuery] = useState(initialQuery)
   const [active, setActive] = useState(0)
@@ -360,6 +366,8 @@ function OutlineSearch({
   const resultCount = matchingCommands.length + results.length
 
   useEffect(() => {
+    setQuery(initialQuery)
+    setActive(0)
     inputRef.current?.focus()
     setSearchQuery(editor, searchText(initialQuery))
     return () => setSearchQuery(editor, '')
@@ -400,8 +408,19 @@ function OutlineSearch({
   }
 
   return (
-    <div className="search-backdrop" onMouseDown={onClose}>
-      <section className="outline-search" role="dialog" aria-modal="true" aria-label="Search outline" onMouseDown={(event) => event.stopPropagation()}>
+    <div
+      className={`search-backdrop t-backdrop ${motionState}`}
+      aria-hidden={motionState === 'is-closing' || undefined}
+      inert={motionState === 'is-closing' || undefined}
+      onMouseDown={onClose}
+    >
+      <section
+        className={`outline-search t-modal ${motionState}`}
+        role={motionState === 'is-closing' ? undefined : 'dialog'}
+        aria-modal={motionState === 'is-closing' ? undefined : 'true'}
+        aria-label="Search outline"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="border-b border-neutral-100 p-3">
           <SearchInput
             ref={inputRef}
@@ -503,7 +522,9 @@ export function OutlinerChrome({
   const canNavigateBack = Boolean(editorUi?.backStack.length)
   const canNavigateForward = Boolean(editorUi?.forwardStack.length)
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchPresence = useMotionPresence(searchOpen, 150)
   const [searchQuery, setSearchQueryText] = useState('')
+  const [searchSession, setSearchSession] = useState(0)
   const [nodeMenu, setNodeMenu] = useNodeMenu()
   const [actionError, setActionError] = useState<string | null>(null)
   useDeepLinks(editor)
@@ -522,6 +543,7 @@ export function OutlinerChrome({
 
   function openSearch(query = '') {
     setSearchQueryText(query)
+    setSearchSession((current) => current + 1)
     setSearchOpen(true)
   }
 
@@ -643,8 +665,9 @@ export function OutlinerChrome({
         onOpenSearch={() => openSearch()}
       />
       {actionError && <div className="action-error" role="alert">{actionError}<button onClick={() => setActionError(null)}>Dismiss</button></div>}
-      {searchOpen && createPortal(
+      {searchPresence.mounted && createPortal(
         <OutlineSearch
+          key={searchSession}
           editor={editor}
           initialQuery={searchQuery}
           onSaveSearch={saveSearch}
@@ -658,6 +681,7 @@ export function OutlinerChrome({
           onOpenSettings={onOpenSettings}
           onOpenTrash={onOpenTrash}
           onClose={() => setSearchOpen(false)}
+          motionState={searchPresence.motionState}
         />,
         document.body,
       )}

@@ -112,7 +112,7 @@ export function InternalLinkMenu({ editor }: { editor: Editor | null }) {
   if (!menu || !choices.length) return null
 
   return (
-    <ul className="internal-link-menu" style={{ top: menu.top, left: menu.left }} aria-label="Internal link suggestions">
+    <ul className="internal-link-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }} aria-label="Internal link suggestions">
       {choices.map((choice, index) => {
         const label = choice.type === 'existing' ? choice.entry.text.trim() || 'Untitled' : choice.label
         return (

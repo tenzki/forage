@@ -72,7 +72,7 @@ export function TagMenu({ editor }: { editor: Editor | null }) {
   if (!menu || !matches.length) return null
 
   return (
-    <ul className="tag-menu" style={{ top: menu.top, left: menu.left }} aria-label="Tag suggestions">
+    <ul className="tag-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }} aria-label="Tag suggestions">
       {matches.map((tag, index) => (
         <li key={tag}>
           <button

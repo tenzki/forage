@@ -22,7 +22,7 @@ export function TasksPanel({ editor, onClose }: { editor: Editor; onClose: () =>
   }
 
   return (
-    <div className="secondary-view">
+    <div className="secondary-view t-panel-slide" data-open="true">
       <SecondaryViewHeader title="Tasks" onBack={onClose} />
       <section className="tasks-page" aria-label="All tasks">
         {tasks.length === 0 ? (

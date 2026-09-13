@@ -15,6 +15,7 @@ import { InternalLink } from './internalLinks'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
 import { SlashCommandDecorations } from './slashCommands'
+import { AgentStreamingText } from './agentStreamingText'
 import { EMPTY_DOC, normalizeOutlinerDoc } from './emptyDoc'
 import { collectBullets } from './outlineModel'
 import type { JsonValue } from '../types/tree'
@@ -67,6 +68,7 @@ export function OutlinerEditor({
       OutlinerKeymap,
       TagDecorations,
       SlashCommandDecorations,
+      AgentStreamingText,
       SkillContextPreview,
       OutlinerUi,
     ],

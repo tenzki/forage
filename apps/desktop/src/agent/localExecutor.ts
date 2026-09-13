@@ -28,7 +28,11 @@ export interface LocalRunRepository {
 
 export type LocalRuntimeRunner = (
   input: RunInput,
-  options: { signal: AbortSignal; onActivity: (event: ActivityEvent) => Promise<void> },
+  options: {
+    signal: AbortSignal
+    onActivity: (event: ActivityEvent) => Promise<void>
+    onDelta?: (textSoFar: string) => void
+  },
 ) => Promise<StructuredResult>
 
 export interface AgentExecutionHandle {
@@ -39,6 +43,7 @@ export interface AgentExecutionHandle {
 
 export interface AgentInvocationOptions {
   onActivity?: (event: ActivityEvent) => void | Promise<void>
+  onDelta?: (textSoFar: string) => void
 }
 
 export class LocalAgentExecutor {
@@ -127,6 +132,7 @@ export class LocalAgentExecutor {
           await this.repository.appendAgentActivity(input.runId, event, this.now())
           await options.onActivity?.(event)
         },
+        onDelta: options.onDelta,
       }))
       if (controller.signal.aborted) throw new DOMException('Agent run cancelled.', 'AbortError')
       await this.repository.settleAgentRun(

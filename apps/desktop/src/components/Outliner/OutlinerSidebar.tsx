@@ -83,7 +83,7 @@ function ShortcutPicker({ entries, tags, shortcuts, onAdd, onClose }: ShortcutPi
   useEffect(() => inputRef.current?.focus(), [])
 
   return (
-    <section className="shortcut-picker" role="dialog" aria-label="Add shortcut">
+    <section className="shortcut-picker t-dropdown is-open" data-origin="top-left" role="dialog" aria-label="Add shortcut">
       <div className="shortcut-picker-search">
         <input
           ref={inputRef}

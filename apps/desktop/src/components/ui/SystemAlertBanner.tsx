@@ -1,5 +1,6 @@
 import { AlertTriangle, X } from 'lucide-react'
 import { cn } from './cn'
+import type { MotionPresenceState } from './useMotionPresence'
 
 export function SystemAlertBanner({
   title,
@@ -7,12 +8,14 @@ export function SystemAlertBanner({
   onDismiss,
   tone = 'error',
   className,
+  motionState = 'is-open',
 }: {
   title: string
   description: string
   onDismiss: () => void
   tone?: 'error' | 'warning'
   className?: string
+  motionState?: MotionPresenceState
 }) {
   return (
     <div
@@ -20,7 +23,7 @@ export function SystemAlertBanner({
       data-slot="system-alert-banner"
       className={cn(
         'fixed top-5 right-5 z-120 block w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-white/70 bg-white/95 font-sans shadow-[0_12px_36px_-8px_rgba(0,0,0,0.2)] backdrop-blur-xl',
-        'animate-[forage-alert-in_240ms_cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none',
+        `t-toast ${motionState}`,
         className,
       )}
     >

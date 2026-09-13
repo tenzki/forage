@@ -146,6 +146,28 @@ function MoveToDialog({
   const [placement, setPlacement] = useState<MovePlacement>('inside')
   const [activeIndex, setActiveIndex] = useState(0)
   const [recentIds, setRecentIds] = useState(readRecentMoveDestinations)
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  function close() {
+    if (closing) return
+    setClosing(true)
+    closeTimer.current = window.setTimeout(onClose, 150)
+  }
+
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+  }, [])
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [closing])
 
   const destinationOptions = useMemo(() => {
     const byId = new Map(destinations.map((entry) => [entry.id, entry]))
@@ -210,7 +232,7 @@ function MoveToDialog({
       return
     }
     setRecentIds(rememberMoveDestination(destinationId, recentIds))
-    onClose()
+    close()
   }
 
   function submit(event: React.FormEvent) {
@@ -231,8 +253,20 @@ function MoveToDialog({
   }, [shortcutTargetId, placement, recentIds])
 
   return (
-    <div className="search-backdrop" onMouseDown={onClose}>
-      <form className="move-dialog" role="dialog" aria-modal="true" aria-labelledby="move-title" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+    <div
+      className={`search-backdrop t-backdrop ${closing ? 'is-closing' : 'is-open'}`}
+      aria-hidden={closing || undefined}
+      inert={closing || undefined}
+      onMouseDown={close}
+    >
+      <form
+        className={`move-dialog t-modal ${closing ? 'is-closing' : 'is-open'}`}
+        role={closing ? undefined : 'dialog'}
+        aria-modal={closing ? undefined : 'true'}
+        aria-labelledby="move-title"
+        onSubmit={submit}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <header className="move-dialog-header">
           <h2 id="move-title">Move bullet</h2>
           <p>Search for where this branch should go.</p>
@@ -304,7 +338,7 @@ function MoveToDialog({
           ) : null}
         </div>
         <div className="dialog-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={close}>Cancel</button>
           <button className="move-submit" type="submit" disabled={!shortcutTargetId} aria-keyshortcuts="Meta+Enter Control+Enter">
             <span>Move here</span>
             <kbd aria-hidden="true">{IS_APPLE_PLATFORM ? '⌘' : 'Ctrl'} ↵</kbd>
@@ -331,6 +365,7 @@ export function NodeActions({
   const hasNote = hasBulletNote(editor, request.nodeId)
 
   useEffect(() => {
+    if (moving) return
     const handleKeyboard = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose()
@@ -353,7 +388,7 @@ export function NodeActions({
     menuRef.current?.querySelector('button')?.focus()
     window.addEventListener('keydown', handleKeyboard)
     return () => window.removeEventListener('keydown', handleKeyboard)
-  }, [onClose])
+  }, [moving, onClose])
 
   if (moving) {
     return <MoveToDialog editor={editor} sourceId={request.nodeId} onClose={onClose} onError={onError} />

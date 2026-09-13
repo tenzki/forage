@@ -206,7 +206,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="secondary-view">
+    <div className="secondary-view t-panel-slide" data-open="true">
       <SecondaryViewHeader title="Settings" onBack={onBack} />
       <div className="settings-panel">
         <SegmentedControl

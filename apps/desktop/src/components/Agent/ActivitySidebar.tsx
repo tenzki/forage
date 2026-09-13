@@ -88,6 +88,8 @@ export function ActivitySidebar({
     <aside
       className={`activity-sidebar${collapsed ? ' is-collapsed' : ''}`}
       aria-label="Agent activity"
+      aria-hidden={collapsed || undefined}
+      data-open={String(!collapsed)}
       hidden={collapsed}
     >
       <div className="activity-sidebar-header">
@@ -119,7 +121,11 @@ export function ActivitySidebar({
               const duration = durationLabel(call.durationMs)
               const isCallCollapsed = collapsedCalls.has(call.id)
               return (
-                <section key={call.id} className={`activity-call is-${call.status}`}>
+                <section
+                  key={call.id}
+                  className={`activity-call t-acc is-${call.status}`}
+                  data-open={String(!isCallCollapsed)}
+                >
                   <div className="activity-call-header">
                     <button
                       type="button"
@@ -130,7 +136,12 @@ export function ActivitySidebar({
                     >
                       <span className={`activity-kind-icon is-${call.kind ?? call.events[0]?.kind ?? 'skill'}`}>{kindIcon(call.kind ?? call.events[0]?.kind ?? 'skill')}</span>
                       <span className="activity-entry-main">
-                        <strong>{call.label}</strong>
+                        <strong
+                          className={call.status === 'running' ? 't-shimmer' : undefined}
+                          data-text={call.status === 'running' ? call.label : undefined}
+                        >
+                          {call.label}
+                        </strong>
                         <small>{new Date(call.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</small>
                       </span>
                       {duration && <span className="activity-duration">{duration}</span>}
@@ -143,41 +154,45 @@ export function ActivitySidebar({
                       aria-label={`${isCallCollapsed ? 'Expand' : 'Collapse'} execution for ${call.label}`}
                       onClick={() => toggleCall(call.id)}
                     >
-                      <ChevronDown className={`activity-detail-chevron${isCallCollapsed ? '' : ' is-expanded'}`} aria-hidden="true" />
+                      <span className="t-acc-chevron"><ChevronDown className="activity-detail-chevron" aria-hidden="true" /></span>
                     </button>
                   </div>
-                  {!isCallCollapsed && call.events.length > 0 && (
-                    <ol className="activity-timeline" aria-label={`Execution timeline for ${call.label}`}>
-                      {call.events.map((entry) => {
-                        const isExpanded = expandedEvents.has(entry.id)
-                        return (
-                          <li key={entry.id} className={`activity-timeline-event is-${entry.status}`}>
-                            <span className={`activity-kind-icon is-${entry.kind}`}>{kindIcon(entry.kind)}</span>
-                            <div className="activity-timeline-content">
-                              <button
-                                type="button"
-                                className={`activity-timeline-label${entry.nodeId ? ' is-navigable' : ''}`}
-                                aria-label={entry.nodeId ? `Open outline result for ${entry.label}` : undefined}
-                                onClick={() => {
-                                  if (entry.nodeId && onOpenNode) onOpenNode(entry.nodeId, call.nodeId)
-                                  else if (entry.detail) toggleEvent(entry.id)
-                                }}
-                                aria-expanded={entry.detail && !entry.nodeId ? isExpanded : undefined}
-                              >
-                                <strong>{entry.label}</strong>
-                                <span className="activity-status-icon">{statusIcon(entry.status)}</span>
-                              </button>
-                              {entry.detail && (
-                                <button type="button" className={`activity-entry-detail${isExpanded ? ' is-expanded' : ''}`} onClick={() => toggleEvent(entry.id)}>
-                                  {isExpanded ? <pre>{entry.detail}</pre> : <span>{entry.detail}</span>}
-                                  <ChevronDown className="activity-detail-chevron" aria-hidden="true" />
-                                </button>
-                              )}
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ol>
+                  {call.events.length > 0 && (
+                    <div className="t-acc-panel" aria-hidden={isCallCollapsed || undefined} inert={isCallCollapsed || undefined}>
+                      <div className="t-acc-panel-inner">
+                        <ol className="activity-timeline" aria-label={`Execution timeline for ${call.label}`}>
+                          {call.events.map((entry) => {
+                            const isExpanded = expandedEvents.has(entry.id)
+                            return (
+                              <li key={entry.id} className={`activity-timeline-event is-${entry.status}`}>
+                                <span className={`activity-kind-icon is-${entry.kind}`}>{kindIcon(entry.kind)}</span>
+                                <div className="activity-timeline-content">
+                                  <button
+                                    type="button"
+                                    className={`activity-timeline-label${entry.nodeId ? ' is-navigable' : ''}`}
+                                    aria-label={entry.nodeId ? `Open outline result for ${entry.label}` : undefined}
+                                    onClick={() => {
+                                      if (entry.nodeId && onOpenNode) onOpenNode(entry.nodeId, call.nodeId)
+                                      else if (entry.detail) toggleEvent(entry.id)
+                                    }}
+                                    aria-expanded={entry.detail && !entry.nodeId ? isExpanded : undefined}
+                                  >
+                                    <strong>{entry.label}</strong>
+                                    <span className="activity-status-icon">{statusIcon(entry.status)}</span>
+                                  </button>
+                                  {entry.detail && (
+                                    <button type="button" className={`activity-entry-detail${isExpanded ? ' is-expanded' : ''}`} onClick={() => toggleEvent(entry.id)}>
+                                      {isExpanded ? <pre>{entry.detail}</pre> : <span>{entry.detail}</span>}
+                                      <ChevronDown className="activity-detail-chevron" aria-hidden="true" />
+                                    </button>
+                                  )}
+                                </div>
+                              </li>
+                            )
+                          })}
+                        </ol>
+                      </div>
+                    </div>
                   )}
                 </section>
               )

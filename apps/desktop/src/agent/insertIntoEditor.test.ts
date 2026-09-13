@@ -11,6 +11,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
 import { BulletNote } from '../editor/bulletNote'
 import { InternalLink } from '../editor/internalLinks'
+import { AgentStreamingText } from '../editor/agentStreamingText'
 import {
   GeneratedImage,
   GeneratedImageItem,
@@ -20,8 +21,10 @@ import {
 import { generateWithPi } from './piGeneration'
 import {
   commitStructuredAgentResult,
+  commitStructuredAgentResultInto,
   currentListItemId,
   insertAiChild,
+  insertAiChildUnder,
   removeCurrentSlashCommand,
   runSkillIntoEditor,
   skillActivityLabel,
@@ -49,6 +52,7 @@ function makeEditor(text: string): Editor {
       BulletAttributes,
       BulletNote,
       InternalLink,
+      AgentStreamingText,
       OutlinerKeymap,
     ],
     content: {
@@ -268,6 +272,16 @@ describe('agent output insertion', () => {
     ])
   })
 
+  it('decorates only the newly received text without persisting presentation markup', () => {
+    const nodeId = insertAiChild(editor)!
+    writeAiText(editor, nodeId, 'Hello', '')
+    expect(editor.view.dom.querySelector('.t-stream-w')?.textContent).toBe('Hello')
+
+    writeAiText(editor, nodeId, 'Hello world', 'Hello')
+    expect(editor.view.dom.querySelector('.t-stream-w')?.textContent).toBe(' world')
+    expect(JSON.stringify(editor.getJSON())).not.toContain('t-stream-w')
+  })
+
   it('writes structured nested output as nested AI bullets', () => {
     const nodeId = insertAiChild(editor)!
 
@@ -375,6 +389,22 @@ describe('agent output insertion', () => {
     expect(bulletTexts(editor)).toEqual(['Compare options', 'Summary', 'Evidence'])
     editor.commands.undo()
     expect(bulletTexts(editor)).toEqual(['/research Compare options'])
+  })
+
+  it('replaces live streamed text with the terminal structured result', () => {
+    setCurrentBulletText(editor, '/research topic')
+    const invocationNodeId = currentListItemId(editor)!
+    const outputNodeId = insertAiChildUnder(editor, invocationNodeId)!
+    writeAiText(editor, outputNodeId, 'Partial response', '')
+
+    const [resultNodeId] = commitStructuredAgentResultInto(editor, invocationNodeId, outputNodeId, 'research', {
+      version: 1,
+      nodes: [{ type: 'text', text: 'Final response' }],
+      sources: [],
+    })
+
+    expect(resultNodeId).toBe(outputNodeId)
+    expect(bulletTexts(editor)).toEqual(['topic', 'Final response'])
   })
 
   it('does not move the caret while text streams in', () => {

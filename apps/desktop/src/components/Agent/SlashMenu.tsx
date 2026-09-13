@@ -7,9 +7,12 @@ import type { Editor } from '@tiptap/react'
 import type { SkillDefinition } from '../../agent/definitions'
 import { resolveAgentContext } from '../../agent/context'
 import {
-  commitStructuredAgentResult,
+  commitStructuredAgentResultInto,
   currentListItemId,
+  insertAiChildUnder,
+  removeAiList,
   setCurrentBulletText,
+  writeAiText,
 } from '../../agent/insertIntoEditor'
 import { focusOrCreateBulletNote } from '../../editor/bulletNote'
 import { activeInternalLinkAtSelection } from '../../editor/internalLinks'
@@ -36,6 +39,7 @@ import { serverRunManager } from '../../agent/serverRunManager'
 import { createPiLocalRunner } from '../../agent/piLocalRunner'
 import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
 import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
+import { setAgentActivity } from '../../editor/outlinerUi'
 import { resolveEffectiveToolIds, type ActivityEvent as RuntimeActivityEvent, type RunInput } from '@forage/agent-runtime'
 
 interface CommandChoice {
@@ -294,6 +298,7 @@ export function SlashMenu({
     const runId = crypto.randomUUID()
     const startedAt = Date.now()
     const callLabel = runActivityLabel(skill.label, prompt)
+    let localOutputNodeId: string | null = null
     onActivity?.({
       id: runId,
       phase: 'start',
@@ -358,15 +363,37 @@ export function SlashMenu({
           return { ...auth, modelId, onCredentialRefresh: setOAuthCredential }
         },
       })
+      localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)
+      if (!localOutputNodeId) throw new Error('Could not create live agent output.')
+      setAgentActivity(editor, localOutputNodeId, ['Thinking…'])
+      let streamedText = ''
       const handle = await new LocalAgentExecutor(repository, runner).invoke(input, {
         onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
+        onDelta: (nextText) => {
+          if (!localOutputNodeId) return
+          setAgentActivity(editor, localOutputNodeId, [])
+          writeAiText(editor, localOutputNodeId, nextText, streamedText)
+          streamedText = nextText
+        },
       })
       const result = await handle.completion
-      const [resultNodeId] = commitStructuredAgentResult(editor, invocationNodeId, skill.label, result)
+      setAgentActivity(editor, localOutputNodeId, null)
+      const [resultNodeId] = commitStructuredAgentResultInto(
+        editor,
+        invocationNodeId,
+        localOutputNodeId,
+        skill.label,
+        result,
+      )
+      localOutputNodeId = null
       if (resultNodeId) await recordResultActivity(repository, runId, resultNodeId, onActivity)
       onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
     })().catch((error: unknown) => {
       const detail = error instanceof Error ? error.message : String(error)
+      if (localOutputNodeId) {
+        setAgentActivity(editor, localOutputNodeId, null)
+        removeAiList(editor, localOutputNodeId)
+      }
       onActivity?.({
         id: runId,
         phase: 'error',
@@ -388,7 +415,7 @@ export function SlashMenu({
   if (!menu || matches.length === 0) return null
 
   return (
-    <ul className="slash-menu" style={{ top: menu.top, left: menu.left }}>
+    <ul className="slash-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }}>
       {contextError && <li className="slash-context-error" role="alert">{contextError}</li>}
       {matches.map((command, index) => (
         <li

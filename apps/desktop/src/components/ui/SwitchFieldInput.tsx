@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import { cn } from './cn'
 
 export interface SwitchFieldInputProps {
@@ -25,6 +25,7 @@ export function SwitchFieldInput({
 }: SwitchFieldInputProps) {
   const id = useId()
   const hintId = `${id}-hint`
+  const hasInteracted = useRef(false)
 
   return (
     <div
@@ -49,21 +50,23 @@ export function SwitchFieldInput({
             aria-label={switchAriaLabel}
             aria-labelledby={switchAriaLabel ? undefined : `${id}-label`}
             aria-describedby={hint ? hintId : undefined}
-            onChange={(event) => onCheckedChange(event.target.checked)}
+            onChange={(event) => {
+              hasInteracted.current = true
+              onCheckedChange(event.target.checked)
+            }}
             className="peer sr-only"
           />
           <span
             aria-hidden="true"
+            data-on={String(checked)}
             className={cn(
-              'absolute inset-0 rounded-full border-2 transition-[background-color,border-color] duration-200 peer-checked:border-neutral-900 peer-checked:bg-neutral-900',
+              't-toggle absolute inset-0 rounded-full border-2 transition-[background-color,border-color] duration-200 peer-checked:border-neutral-900 peer-checked:bg-neutral-900 [--toggle-travel:20px]',
+              hasInteracted.current && 'is-init',
               checked ? 'border-neutral-900 bg-neutral-900' : 'border-neutral-200 bg-neutral-100',
             )}
           >
             <span
-              className={cn(
-                'pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-xs transition-transform duration-200 motion-reduce:transition-none',
-                checked && 'translate-x-5',
-              )}
+              className="t-toggle-thumb pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-xs"
             />
           </span>
         </label>
