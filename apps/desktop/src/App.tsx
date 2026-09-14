@@ -159,6 +159,8 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return
     void serverRunManager.restore((event, runId) => handleActivity(fromRuntimeEvent(event, runId)))
+      .then(() => serverRunManager.adoptActive())
+      .catch(() => undefined)
   }, [handleActivity, loaded])
 
   // Persisted runs rehydrate the sidebar so agent activity survives a restart.
@@ -293,11 +295,15 @@ export default function App() {
         void synchronizeNow.current({ outlineId: context.outlineId, ...batch })
       },
       onResync: () => { if (!disposed) void synchronizeNow.current() },
-      onAgent: (signal) => agentRunSignals.notify(signal.runId),
+      onAgent: (signal) => {
+        agentRunSignals.notify(signal.runId)
+        void serverRunManager.adopt(signal.runId).catch(() => undefined)
+      },
       onConnected: () => {
         if (disposed) return
         streamLiveness.set('live')
         agentRunSignals.notifyAll()
+        void serverRunManager.adoptActive().catch(() => undefined)
         void synchronizeNow.current()
       },
       onDisconnected: () => { if (!disposed) streamLiveness.set('down') },
@@ -336,6 +342,12 @@ export default function App() {
       } else if (modifier && (event.key === '?' || (event.shiftKey && event.key === '/'))) {
         event.preventDefault()
         setShortcutsOpen((open) => !open)
+      } else if (modifier && !event.shiftKey && !event.altKey && event.code === 'Backslash') {
+        event.preventDefault()
+        setSidebarCollapsed((collapsed) => !collapsed)
+      } else if (modifier && !event.shiftKey && !event.altKey && event.code === 'Slash') {
+        event.preventDefault()
+        setActivitySidebarCollapsed((collapsed) => !collapsed)
       }
     }
     window.addEventListener('keydown', handler)

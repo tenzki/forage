@@ -324,7 +324,7 @@ export function SlashMenu({
           onActivity?.({
             id: `placement-${runId}`, callId: runId, phase: 'error', kind: 'output',
             label: 'Result needs a destination',
-            detail: 'The output is stored on the server. Open Settings → Server agent executor to place it under a live bullet.',
+            detail: 'The bullet this run wrote to was removed. The output is kept on the server.',
             nodeId: invocationNodeId,
           })
         } else {

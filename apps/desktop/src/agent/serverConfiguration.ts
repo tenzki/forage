@@ -10,7 +10,7 @@ export interface LocalAgentConfiguration {
   modelId: string
 }
 
-interface ServerConfigurationTransport {
+export interface ServerConfigurationTransport {
   configuration(): Promise<{ configuration: PortableAgentConfiguration }>
   publishConfiguration(request: unknown): Promise<{ configuration: PortableAgentConfiguration }>
 }

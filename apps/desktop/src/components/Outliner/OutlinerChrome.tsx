@@ -120,6 +120,8 @@ function Toolbar({
       <div className="flex min-w-0 items-center gap-1.5">
         <IconButton
           label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (\u2318\\ / Ctrl+\\)`}
+          aria-keyshortcuts="Meta+\\ Control+\\"
           onClick={onToggleSidebar}
         >
           <span className="t-icon-swap" data-state={sidebarCollapsed ? 'a' : 'b'}>
@@ -163,6 +165,8 @@ function Toolbar({
         </button>
         <IconButton
           label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
+          title={`${activitySidebarCollapsed ? 'Expand' : 'Collapse'} activity sidebar (\u2318/ / Ctrl+/)`}
+          aria-keyshortcuts="Meta+/ Control+/"
           onClick={onToggleActivitySidebar}
         >
           <span className="t-icon-swap" data-state={activitySidebarCollapsed ? 'a' : 'b'}>

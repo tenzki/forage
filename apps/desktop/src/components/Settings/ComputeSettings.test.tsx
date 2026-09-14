@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { invoke } from '@tauri-apps/api/core'
 import { ComputeSettings } from './ComputeSettings'
 import { useSettingsStore } from '../../store/settingsStore'
+import { confirmedConfigurationMirror } from '../../agent/configurationMirror'
+import { buildServerAgentConfiguration } from '../../agent/serverConfiguration'
+import { usePublishedServerConfiguration } from '../../agent/serverConfigurationSync'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
@@ -178,6 +181,31 @@ describe('compute settings', () => {
     expect(screen.getByRole('button', { name: 'Server' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.queryByTestId('compute-wizard-progress')).toBeNull()
     expect(screen.getByRole('button', { name: 'Use local compute' })).toBeTruthy()
+  })
+
+  it('shares the configuration published by startup sync with the rest of Settings', async () => {
+    usePublishedServerConfiguration.setState({ configuration: null })
+    const agent = { id: 'general', name: 'General', description: 'General assistant', systemPrompt: 'Be useful.', toolIds: [] }
+    const skill = { id: 'research-inbox', label: 'research-inbox', description: 'Inbox', systemPrompt: 'Read.', agentId: 'general', requiredToolIds: [] }
+    const server = buildServerAgentConfiguration({ agents: [agent], skills: [], customTools: [], enabledToolIds: [], modelId: 'gpt-5.5' }, 3)
+    const mirror = await confirmedConfigurationMirror(server)
+    useSettingsStore.setState({ agents: [agent], skills: [skill] })
+    vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+      if (command === 'server_connection_info') return connection
+      if (command === 'server_provisioning_state') return null
+      if (command === 'server_agent_configuration') return { configuration: server, publishedAt: '2026-09-02T10:00:00.000Z' }
+      if (command === 'server_agent_configuration_mirror') return mirror
+      if (command === 'server_agent_set_configuration_mirror') return undefined
+      if (command === 'server_agent_publish_configuration') {
+        const request = (arguments_ as { request: { configuration: unknown } }).request
+        return { configuration: request.configuration, publishedAt: '2026-09-02T10:00:00.000Z' }
+      }
+      throw new Error(`unexpected command ${command}`)
+    })
+    render(<ComputeSettings />)
+
+    await waitFor(() => expect(usePublishedServerConfiguration.getState().configuration?.revision).toBe(4))
+    expect(usePublishedServerConfiguration.getState().configuration?.skills.map((candidate) => candidate.id)).toEqual(['research-inbox'])
   })
 
   it('stays in local mode when the copy step fails', async () => {

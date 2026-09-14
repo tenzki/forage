@@ -23,6 +23,7 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { NativeEventRepository, type ServerConnectionInfo } from '../../persistence/eventStore'
 import { adoptLocalOutline } from '../../sync/adoptOutline'
 import { serverRunManager } from '../../agent/serverRunManager'
+import { usePublishedServerConfiguration } from '../../agent/serverConfigurationSync'
 import { ConfirmButton } from './ConfirmButton'
 import { SegmentedControl } from '../ui/SegmentedControl'
 
@@ -112,6 +113,7 @@ export function ComputeSettings() {
             setConfigurationConflict(published.configuration)
           }
           setRevision(published.configuration.revision)
+          usePublishedServerConfiguration.getState().accept(published.configuration)
           if (reconciliation.outcome !== 'conflict') {
             await mirrorStore.save(await confirmedConfigurationMirror(published.configuration))
           }
@@ -288,6 +290,7 @@ export function ComputeSettings() {
       }, revision + 1),
     })
     setRevision(published.configuration.revision)
+    usePublishedServerConfiguration.getState().accept(published.configuration)
     await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(published.configuration))
     setConfigurationConflict(null)
     return published
@@ -318,10 +321,12 @@ export function ComputeSettings() {
           configuration: buildServerAgentConfiguration(localAgentConfiguration, configurationConflict.revision + 1),
         })
         setRevision(published.configuration.revision)
+        usePublishedServerConfiguration.getState().accept(published.configuration)
         await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(published.configuration))
       } else {
         await replaceAgentConfiguration(configurationConflict)
         setRevision(configurationConflict.revision)
+        usePublishedServerConfiguration.getState().accept(configurationConflict)
         await new NativeConfigurationMirrorStore().save(await confirmedConfigurationMirror(configurationConflict))
       }
       setConfigurationConflict(null)

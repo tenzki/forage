@@ -587,6 +587,41 @@ describe('App view switching', () => {
     expect(screen.getByRole('button', { name: 'Expand activity sidebar' })).toBeTruthy()
   })
 
+  it('toggles the outline sidebar with the global shortcut', async () => {
+    await renderApp()
+    const outline = screen.getByRole('complementary', { name: 'Outline sidebar' }) as HTMLElement
+    const activity = screen.getByRole('complementary', { name: 'Agent activity' }) as HTMLElement
+
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash', ctrlKey: true })
+
+    expect(outline.classList.contains('is-collapsed')).toBe(true)
+    expect(activity.hidden).toBe(false)
+
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash', ctrlKey: true })
+
+    expect(outline.classList.contains('is-collapsed')).toBe(false)
+  })
+
+  it('toggles the activity sidebar with the global shortcut without stealing the shortcuts panel', async () => {
+    await renderApp()
+    const outline = screen.getByRole('complementary', { name: 'Outline sidebar' }) as HTMLElement
+    const activity = screen.getByRole('complementary', { name: 'Agent activity' }) as HTMLElement
+
+    fireEvent.keyDown(window, { key: '/', code: 'Slash', ctrlKey: true })
+
+    expect(activity.hidden).toBe(true)
+    expect(outline.classList.contains('is-collapsed')).toBe(false)
+
+    fireEvent.keyDown(window, { key: '/', code: 'Slash', ctrlKey: true })
+
+    expect(activity.hidden).toBe(false)
+
+    fireEvent.keyDown(window, { key: '?', code: 'Slash', ctrlKey: true, shiftKey: true })
+
+    expect(screen.getByRole('heading', { name: 'Keyboard shortcuts' })).toBeTruthy()
+    expect(activity.hidden).toBe(false)
+  })
+
   it('shows a recoverable error instead of silently replacing an unreadable outline', async () => {
     const user = userEvent.setup()
     let checkpointAttempts = 0

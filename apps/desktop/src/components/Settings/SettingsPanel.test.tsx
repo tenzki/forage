@@ -5,9 +5,18 @@ import { loginWithChatGpt } from '../../agent/codexAuth'
 import { useSettingsStore } from '../../store/settingsStore'
 import { SettingsPanel } from './SettingsPanel'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
 
 vi.mock('../../agent/codexAuth', () => ({
   loginWithChatGpt: vi.fn(),
+}))
+
+vi.mock('./ServerAgentSettings', () => ({
+  ServerAgentSettings: () => <section><h2>Server agent executor</h2></section>,
+}))
+
+vi.mock('../../agent/serverConfigurationSync', () => ({
+  publishLocalAgentConfiguration: vi.fn(async () => 'published'),
 }))
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
@@ -80,12 +89,14 @@ describe('settings panel', () => {
     expect(screen.getByRole('heading', { name: 'Codex' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Default model' }).closest('.model-select')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'ChatGPT subscription' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByRole('heading', { name: 'Server agent executor' })).toBeNull()
     expect((screen.getByRole('heading', { name: 'Tools', hidden: true }).closest('section') as HTMLElement).hidden).toBe(true)
 
     await user.click(screen.getByRole('button', { name: 'Agents' }))
     expect(screen.getByRole('heading', { name: 'Agents' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Skills' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Tools' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Server agent executor' })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Codex' })).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Advanced' }))
@@ -157,5 +168,17 @@ describe('settings panel', () => {
     expect(reset).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Confirm restore built-ins' }))
     expect(reset).toHaveBeenCalledOnce()
+  })
+
+  it('publishes tool changes to the server agent configuration', async () => {
+    const user = userEvent.setup()
+    const setToolEnabled = vi.mocked(useSettingsStore.getState().setToolEnabled)
+    render(<SettingsPanel onBack={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Agents' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Read webpages' }))
+
+    expect(setToolEnabled).toHaveBeenCalledWith('web_fetch', true)
+    await waitFor(() => expect(publishLocalAgentConfiguration).toHaveBeenCalledTimes(1))
   })
 })

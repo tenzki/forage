@@ -4564,3 +4564,8 @@ body.is-dragging-rule * {
     }
   }
 }
+.server-agent-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #ededed;
+}

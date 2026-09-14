@@ -30,6 +30,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { label: 'Search commands and bullets', keys: [[PRIMARY_MODIFIER, 'K']] },
       { label: 'Go back', keys: [[PRIMARY_MODIFIER, '[']] },
       { label: 'Go forward', keys: [[PRIMARY_MODIFIER, ']']] },
+      { label: 'Show or hide the outline sidebar', keys: [[PRIMARY_MODIFIER, '\\']] },
+      { label: 'Show or hide the activity sidebar', keys: [[PRIMARY_MODIFIER, '/']] },
       { label: 'Open Settings', keys: [[PRIMARY_MODIFIER, ',']] },
       { label: 'Open keyboard shortcuts', keys: [[PRIMARY_MODIFIER, '?']] },
       { label: 'Close the current panel or menu', keys: [['Esc']] },

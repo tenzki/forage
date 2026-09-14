@@ -34,6 +34,7 @@ type InvokeFunction = (command: string, arguments_?: Record<string, unknown>) =>
 export interface ServerAgentTransport {
   invoke(input: ServerInvocationIntent): Promise<z.infer<typeof agentRunAdmissionResponseSchema>>
   run(runId: string): Promise<RunDetail>
+  runs(cursor?: string, limit?: number, status?: RunStatus): Promise<z.infer<typeof agentRunListResponseSchema>>
   activity(runId: string, afterSequence: number, limit?: number): Promise<ActivityPage>
   cancel(runId: string): Promise<void>
   retry(runId: string): Promise<z.infer<typeof agentRunRetryResponseSchema>>
