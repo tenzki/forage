@@ -1,0 +1,10 @@
+{
+  "identifier": "peek-header",
+  "description": "The peek's header bar window: it shows a URL, opens it in the real browser, and closes the peek. Nothing else. The peeked page itself runs in a separate window with no capability at all.",
+  "windows": ["link-peek-header"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "opener:default"
+  ]
+}

@@ -955,6 +955,117 @@ body {
 
 .outliner-editor a[href] {
   cursor: pointer;
+  color: #6549c7;
+  text-decoration: underline;
+  text-decoration-color: #ddd7f5;
+  text-underline-offset: 2px;
+}
+
+.outliner-editor a[href]:hover {
+  text-decoration-color: currentColor;
+}
+
+/* The hover card floats over the outline rather than sitting in it, so its
+   width and placement come from linkCard.ts and only the skin lives here. */
+.link-card {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Header strip for the page peek. This runs as its own borderless window pinned
+   on top of the peek's page window — see PeekHeaderWindow.tsx — so it fills its
+   viewport rather than floating over the outline. */
+.link-peek-body {
+  margin: 0;
+  overflow: hidden;
+}
+
+.link-peek-header.is-window {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.link-peek-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 12px;
+  box-sizing: border-box;
+  border-radius: 12px 12px 0 0;
+  font-size: 12px;
+}
+
+.link-peek-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-peek-host {
+  font-weight: 600;
+}
+
+.link-peek-action,
+.link-peek-close {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.link-card-monogram {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.link-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.link-card-title,
+.link-card-description,
+.link-card-host {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-card-external {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .outliner-editor .internal-link {
@@ -3911,6 +4022,121 @@ body.is-dragging-rule * {
 
   .outline-tag:hover {
     background: #e5e5e5;
+  }
+
+  /* External links stay in ink and carry an underline plus a small outbound
+     glyph, so they never read as the blue internal-link chip above. */
+  .outliner-editor a[href]:not(.internal-link) {
+    color: var(--osui-ink);
+    text-decoration: underline;
+    text-decoration-color: var(--osui-border-strong);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
+  .outliner-editor a[href]:not(.internal-link)::after {
+    content: '\2197';
+    margin-left: 1px;
+    font-size: 0.75em;
+    line-height: 1;
+    vertical-align: super;
+    color: var(--osui-faint);
+    text-decoration: none;
+  }
+
+  .outliner-editor a[href]:not(.internal-link):hover {
+    text-decoration-color: var(--osui-ink);
+  }
+
+  .outliner-editor a[href]:not(.internal-link):hover::after {
+    color: var(--osui-muted);
+  }
+
+  .link-card {
+    border: 1px solid var(--osui-border);
+    background: var(--osui-surface);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .link-peek-header {
+    border: 1px solid var(--osui-border-strong);
+    border-bottom: 0;
+    background: var(--osui-surface);
+  }
+
+  /* Its window already casts the shadow, and a border on a full-bleed viewport
+     only eats pixels from the URL. */
+  .link-peek-header.is-window {
+    border: 0;
+  }
+
+  .link-peek-host {
+    color: var(--osui-ink);
+  }
+
+  .link-peek-path {
+    color: var(--osui-faint);
+  }
+
+  .link-peek-action,
+  .link-peek-close {
+    color: var(--osui-muted);
+  }
+
+  /* `.is-hover` is the synthetic one the header window polls for — see
+     useCursorHover() in PeekHeaderWindow.tsx. `:hover` is kept for when the
+     header happens to be the key window and macOS does send the events. */
+  .link-peek-action:hover,
+  .link-peek-close:hover,
+  .link-peek-action.is-hover,
+  .link-peek-close.is-hover {
+    background: var(--osui-hover);
+    color: var(--osui-ink);
+  }
+
+  .link-card:hover {
+    border-color: var(--osui-border-strong);
+    background: var(--osui-hover);
+  }
+
+  .link-card:focus-visible {
+    outline: 2px solid var(--osui-focus);
+    outline-offset: 2px;
+  }
+
+  .link-card-monogram {
+    background: var(--osui-subtle);
+    color: var(--osui-muted);
+  }
+
+  .link-card-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--osui-ink);
+  }
+
+  .link-card-description {
+    font-size: 12px;
+    color: var(--osui-muted);
+  }
+
+  .link-card-host {
+    font-size: 11px;
+    color: var(--osui-faint);
+  }
+
+  /* Nothing to show yet: keep the skeleton quiet rather than flashing a title. */
+  .link-card.is-loading .link-card-title {
+    color: var(--osui-faint);
+  }
+
+  .link-card-external {
+    color: var(--osui-faint);
+  }
+
+  .link-card-external:hover {
+    color: var(--osui-ink);
   }
 
   .outliner-editor .internal-link {

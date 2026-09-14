@@ -12,6 +12,8 @@ import { BulletNote } from './bulletNote'
 import { SkillContextPreview } from './contextPreview'
 import { GeneratedImage, GeneratedImageItem, OutlineBulletList, OutlineListItem } from './generatedImage'
 import { InternalLink } from './internalLinks'
+import { ExternalLink } from './externalLinks'
+import { LinkCards } from './linkCard'
 import { OutlinerUi } from './outlinerUi'
 import { TagDecorations } from './tags'
 import { SlashCommandDecorations } from './slashCommands'
@@ -57,6 +59,7 @@ export function OutlinerEditor({
         listItem: false,
         trailingNode: false,
         undoRedo: false,
+        link: { openOnClick: false },
       }),
       OutlineListItem,
       OutlineBulletList,
@@ -65,6 +68,8 @@ export function OutlinerEditor({
       BulletAttributes,
       BulletNote,
       InternalLink,
+      ExternalLink,
+      LinkCards,
       OutlinerKeymap,
       TagDecorations,
       SlashCommandDecorations,

@@ -74,6 +74,7 @@ pub fn run() {
             commands::local_credential_remove,
             commands::asset_ingest_data_url,
             commands::asset_read,
+            commands::peek_page_url,
             sync_commands::server_enroll,
             sync_commands::server_seed_outline,
             commands::event_store_mark_seeded,

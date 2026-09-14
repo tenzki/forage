@@ -46,6 +46,7 @@ import {
 import { openOrCreateDailyNote } from '../../editor/dailyNotes'
 import { newNodeId } from '../../types/tree'
 import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
+import { useLinkPeek } from './useLinkPeek'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
@@ -637,6 +638,8 @@ export function OutlinerChrome({
     window.addEventListener(OUTLINE_TAG_EVENT, openTag)
     return () => window.removeEventListener(OUTLINE_TAG_EVENT, openTag)
   }, [])
+
+  useLinkPeek()
 
   useEffect(() => {
     const openInternalLink = (event: Event) => {

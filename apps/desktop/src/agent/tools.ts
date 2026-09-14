@@ -115,7 +115,7 @@ function searchArguments(arguments_: Record<string, unknown>): { query: string; 
   return { query, count: Math.max(1, Math.min(MAX_RESULTS, Math.floor(requested))) }
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+export async function fetchWithTimeout(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
   const controller = new AbortController()
   const abort = () => controller.abort(signal?.reason)
   signal?.addEventListener('abort', abort, { once: true })
