@@ -752,7 +752,7 @@ describe('outline structure rules', () => {
         alphabet
       `)
       const entry = bullet(editor, 'alphabet')
-      editor.commands.setTextSelection({ from: entry.pos + 2 + 2, to: entry.pos + 2 + 5 })
+      editor.commands.setTextSelection({ from: entry.pos + 2 + 2, to: entry.pos + 2 + 6 })
       press(editor, 'Enter')
 
       expect(render(editor)).toBe(outline`

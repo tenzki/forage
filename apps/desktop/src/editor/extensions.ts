@@ -15,7 +15,9 @@ import { newNodeId } from '../types/tree'
 import {
   collectBullets,
   currentBulletId,
+  indentSelectedBullets,
   moveCurrentBullet,
+  outdentSelectedBullets,
   toggleCurrentBulletCompleted,
   type BulletEntry,
 } from './outlineModel'
@@ -289,7 +291,7 @@ function handleTitleEnter(editor: Editor): boolean {
   if ($from.parentOffset === 0 && $from.parent.content.size > 0) {
     const item = freshBullet(editor)
     const tr = state.tr.insert(itemPos, item)
-    tr.setSelection(TextSelection.create(tr.doc, itemPos + 2))
+    tr.setSelection(TextSelection.create(tr.doc, itemPos + item.nodeSize + 2))
     view.dispatch(tr.scrollIntoView())
     return true
   }
@@ -361,13 +363,13 @@ export const OutlinerKeymap = Extension.create({
       Tab: () => {
         const nodeId = currentBulletId(this.editor)
         if (nodeId && !validateSystemNodeAction(this.editor.state.doc, 'move', nodeId).allowed) return true
-        this.editor.commands.sinkListItem('listItem')
+        indentSelectedBullets(this.editor)
         return true
       },
       'Shift-Tab': () => {
         const nodeId = currentBulletId(this.editor)
         if (nodeId && !validateSystemNodeAction(this.editor.state.doc, 'move', nodeId).allowed) return true
-        this.editor.commands.liftListItem('listItem')
+        outdentSelectedBullets(this.editor)
         return true
       },
       'Alt-ArrowUp': () => moveCurrentBullet(this.editor, -1),

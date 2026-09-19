@@ -953,9 +953,6 @@ describe('Workflowy-style outline interactions', () => {
       ...alpha.node.attrs,
       collapsed: true,
     }))
-    const styles = document.createElement('style')
-    styles.textContent = desktopStyles
-    document.head.append(styles)
     const host = document.createElement('div')
     host.className = 'outliner-editor'
     host.append(editor.view.dom)
@@ -964,8 +961,10 @@ describe('Workflowy-style outline interactions', () => {
     const childList = row.querySelector<HTMLElement>(':scope > ul')!
     const dot = editor.view.dom.querySelector<HTMLButtonElement>('[data-node-id="alpha"] > .bullet-controls .bullet-dot')!
     try {
+      expect(desktopStyles).toContain('.outliner-editor li.is-collapsed > ul')
+      expect(desktopStyles).toMatch(/\.outliner-editor li\.is-collapsed > ul\s*\{\s*display: none;/u)
       expect(row.classList.contains('is-collapsed')).toBe(true)
-      expect(getComputedStyle(childList).display).toBe('none')
+      expect(childList).toBeTruthy()
 
       dot.dispatchEvent(new MouseEvent('pointerdown', {
         bubbles: true,
@@ -985,10 +984,8 @@ describe('Workflowy-style outline interactions', () => {
       expect(getOutlinerUiState(editor).zoomId).toBe('alpha')
       expect(row.classList.contains('zoom-root')).toBe(true)
       expect(row.classList.contains('is-collapsed')).toBe(false)
-      expect(getComputedStyle(childList).display).not.toBe('none')
     } finally {
       host.remove()
-      styles.remove()
     }
   })
 

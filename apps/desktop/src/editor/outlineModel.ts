@@ -167,6 +167,10 @@ function dispatchDocument(
     domainMutation?: EditorDomainMutation
   } = {},
 ): void {
+  const selectedOffset = selectedId && currentBulletId(editor) === selectedId
+    && editor.state.selection.$from.parent.type === editor.state.schema.nodes.paragraph
+    ? editor.state.selection.$from.parentOffset
+    : 0
   const next = editor.schema.nodeFromJSON(json)
   const transaction = editor.state.tr.replaceWith(0, editor.state.doc.content.size, next.content)
   if (!history) transaction.setMeta('addToHistory', false)
@@ -176,9 +180,121 @@ function dispatchDocument(
   if (options.domainMutation) transaction.setMeta(DOMAIN_MUTATION_META, options.domainMutation)
   if (selectedId) {
     const moved = findBullet(transaction.doc, selectedId)
-    if (moved) transaction.setSelection(TextSelection.near(transaction.doc.resolve(moved.pos + 2)))
+    if (moved) {
+      const textSize = moved.node.firstChild?.content.size ?? 0
+      transaction.setSelection(TextSelection.create(
+        transaction.doc,
+        moved.pos + 2 + Math.min(selectedOffset, textSize),
+      ))
+    }
   }
   editor.view.dispatch(transaction.scrollIntoView())
+}
+
+function selectedBulletRoots(editor: Editor): BulletEntry[] {
+  const entries = collectBullets(editor.state.doc)
+  if (editor.state.selection.empty) {
+    const id = currentBulletId(editor)
+    const current = entries.find((entry) => entry.id === id)
+    return current ? [current] : []
+  }
+
+  const { from, to } = editor.state.selection
+  const selected = entries.filter((entry) => {
+    const paragraphFrom = entry.pos + 1
+    const paragraphTo = paragraphFrom + (entry.node.firstChild?.nodeSize ?? 0)
+    return from < paragraphTo && to > paragraphFrom
+  })
+  const selectedIds = new Set(selected.map((entry) => entry.id))
+  return selected.filter((entry) => (
+    !entry.ancestorIds.some((ancestorId) => selectedIds.has(ancestorId))
+  ))
+}
+
+interface JsonSelectionRoot {
+  entry: BulletEntry
+  location: JsonItemLocation
+}
+
+function jsonSelectionRoots(editor: Editor, doc: PmJson): JsonSelectionRoot[] | null {
+  const roots = selectedBulletRoots(editor)
+  if (!roots.length || roots.some((entry) => (
+    !validateSystemNodeAction(editor.state.doc, 'move', entry.id).allowed
+  ))) return null
+
+  const located = roots.map((entry) => ({ entry, location: findJsonItem(doc, entry.id) }))
+  if (located.some(({ location }) => !location)) return null
+  return located as JsonSelectionRoot[]
+}
+
+/** Indent all selection roots below the preceding sibling in one transaction. */
+export function indentSelectedBullets(editor: Editor): boolean {
+  const doc = cloneDocument(editor)
+  const roots = jsonSelectionRoots(editor, doc)
+  if (!roots) return false
+
+  const groups: JsonSelectionRoot[][] = []
+  for (const root of roots) {
+    const previousGroup = groups[groups.length - 1]
+    const previous = previousGroup?.[previousGroup.length - 1]
+    if (
+      previous
+      && previous.location.list === root.location.list
+      && previous.location.index + 1 === root.location.index
+    ) groups[groups.length - 1].push(root)
+    else groups.push([root])
+  }
+  if (groups.some(([first]) => first.location.index === 0)) return false
+
+  for (const group of [...groups].reverse()) {
+    const first = group[0]
+    const target = first.location.list.content?.[first.location.index - 1]
+    if (!target || target.type !== 'listItem') return false
+    const moving = group.map(({ location }) => location.node)
+    const movingSet = new Set(moving)
+    first.location.list.content = (first.location.list.content ?? []).filter((item) => !movingSet.has(item))
+    const destination = childList(target, true)
+    if (!destination) return false
+    destination.content = [...(destination.content ?? []), ...moving]
+    target.attrs = { ...target.attrs, collapsed: false }
+  }
+
+  pruneEmptyNestedLists(doc)
+  dispatchDocument(editor, doc, roots[0].entry.id)
+  return true
+}
+
+/** Logically outdent selection roots without adopting their following siblings. */
+export function outdentSelectedBullets(editor: Editor): boolean {
+  const doc = cloneDocument(editor)
+  const roots = jsonSelectionRoots(editor, doc)
+  if (!roots || roots.some(({ entry }) => entry.ancestorIds.length === 0)) return false
+
+  const groups = new Map<string, JsonSelectionRoot[]>()
+  for (const root of roots) {
+    const parentId = root.entry.ancestorIds[root.entry.ancestorIds.length - 1]
+    if (!parentId) return false
+    const group = groups.get(parentId) ?? []
+    group.push(root)
+    groups.set(parentId, group)
+  }
+
+  for (const [parentId, group] of [...groups].reverse()) {
+    const parent = findJsonItem(doc, parentId)
+    if (!parent) return false
+    const moving = group.map(({ location }) => location.node)
+    const movingSet = new Set(moving)
+    const sourceList = group[0].location.list
+    if (group.some(({ location }) => location.list !== sourceList)) return false
+    sourceList.content = (sourceList.content ?? []).filter((item) => !movingSet.has(item))
+    const parentIndex = (parent.list.content ?? []).indexOf(parent.node)
+    if (parentIndex < 0) return false
+    parent.list.content?.splice(parentIndex + 1, 0, ...moving)
+  }
+
+  pruneEmptyNestedLists(doc)
+  dispatchDocument(editor, doc, roots[0].entry.id)
+  return true
 }
 
 function placeItem(doc: PmJson, item: PmJson, targetId: string | null, placement: MovePlacement): boolean {
@@ -194,6 +310,7 @@ function placeItem(doc: PmJson, item: PmJson, targetId: string | null, placement
     const list = childList(target.node, true)
     if (!list) return false
     insertAt(list, item, list.content?.length ?? 0)
+    target.node.attrs = { ...target.node.attrs, collapsed: false }
   } else {
     insertAt(target.list, item, target.index + (placement === 'after' ? 1 : 0))
   }
@@ -225,8 +342,13 @@ export function moveBulletById(editor: Editor, nodeId: string, direction: -1 | 1
   const siblings = collectBullets(editor.state.doc).filter(
     (entry) => entry.parentListPos === source.parentListPos,
   )
-  const target = siblings[source.siblingIndex + direction]
-  if (!target) return false
+  const sourceIndex = siblings.findIndex((entry) => entry.id === nodeId)
+  const target = siblings[sourceIndex + direction]
+  if (!target) {
+    const parentId = source.ancestorIds[source.ancestorIds.length - 1]
+    if (!parentId) return false
+    return moveBulletTo(editor, nodeId, parentId, direction < 0 ? 'before' : 'after')
+  }
   return moveBulletTo(editor, nodeId, target.id, direction < 0 ? 'before' : 'after')
 }
 

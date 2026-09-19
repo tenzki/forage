@@ -149,29 +149,13 @@ Placement is decided by pointer position over the target row: top 30% →
 
 ---
 
-## Known divergences
+## Implementation status
 
-Verified by running `outlineStructure.test.ts` against the implementation.
-The BSP family was implemented on 2026-09-02 (`handleStructuralBackspace` in
-`extensions.ts`) and now passes in full. 54 of 67 rules pass; the 13 below still
-fail. They are listed here rather than in the rules themselves, so the rules
-stay a statement of intent.
-
-| Rule | Current Forage behavior | Cause |
-|------|-------------------------|-------|
-| OUT-01 | Outdenting a top-level bullet **destroys it** — it is lifted out of the `bulletList` into a bare paragraph and stops being a bullet. | `liftListItem` lifts out of the list entirely when there is no outer list. |
-| OUT-03, OUT-04, OUT-08 | Following siblings are **adopted as children** of the outdented bullet. | `extensions.ts:264` calls `liftListItem`; ProseMirror's `liftToOuterList` deliberately reparents trailing siblings ("There are siblings after the lifted items, which must become children of the last item"). |
-| INV-01, INV-05 on outdent | Consequences of the above: ids and collapse state end up on the wrong tree shape. | Same. |
-| MOV-03, MOV-04 | No-op at sibling boundaries. | `moveBulletById` in `outlineModel.ts` indexes strictly within one sibling list. |
-| MOV-07 | The caret survives the move but its offset resets to 0. | `dispatchDocument` re-seats the selection with `TextSelection.near(pos + 2)`. |
-| ENT-04 | Structure is right, but the caret moves into the **new empty bullet** instead of staying with the text. | `handleTitleEnter` selects `itemPos + 2`, which is the inserted bullet. |
-| ENT-09 | Enter over a text selection splits without deleting the selection first, so the selected text survives in the new bullet. | `handleTitleEnter` returns early unless `state.selection.empty`, then a later handler splits. |
-| IND-04, DRP-05 | Collapsed targets are not expanded on receive, so the moved bullet lands somewhere invisible. | No expansion step in `sinkListItem` or `moveBulletTo`. |
-
-Rules that pass, and should be protected by these tests during any further fix:
-all of IND except IND-04 (including both multi-select cases), OUT-02, OUT-05,
-OUT-06, OUT-07, OUT-09, ENT-01/02/03/05/06/07, all of BSP, MOV-01/02/05/06, and
-all of DRP except DRP-05.
+All rules in this document pass in `outlineStructure.test.ts`. Indent and
+outdent use Forage's tree-aware structural operations rather than
+ProseMirror's generic list lifting, whose trailing-sibling adoption does not
+match OUT-03. The same tree operations preserve branch identity, collapse
+state, selection offsets, and single-step undo behavior.
 
 ### Fixed: BSP-01 — BSP-05 (2026-09-02)
 
