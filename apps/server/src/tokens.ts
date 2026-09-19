@@ -36,7 +36,7 @@ await runCli(async () => {
          FROM credentials ORDER BY created_at`,
       )
       if (!result.rowCount) {
-        process.stdout.write('No credentials exist yet. Bootstrap the server with: npm run server:bootstrap\n')
+        process.stdout.write('No credentials exist yet. Bootstrap the server with: pnpm server:bootstrap\n')
         return
       }
       process.stdout.write(`${JSON.stringify(result.rows, null, 2)}\n`)
@@ -63,7 +63,7 @@ await runCli(async () => {
       if (!binding.rows[0]) {
         throw new CliError(args.get('outline')
           ? `Outline ${args.get('outline')} does not exist. List outlines with "tokens list" or bootstrap the server first.`
-          : 'No outline exists. Bootstrap the server first with: npm run server:bootstrap')
+          : 'No outline exists. Bootstrap the server first with: pnpm server:bootstrap')
       }
       const secret = `fg_${kind}_${randomBytes(32).toString('base64url')}`
       const id = `token_${randomUUID()}`
@@ -77,7 +77,7 @@ await runCli(async () => {
       if (kind === 'device') {
         process.stdout.write(
           'This token carries a single scope. Desktop server mode also needs agents:read, agents:execute, and agents:manage,\n'
-          + 'which only "npm run server:bootstrap" issues.\n',
+          + 'which only "pnpm server:bootstrap" issues.\n',
         )
       }
     }

@@ -12,9 +12,19 @@ function readJson(relativePath) {
 
 test('the repository root is only the workspace orchestrator', () => {
   const rootManifest = readJson('package.json')
+  const workspace = readFileSync(path.join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')
 
   assert.equal(rootManifest.name, '@forage/workspace')
-  assert.deepEqual(rootManifest.workspaces, ['apps/*', 'packages/*'])
+  assert.equal(rootManifest.packageManager.startsWith('pnpm@'), true)
+  assert.equal('workspaces' in rootManifest, false)
+  assert.match(workspace, /- apps\/\*/)
+  assert.match(workspace, /- packages\/\*/)
+  assert.match(workspace, /- apps\/desktop\/src-tauri\/resources\/pi\/sidecar/)
+  assert.equal(existsSync(path.join(repositoryRoot, 'package-lock.json')), false)
+  assert.equal(
+    existsSync(path.join(repositoryRoot, 'apps/desktop/src-tauri/resources/pi/sidecar/package-lock.json')),
+    false,
+  )
   assert.match(rootManifest.scripts.dev, /dev:infra/)
   assert.match(rootManifest.scripts.dev, /turbo run dev/)
   assert.match(rootManifest.scripts['server:bootstrap'], /dev:infra/)

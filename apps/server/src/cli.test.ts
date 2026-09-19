@@ -76,7 +76,7 @@ describe('server CLI runner', () => {
       await runCli(async () => {
         throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:55437'), { code: 'ECONNREFUSED' })
       })
-      expect(written.join('')).toContain('npm run dev:infra')
+      expect(written.join('')).toContain('pnpm dev:infra')
     } finally {
       write.mockRestore()
       process.exitCode = previousExitCode

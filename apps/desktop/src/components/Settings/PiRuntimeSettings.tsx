@@ -44,7 +44,7 @@ export function PiRuntimeSettings() {
         <RuntimeResult label="Codex" status={codexStatus} />
         <p className="settings-hint">
           Development requires Node.js 18+ and Codex 0.148.0+ on PATH.
-          The sidecar runs via tsx with its own npm dependencies in src-tauri/resources/pi/sidecar/.
+          The sidecar runs via tsx with its own package dependencies in src-tauri/resources/pi/sidecar/.
         </p>
         <button className="settings-save" disabled={checking} onClick={() => void checkRuntimes()}>
           {checking ? 'Checking…' : 'Check agent runtimes'}

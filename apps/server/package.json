@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
     "start": "tsx src/main.ts",
-    "build": "npm run typecheck",
+    "build": "pnpm typecheck",
     "db:migrate": "tsx src/migrate.ts",
     "bootstrap": "tsx src/bootstrap.ts",
     "tokens": "tsx src/tokens.ts",
@@ -15,19 +15,22 @@
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.0",
-    "@forage/agent-runtime": "0.1.0",
-    "@forage/document": "0.1.0",
-    "@forage/domain": "0.1.0",
-    "@forage/protocol": "0.1.0",
+    "@forage/agent-runtime": "workspace:*",
+    "@forage/document": "workspace:*",
+    "@forage/domain": "workspace:*",
+    "@forage/protocol": "workspace:*",
     "fastify": "^5.6.0",
     "pg": "^8.16.3",
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@tiptap/pm": "3.20.5",
+    "@types/node": "26.2.0",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.12",
     "typescript": "^5",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.1",
+    "ws": "8.18.3"
   }
 }

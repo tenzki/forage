@@ -80,9 +80,9 @@ This map ties every normative scenario in the change to automated evidence. Prov
 
 ## Verification commands
 
-- Full TypeScript/component suite: `npm test`
-- Workspace boundary suite: `npm run test:workspace`
-- Production TypeScript builds: `npm run build`
+- Full TypeScript/component suite: `pnpm test`
+- Workspace boundary suite: `pnpm test:workspace`
+- Production TypeScript builds: `pnpm build`
 - Rust suite: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
-- Real PostgreSQL suite: `TEST_DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test npm test -- apps/server/src/postgres.test.ts`
-- Strict proposal validation: `npx openspec validate add-server-agent-executor --strict`
+- Real PostgreSQL suite: `TEST_DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test pnpm test -- apps/server/src/postgres.test.ts`
+- Strict proposal validation: `pnpm exec openspec validate add-server-agent-executor --strict`

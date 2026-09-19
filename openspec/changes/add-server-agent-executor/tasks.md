@@ -95,7 +95,7 @@
 - [x] 11.2 Document server worker deployment, encryption-key backup/rotation, ChatGPT device authorization, API-key alternative, provider disclosures, transcript setup, credential revocation, scopes, retries, run retention, and failure recovery
 - [x] 11.3 Update Apple Shortcuts capture documentation with canonical `source` properties and explain that the existing Notes API remains synchronous and backward compatible while eligible work continues in the background
 - [x] 11.4 Document default disabled YouTube, X/Twitter, and webpage policies, their skills/tools/result placement, expected provider usage, and how local-only execution differs from unattended server processing
-- [x] 11.5 Run shared package, desktop, server, protocol, domain, component, and workspace tests with `npm test` and `npm run test:workspace`, and resolve every failure
+- [x] 11.5 Run shared package, desktop, server, protocol, domain, component, and workspace tests with `pnpm test` and `pnpm test:workspace`, and resolve every failure
 - [x] 11.6 Run PostgreSQL migration/integration tests from a clean database and from schema `0001`, including concurrency, restart, OAuth refresh, atomic Inbox admission, and exactly-once result scenarios using fake providers
 - [x] 11.7 Run Rust tests, TypeScript typechecks, production builds, and strict OpenSpec validation; confirm no secrets or raw fetched bodies appear in fixtures, snapshots, logs, events, or API responses
 - [ ] 11.8 With explicit owner approval and disposable credentials/data, perform a manual end-to-end smoke test for local manual execution, server manual execution, background YouTube transcription/summary, X research, cancellation, restart recovery, sync, and disconnect

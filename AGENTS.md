@@ -1,35 +1,35 @@
-# CLAUDE.md
+# AGENTS.md
 
 > The project was renamed **ai-chat → Forage** (bundle id `com.forage.app`). Historical references to `ai-chat` in archived phase material and superseded ADR bodies are intentional. See ADR-0010. The current system map is `docs/architecture.md`.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository.
 
 ## Commands
 
 ```bash
-npm install              # installs all workspaces + desktop sidecar deps
-npm run dev              # PostgreSQL + migrations, then API + real Tauri app via Turbo
-npm run dev:desktop      # Real local-only Tauri app; no PostgreSQL or API
-npm run dev:server       # PostgreSQL + migrations + API only
-npm run server:bootstrap # One-time local owner, outline, and credential creation
-npm run server:tokens -- list  # List, create, or revoke server credentials
-npm run dev:down         # Stop local compose infrastructure
-npm run dev:web --workspace @forage/desktop   # Browser-only Vite frontend on :1420
-npm run build            # Turbo build/typecheck for desktop and server
-npm run tauri -- build   # Bundle the macOS app
-npm test                 # root Vitest suite (setup: apps/desktop/src/test-setup.ts)
-npx vitest run apps/desktop/src/path/to/file.test.ts  # single test file
-npx vitest run -t "test name"                  # single test by name
-npm run typecheck --workspace @forage/server   # server typecheck only
+pnpm install             # installs all workspaces + desktop sidecar deps
+pnpm dev                 # PostgreSQL + migrations, then API + real Tauri app via Turbo
+pnpm dev:desktop         # Real local-only Tauri app; no PostgreSQL or API
+pnpm dev:server          # PostgreSQL + migrations + API only
+pnpm server:bootstrap    # One-time local owner, outline, and credential creation
+pnpm server:tokens -- list  # List, create, or revoke server credentials
+pnpm dev:down            # Stop local compose infrastructure
+pnpm --filter @forage/desktop dev:web  # Browser-only Vite frontend on :1420
+pnpm build               # Turbo build/typecheck for desktop and server
+pnpm tauri -- build      # Bundle the macOS app
+pnpm test                # root Vitest suite (setup: apps/desktop/src/test-setup.ts)
+pnpm exec vitest run apps/desktop/src/path/to/file.test.ts  # single test file
+pnpm exec vitest run -t "test name"               # single test by name
+pnpm --filter @forage/server typecheck             # server typecheck only
 ```
 
-Prerequisites: Node.js 18+, Codex 0.148.0+ (subscription image generation only).
-The sidecar runs via `tsx` with its own npm dependencies in `apps/desktop/src-tauri/resources/pi/sidecar/`;
-`npm install` at root handles both the webview and sidecar in one step.
+Prerequisites: Node.js 18+, pnpm 10.32.1 (via Corepack or a direct install), Codex 0.148.0+ (subscription image generation only).
+The sidecar runs via `tsx` as a pnpm workspace package in `apps/desktop/src-tauri/resources/pi/sidecar/`;
+`pnpm install` at root handles both the webview and sidecar in one step.
 
 There is no linter. `tsconfig.json` is strict and has `noUnusedLocals`/`noUnusedParameters`, so `tsc` is the gate.
 
-Anything touching custom native persistence/sync commands or `plugin-store` only works in the Tauri app (`npm run dev` or `npm run dev:desktop`), not the browser-only `dev:web` command.
+Anything touching custom native persistence/sync commands or `plugin-store` only works in the Tauri app (`pnpm dev` or `pnpm dev:desktop`), not the browser-only `dev:web` command.
 
 ## Architecture
 

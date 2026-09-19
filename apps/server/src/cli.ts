@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 
-/** Repo-root .env, so the workspace-scoped npm scripts run without an env prefix. */
+/** Repo-root .env, so the workspace-scoped pnpm scripts run without an env prefix. */
 const DOT_ENV_PATH = fileURLToPath(new URL('../../../.env', import.meta.url))
 
 let dotEnvLoaded = false
@@ -84,7 +84,7 @@ function describeFailure(error: unknown): string {
   if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
     return [
       `Could not reach PostgreSQL: ${message}`,
-      'Start the local database first with: npm run dev:infra',
+      'Start the local database first with: pnpm dev:infra',
     ].join('\n')
   }
   return message

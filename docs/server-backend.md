@@ -6,16 +6,16 @@ Server mode synchronizes the same event stream with a self-hosted Node.js server
 
 ## Start a development server
 
-After `npm install`, the normal development command starts PostgreSQL, applies the schema idempotently, and then runs the API and Tauri desktop app concurrently through Turborepo:
+After `pnpm install`, the normal development command starts PostgreSQL, applies the schema idempotently, and then runs the API and Tauri desktop app concurrently through Turborepo:
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 On a fresh development database, bootstrap the only owner once before connecting the desktop. This command also starts PostgreSQL and applies migrations. It prints the owner ID plus initial API and device tokens exactly once; store them immediately.
 
 ```bash
-npm run server:bootstrap
+pnpm server:bootstrap
 ```
 
 Bootstrapping creates **no outline**. A blank server holds an owner and credentials and nothing else. The first desktop to connect claims the server and seeds it with that device's own outline, so your existing local notes become the server's content rather than being parked behind an empty stub. Until a device has seeded it, every outline, note-capture, and agent request is refused with a `conflict` explaining that the outline has not been seeded.
@@ -23,9 +23,9 @@ Bootstrapping creates **no outline**. A blank server holds an owner and credenti
 Focused commands are available when the full stack is unnecessary:
 
 ```bash
-npm run dev:desktop # Tauri only, using local SQLite storage
-npm run dev:server  # PostgreSQL, migrations, and API only
-npm run dev:down    # stop compose infrastructure
+pnpm dev:desktop # Tauri only, using local SQLite storage
+pnpm dev:server  # PostgreSQL, migrations, and API only
+pnpm dev:down    # stop compose infrastructure
 ```
 
 The development API listens at `http://127.0.0.1:3210`. Production invocations of `@forage/server` still require explicit `DATABASE_URL`, `FORAGE_INSTANCE_ID`, and `FORAGE_ASSET_DIR`; development defaults exist only in the root orchestration scripts.
@@ -43,15 +43,15 @@ A device connecting to a server that **already** holds an outline cannot seed it
 Create an API token and capture the displayed secret; only its SHA-256 hash is stored:
 
 ```bash
-npm run tokens --workspace @forage/server -- create \
+pnpm server:tokens -- create \
     --kind api --name apple-shortcuts --scope notes:create
 ```
 
 Optional flags are `--outline OUTLINE_ID` and `--expires 2027-01-01T00:00:00Z`. Device tokens use `--kind device --scope sync`. List non-secret metadata or revoke a token with:
 
 ```bash
-npm run tokens --workspace @forage/server -- list
-npm run tokens --workspace @forage/server -- revoke TOKEN_ID
+pnpm server:tokens -- list
+pnpm server:tokens -- revoke TOKEN_ID
 ```
 
 ## Add a note from another application

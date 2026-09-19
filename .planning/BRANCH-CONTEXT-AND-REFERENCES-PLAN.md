@@ -189,7 +189,7 @@ The resolver must operate on the ProseMirror document rather than rendered DOM, 
 
 - Document command placement as the context mechanism.
 - Document references as the only external-context mechanism.
-- Remove descriptions of configurable context strategies from ADR-0008, `CLAUDE.md`, `.planning/PROJECT.md`, and `.planning/ROADMAP.md`.
+- Remove descriptions of configurable context strategies from ADR-0008, `AGENTS.md`, `.planning/PROJECT.md`, and `.planning/ROADMAP.md`.
 
 ## Test Plan
 

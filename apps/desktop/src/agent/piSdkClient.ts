@@ -104,7 +104,7 @@ export class PiRpcClient {
       this.child = await this.command.spawn()
     } catch (error) {
       unsubscribeStartup()
-      throw new Error(`Could not start the Pi SDK sidecar. Install dependencies with 'cd sidecar && npm install'. ${message(error)}`)
+      throw new Error(`Could not start the Pi SDK sidecar. Install dependencies with 'pnpm install' from the repository root. ${message(error)}`)
     }
     try {
       await startup

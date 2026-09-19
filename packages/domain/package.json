@@ -5,7 +5,8 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@forage/document": "0.1.0",
+    "@forage/document": "workspace:*",
+    "@tiptap/pm": "3.20.5",
     "zod": "^4.1.5"
   }
 }

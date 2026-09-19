@@ -21,8 +21,8 @@ await runCli(async () => {
     if (error instanceof Error && error.message.includes('already bootstrapped')) {
       throw new CliError([
         'This server already has an owner, so no new tokens were issued.',
-        'List the existing credentials with:  npm run server:tokens -- list',
-        'Mint a replacement with:            npm run server:tokens -- create --kind device --name desktop',
+        'List the existing credentials with:  pnpm server:tokens -- list',
+        'Mint a replacement with:            pnpm server:tokens -- create --kind device --name desktop',
       ].join('\n'))
     }
     throw error

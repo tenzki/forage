@@ -9,7 +9,7 @@ It does require Forage server mode and a network-reachable HTTPS server. The des
 Create a dedicated token whose only permission is creating notes:
 
 ```bash
-npm run tokens --workspace @forage/server -- create \
+pnpm server:tokens -- create \
   --kind api --name apple-shortcuts --scope notes:create
 ```
 

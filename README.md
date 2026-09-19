@@ -20,17 +20,18 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 ## Requirements
 
 - Node.js 18+
+- pnpm 10.32.1 (the repository's `packageManager` pin can be activated with Corepack)
 - Rust toolchain (Tauri build) — install via [rustup](https://rustup.rs/) if missing
 - [Codex CLI](https://github.com/openai/codex) 0.148.0+ on `PATH` — **only needed for subscription-mode image generation** (`/image`). API-key image generation and all other features work without it.
 
 ## Run it
 
 ```bash
-npm install    # installs all workspace and agent-sidecar dependencies
-npm run dev    # starts PostgreSQL, applies migrations, then runs the API and Tauri app
+pnpm install   # installs all workspace and agent-sidecar dependencies
+pnpm dev       # starts PostgreSQL, applies migrations, then runs the API and Tauri app
 ```
 
-On a fresh development database, run `npm run server:bootstrap` once before connecting the desktop to the server. It prints the outline ID and initial credentials exactly once. To work only on the local-first desktop app without PostgreSQL or the API, use `npm run dev:desktop`.
+On a fresh development database, run `pnpm server:bootstrap` once before connecting the desktop to the server. It prints the outline ID and initial credentials exactly once. To work only on the local-first desktop app without PostgreSQL or the API, use `pnpm dev:desktop`.
 
 
 ## Built on Pi
