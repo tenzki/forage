@@ -22,7 +22,10 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 - Node.js 18+
 - pnpm 10.32.1 (the repository's `packageManager` pin can be activated with Corepack)
 - Rust toolchain (Tauri build) — install via [rustup](https://rustup.rs/) if missing
-- [Codex CLI](https://github.com/openai/codex) 0.148.0+ on `PATH` — **only needed for subscription-mode image generation** (`/image`). API-key image generation and all other features work without it.
+
+Optional:
+
+- [Codex CLI](https://github.com/openai/codex) 0.148.0+ on `PATH` — needed only for subscription-mode image generation (`/image`). API-key image generation and all other features work without it.
 
 ## Run it
 
@@ -31,18 +34,13 @@ pnpm install   # installs all workspace and agent-sidecar dependencies
 pnpm dev       # starts PostgreSQL, applies migrations, then runs the API and Tauri app
 ```
 
-On a fresh development database, run `pnpm server:bootstrap` once before connecting the desktop to the server. It prints the outline ID and initial credentials exactly once. To work only on the local-first desktop app without PostgreSQL or the API, use `pnpm dev:desktop`.
+On a fresh development database, run `pnpm server:bootstrap` once before connecting the desktop to the server. It prints the initial credentials exactly once; the first desktop then seeds the server with its outline. To work only on the local-first desktop app without PostgreSQL or the API, use `pnpm dev:desktop`. For server connection, tokens, and the Notes API, see [Optional Server Backend](docs/server-backend.md).
 
 
 ## Built on Pi
 
-Agent execution runs on [Pi](https://pi.dev): Forage embeds the Pi SDK in an isolated Node.js sidecar and talks to it over JSONL. Agents, skills, and tools ride on Pi's agent loop rather than a black-box prompt wrapper — bounded, inspectable, and swappable.
+Forage follows [Pi](https://pi.dev)'s philosophy of agents as small, inspectable systems: explicit skills and tool permissions, user-owned model access, and structured results that stay in your outline. Agents should be configurable and understandable, not a black-box prompt wrapper.
 
-## Architecture, briefly
+## Architecture
 
 See [Forage Architecture](docs/architecture.md) for the current component, authority, storage-mode, and agent-execution map.
-
-- **Editor:** one TipTap document; bullets are ProseMirror `listItem`s, agent output is marked and styled separately, images are dedicated nodes.
-- **Identity:** each bullet gets a stable UUID via a ProseMirror plugin, so links and references survive reordering.
-- **Persistence:** SQLite stores immutable events, verified checkpoints, sync state, and the durable pending outbox. In optional server mode, PostgreSQL is authoritative while SQLite remains the offline cache.
-- **Agent:** local mode uses an isolated Pi SDK sidecar; server mode uses a portable model/tool runtime with PostgreSQL leases and executor-owned credentials. Both honor shared validated run/result contracts. Execution follows storage authority and never silently falls back between modes.
