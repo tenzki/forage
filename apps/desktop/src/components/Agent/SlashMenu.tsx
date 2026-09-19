@@ -31,6 +31,7 @@ import type { ActivityReporter } from '../../agent/activity'
 import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
 import {
   nativeLocalCredentialVault,
+  resolveExtensionSecretValues,
   resolveLocalCredential,
 } from '../../agent/localCredentials'
 import { NativeEventRepository } from '../../persistence/eventStore'
@@ -40,7 +41,13 @@ import { createPiLocalRunner } from '../../agent/piLocalRunner'
 import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
 import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
 import { setAgentActivity } from '../../editor/outlinerUi'
-import { resolveEffectiveToolIds, type ActivityEvent as RuntimeActivityEvent, type RunInput } from '@forage/agent-runtime'
+import {
+  createLocalExtensionSnapshotFromCatalog,
+  resolveEffectiveToolIds,
+  type ActivityEvent as RuntimeActivityEvent,
+  type RunInput,
+} from '@forage/agent-runtime'
+import { extensionToolOptions, useExtensionStore } from '../../store/extensionStore'
 
 interface CommandChoice {
   id: string
@@ -124,6 +131,8 @@ export function SlashMenu({
   const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
   const setOAuthCredential = useSettingsStore((state) => state.setOAuthCredential)
+  const extensionCatalog = useExtensionStore((state) => state.catalog)
+  const extensionConfiguration = useExtensionStore((state) => state.configuration)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
   const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
@@ -344,23 +353,48 @@ export function SlashMenu({
         ? 'Not signed in to ChatGPT. Open Settings and connect your subscription.'
         : 'No OpenAI API key set. Open Settings and add your API key.')
       const identity = await repository.identity()
+      if (!extensionCatalog || !extensionConfiguration) {
+        await useExtensionStore.getState().refresh()
+      }
+      const currentExtensionState = useExtensionStore.getState()
+      if (!currentExtensionState.catalog || !currentExtensionState.configuration) {
+        throw new Error('Local extension inventory is unavailable; open Extensions settings and retry.')
+      }
+      const supportedExtensionToolIds = extensionToolOptions(currentExtensionState.catalog)
+        .filter((tool) => tool.available)
+        .map((tool) => tool.id)
       const effectiveToolIds = resolveEffectiveToolIds({
         agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
         globallyEnabledToolIds: enabledToolIds, policyAllowedToolIds: agent.toolIds,
-        executorSupportedToolIds: [...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id), ...customTools.map((tool) => tool.id)],
+        executorSupportedToolIds: [
+          ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
+          ...customTools.map((tool) => tool.id),
+          ...supportedExtensionToolIds,
+        ],
       })
+      const localExtensionSnapshot = createLocalExtensionSnapshotFromCatalog(
+        currentExtensionState.catalog,
+        currentExtensionState.configuration.revision,
+        effectiveToolIds,
+      )
       const input: RunInput = {
         version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
         source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
         baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
         agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
         customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
+        ...(localExtensionSnapshot ? { localExtensionSnapshot } : {}),
       }
       const runner = createPiLocalRunner({
         resolveCredential: async (reference) => {
           if (reference !== credential.id) throw new Error('The local credential reference changed before execution.')
           const auth = await resolveLocalCredential(credential, nativeLocalCredentialVault)
           return { ...auth, modelId, onCredentialRefresh: setOAuthCredential }
+        },
+        resolveExtensionSecrets: async (snapshot) => {
+          const configuration = useExtensionStore.getState().configuration
+          if (!configuration) throw new Error('Extension configuration is unavailable; refresh Extensions settings and retry.')
+          return resolveExtensionSecretValues(snapshot, configuration, nativeLocalCredentialVault)
         },
       })
       localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)

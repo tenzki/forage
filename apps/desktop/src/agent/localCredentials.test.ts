@@ -5,6 +5,7 @@ import {
   LOCAL_OPENAI_CREDENTIAL_ID,
   migrateLegacyCredentials,
   resolveLocalCredential,
+  resolveExtensionSecretValues,
 } from './localCredentials'
 
 describe('local executor credentials', () => {
@@ -49,5 +50,30 @@ describe('local executor credentials', () => {
       provider: 'openai-codex',
       status: 'connected',
     }, { load: async () => '{"accessToken":"only"}' })).rejects.toThrow(/invalid/i)
+  })
+
+  it('resolves only scoped secrets for sources in the admitted extension snapshot', async () => {
+    const load = vi.fn(async (reference: string) => reference.endsWith('/token') ? 'secret-value' : '')
+    const snapshot = {
+      version: 1 as const, catalogRevision: 'a'.repeat(64), configurationRevision: 3,
+      sources: [{
+        installationId: 'installation-1', extensionId: 'dev.example.tools', sourceRevision: 'b'.repeat(64),
+        entryDigest: 'c'.repeat(64), toolIds: ['text_stats'], hooks: [],
+      }],
+    }
+    const configuration = {
+      version: 1 as const, revision: 3, sources: [{
+        installationId: 'installation-1', source: { kind: 'local' as const, path: '/tmp/tools' }, enabled: true,
+        trust: { accepted: true as const, extensionId: 'dev.example.tools' }, settings: {},
+        secretReferences: { token: 'forage-extension/installation-1/token' },
+      }],
+    }
+
+    await expect(resolveExtensionSecretValues(snapshot, configuration, { load })).resolves.toEqual({
+      'installation-1': { token: 'secret-value' },
+    })
+    expect(load).toHaveBeenCalledWith('forage-extension/installation-1/token')
+    expect(() => JSON.stringify(configuration)).not.toThrow()
+    expect(JSON.stringify(configuration)).not.toContain('secret-value')
   })
 })

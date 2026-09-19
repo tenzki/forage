@@ -1,8 +1,10 @@
 import { appDataDir, resolveResource } from '@tauri-apps/api/path'
 import { Command, type Child } from '@tauri-apps/plugin-shell'
+import { extensionLogEntrySchema, extensionProgressSchema } from '@forage/agent-runtime'
 
 const STDERR_LIMIT = 16_000
 const STDOUT_LINE_LIMIT = 8_000_000
+const ABORT_GRACE_MS = 1_500
 
 export type PiRpcEvent = Record<string, unknown> & { type: string }
 
@@ -59,20 +61,19 @@ export class PiRpcClient {
   private stderr = ''
   private stdoutBuffer = ''
   private stopping = false
+  private aborting = false
+  private abortTimer: ReturnType<typeof setTimeout> | null = null
+  private knownSecrets: string[] = []
 
   async start(options: PiProcessOptions): Promise<void> {
     if (this.child) throw new Error('Pi subprocess is already running.')
     this.stopping = false
+    this.aborting = false
+    this.knownSecrets = [options.apiKey].filter(Boolean)
     const agentDir = await appDataDir()
 
-    const [indexPath] = await Promise.all([
-      resolveResource('resources/pi/sidecar/index.ts'),
-    ])
-
-    // Invoke tsx's real entry point. Tauri dereferences the .bin/tsx symlink
-    // when copying resources, which breaks its relative module imports.
-    const tsxCli = await resolveResource('resources/pi/sidecar/node_modules/tsx/dist/cli.mjs')
-    const args = [tsxCli, indexPath]
+    const indexPath = await resolveResource('resources/pi/sidecar/dist/index.mjs')
+    const args = [indexPath]
     const env = {
       PI_CODING_AGENT_DIR: `${agentDir.replace(/\/$/, '')}/pi-agent`,
       PI_SKIP_VERSION_CHECK: '1',
@@ -119,11 +120,22 @@ export class PiRpcClient {
   }
 
   async prompt(message: string): Promise<void> {
+    this.aborting = false
+    this.clearAbortTimer()
     await this.write({ type: 'run', payload: message })
   }
 
   async abort(): Promise<void> {
     if (!this.child) return
+    this.aborting = true
+    this.clearAbortTimer()
+    this.abortTimer = setTimeout(() => {
+      const child = this.child
+      if (!child || !this.aborting) return
+      this.child = null
+      void child.kill().catch(() => undefined)
+      this.handleExit(new Error('Pi SDK did not stop within the cancellation grace period.'))
+    }, ABORT_GRACE_MS)
     await this.write({ type: 'abort' })
   }
 
@@ -152,6 +164,7 @@ export class PiRpcClient {
     const child = this.child
     this.child = null
     this.command = null
+    this.clearAbortTimer()
     if (child) {
       try {
         await child.kill()
@@ -160,6 +173,7 @@ export class PiRpcClient {
       }
     }
     this.listeners.clear()
+    this.knownSecrets = []
   }
 
   getStderr(): string {
@@ -169,7 +183,7 @@ export class PiRpcClient {
   private attachProcessListeners(command: Command<string>): void {
     command.stdout.on('data', (data) => this.handleStdout(data))
     command.stderr.on('data', (data) => {
-      this.stderr = `${this.stderr}${data}\n`.slice(-STDERR_LIMIT)
+      this.stderr = `${this.stderr}${sanitize(data, this.knownSecrets)}\n`.slice(-STDERR_LIMIT)
     })
     command.on('error', (error) => this.handleExit(new Error(error)))
     command.on('close', ({ code, signal }) => {
@@ -189,14 +203,25 @@ export class PiRpcClient {
     for (const line of lines) {
       if (!line.trim()) continue
       try {
-        this.route(JSON.parse(line) as PiRpcEvent)
-      } catch (error) {
-        console.warn('[pi-sdk] ignored malformed output:', error)
+        const event = JSON.parse(line) as unknown
+        if (!validProtocolEvent(event)) throw new Error('Invalid sidecar event.')
+        this.route(event)
+      } catch {
+        const child = this.child
+        this.child = null
+        void child?.kill().catch(() => undefined)
+        this.handleExit(new Error('Pi SDK emitted malformed protocol output.'))
+        return
       }
     }
   }
 
   private route(event: PiRpcEvent): void {
+    if (this.aborting && event.type !== 'agent_settled' && event.type !== 'process_error') return
+    if (event.type === 'agent_settled' || event.type === 'process_error') {
+      this.aborting = false
+      this.clearAbortTimer()
+    }
     for (const listener of this.listeners) listener(event)
   }
 
@@ -210,11 +235,60 @@ export class PiRpcClient {
 
   private handleExit(error: Error): void {
     this.child = null
+    this.clearAbortTimer()
     for (const listener of this.listeners) listener({ type: 'process_error', error: error.message })
+  }
+
+  private clearAbortTimer(): void {
+    if (this.abortTimer !== null) clearTimeout(this.abortTimer)
+    this.abortTimer = null
   }
 
 }
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function validProtocolEvent(value: unknown): value is PiRpcEvent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const event = value as Record<string, unknown>
+  if (!boundedJson(event, STDOUT_LINE_LIMIT) || typeof event.type !== 'string') return false
+  if (event.type === 'ready') return true
+  if (event.type === 'process_error') return typeof event.error === 'string' && event.error.length <= 2_000
+  if (event.type === 'agent_settled') return event.text === undefined || typeof event.text === 'string' && event.text.length <= 100_000
+  if (event.type === 'message_update') return Boolean(event.assistantMessageEvent && typeof event.assistantMessageEvent === 'object')
+  if (event.type === 'tool_execution_start') {
+    return validToolIdentity(event) && boundedJson(event.args, 100_000)
+  }
+  if (event.type === 'tool_execution_end') {
+    return validToolIdentity(event) && boundedJson(event.result, STDOUT_LINE_LIMIT) && (event.isError === undefined || typeof event.isError === 'boolean')
+  }
+  if (event.type === 'extension_progress') {
+    return validToolIdentity(event) && validInstallationId(event.installationId) && extensionProgressSchema.safeParse(event.progress).success
+  }
+  if (event.type === 'extension_log') {
+    const { installationId, extensionId, type: _type, ...entry } = event
+    return validInstallationId(installationId)
+      && typeof extensionId === 'string' && extensionId.length <= 128
+      && extensionLogEntrySchema.safeParse(entry).success
+  }
+  return false
+}
+
+function sanitize(value: string, secrets: readonly string[]): string {
+  return secrets.reduce((text, secret) => secret ? text.split(secret).join('[REDACTED]') : text, value)
+}
+
+function validToolIdentity(event: Record<string, unknown>): boolean {
+  return typeof event.toolName === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(event.toolName)
+    && (event.toolCallId === undefined || typeof event.toolCallId === 'string' && event.toolCallId.length <= 128)
+}
+
+function validInstallationId(value: unknown): boolean {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+}
+
+function boundedJson(value: unknown, maximum: number): boolean {
+  try { return JSON.stringify(value).length <= maximum } catch { return false }
 }

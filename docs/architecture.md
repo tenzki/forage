@@ -16,6 +16,10 @@ flowchart LR
     IPC --> TRANSPORT[Origin-pinned server transport]
     IPC --> STREAM[Origin-pinned outline stream client]
     APP --> SIDECAR[Local Node.js Pi SDK sidecar]
+    APP --> EXTMGMT[Credential-free extension management]
+    EXTMGMT --> FORAGECFG[(~/.forage configuration and packages)]
+    FORAGECFG --> SIDECAR
+    SIDECAR --> EXTHOST[Forage-native extension host]
     SIDECAR --> MODELS[User-selected model provider]
     TRANSPORT --> SERVER[Optional Fastify server]
     STREAM --> SERVER
@@ -36,7 +40,8 @@ Responsibilities are divided by capability:
 | React/TypeScript desktop | Editor behavior, application orchestration, event capture, deterministic projection, synchronization policy, agent context and tool policy, and UI state |
 | Shared TypeScript packages | ProseMirror schema and operations, event envelopes and reduction, protocol validation, rebase behavior, agent configuration, run inputs, activity, and structured-result contracts |
 | Tauri/Rust boundary | SQLite durability, checkpoints and outbox state, local content-addressed asset bytes, local credential storage, and origin-pinned authenticated server transport |
-| Local Node.js sidecar | In-memory Pi SDK sessions, local model/tool execution, streaming lifecycle events, structured output, cancellation, and process cleanup |
+| Local Node.js sidecar | In-memory Pi SDK sessions, local model/tool execution, the private native-extension adapter, streaming lifecycle events, structured output, cancellation, and process cleanup |
+| Forage extension host | Manifest-only inventory, device-local configuration/package lifecycle, trust and revision checks, native tool/hook loading, and bounded extension execution outside the webview |
 | Optional server | Authentication, global event sequencing, authoritative server-mode projection, Notes API, asset transfer, agent configuration, and durable agent work |
 | PostgreSQL | Authoritative server-mode events, revisions, projections, credentials, automation policy, durable agent queues, leases, activity, and result identity |
 
@@ -85,6 +90,16 @@ The desktop supports two execution locations behind shared run and result contra
 
 Both paths return validated structured outline nodes. Server output is persisted before placement and enters the outline as one atomic `agent.result_committed` event. A missing or trashed target produces `completed_unplaced`; the intact stored output can later be placed exactly once under another live node. There is no parallel agent-owned outline, and the editor remains available while runs and synchronization continue.
 
+### Local extensions
+
+Local extensions use Forage's versioned `forage.extension.json` and `@forage/extension-api`, not Pi's extension or package APIs. Settings inventory is manifest-only until a user explicitly reviews, trusts, and enables a source. Installation, activation, app-rendered configuration, global tool enablement, and per-agent selection are distinct gates. The API supports bounded tools and `run:start`/`run:end` hooks; it exposes no React, Tauri, editor, server, provider, or Pi objects.
+
+The credential-free management sidecar owns `~/.forage/settings.json`, drop-ins under `~/.forage/extensions/`, and immutable managed revisions under `~/.forage/packages/`. npm and Git are invoked only for explicit preview/install/update checks or updates, with dependency lifecycle scripts disabled. Normal startup, refresh, validation, and invocation use installed local state only.
+
+At local admission, the desktop captures a catalog/configuration/source digest snapshot and explicit tool ownership. The run sidecar verifies it before import, leases managed revisions for the run, and applies the same effective allowlist to built-in, custom HTTP, and extension tools. Pi remains a replaceable internal agent-loop adapter behind this native boundary. Enabled extensions are trusted Node.js code with the user's process permissions; the host and process separation are not an OS sandbox. Extension installations, settings, secrets, and snapshots remain device-local, and server execution never falls back to them.
+
+See [Extensions](extensions.md) for the Settings and development workflow.
+
 ## External capture and assets
 
 The server Notes API accepts bounded plain-text capture commands and deterministically creates semantic `note.created` events under a stable parent, normally Inbox. Optional policies may admit server agent work for webpage, X, or YouTube enrichment without delaying or invalidating the original capture.
@@ -106,5 +121,6 @@ Generated raster images are stored outside the event payload as content-addresse
 - [ADR-0018: Resolve Models and Credentials Through Environment Compute Profiles](ADRs/ADR-0018-environment-compute-profiles.md)
 - [ADR-0019: Admit Server Agents From Invocation Intents](ADRs/ADR-0019-intent-based-server-agent-admission.md)
 - [ADR-0020: Keep Agent Runs Concurrent and Commit Results Atomically](ADRs/ADR-0020-concurrent-agents-and-atomic-results.md)
+- [ADR-0021: Allow Explicitly Trusted Local Code Through a Forage Extension Contract](ADRs/ADR-0021-trusted-local-forage-extensions.md)
 
 For server setup, security, and operational limits, see [Optional Server Backend](server-backend.md).

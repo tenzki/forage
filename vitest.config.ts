@@ -11,7 +11,16 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     testTimeout: 15_000,
     setupFiles: ['./apps/desktop/src/test-setup.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/target/**', 'scripts/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/target/**',
+      'scripts/**',
+      'packages/extension-api/**',
+      'packages/extension-host/**',
+      'packages/extensions/**',
+      'apps/desktop/src-tauri/resources/pi/sidecar/**',
+    ],
     env: loadEnv(mode, process.cwd(), ''),
   },
 }))

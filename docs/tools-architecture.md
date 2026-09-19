@@ -1,5 +1,7 @@
 # Tool support architecture
 
+> Historical context below explains the origin of the built-in web tools. The current executable-extension boundary is Forage-native; see [Extensions](extensions.md).
+
 ## How Pi handles web search
 
 Pi does not ship web search as a privileged built-in tool. The installed `web-search` capability is an Agent Skill:
@@ -25,9 +27,9 @@ This app should not add a shell just to copy Pi's web-search skill. It exposes n
 
 This preserves the frontend-only architecture and grants no filesystem or command-execution capability. Page URLs are disclosed to Jina Reader, which is stated in Settings.
 
-## User-created tools
+## User-created declarative tools
 
-Users should add **declarative HTTP tools**, not arbitrary JavaScript. A persisted tool definition can contain:
+For webview-owned integrations, users should add **declarative HTTP tools**, not arbitrary JavaScript. Trusted executable tools use the separate native extension host and run only in the local sidecar.
 
 ```ts
 interface CustomHttpTool {
@@ -80,4 +82,4 @@ Tauri's HTTP capability is static. Preserving the current frontend-only architec
 2. **Curated custom HTTP tools** — implemented for public GET requests to GitHub and Open-Meteo.
 3. **Tool activity UI** — show compact call/result details in the generated branch.
 4. **Authenticated connectors and OpenAPI import/export** — portable declarative tool bundles; arbitrary hosts require the hardened-networking architecture decision above.
-5. **Signed or sandboxed extensions** — only if declarative tools prove insufficient; do not run untrusted TypeScript in the webview.
+5. **Trusted local extensions** — implemented through the native sidecar host; extension code never runs in the webview and is explicitly described as unsandboxed trusted code.

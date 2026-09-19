@@ -1,0 +1,21 @@
+{
+  "name": "@forage/extension-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts --reporter=verbose"
+  },
+  "dependencies": {
+    "@forage/agent-runtime": "workspace:*",
+    "@forage/extension-api": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^5",
+    "vitest": "^4.1.1"
+  }
+}

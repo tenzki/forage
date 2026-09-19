@@ -2,6 +2,7 @@ import {
   activityEventSchema,
   parseStructuredResult,
   type ActivityEvent as RuntimeActivityEvent,
+  type RunInput,
   type StructuredResultNode,
 } from '@forage/agent-runtime'
 import type { CodexAuthConfig } from './client'
@@ -16,6 +17,7 @@ export interface PiLocalRunnerDependencies {
   resolveCredential: (reference: string) => Promise<CodexAuthConfig>
   generate?: PiGenerate
   assets?: GeneratedAssetIngestor
+  resolveExtensionSecrets?: (snapshot: NonNullable<RunInput['localExtensionSnapshot']>) => Promise<Record<string, Record<string, string>>>
 }
 
 export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): LocalRuntimeRunner {
@@ -27,6 +29,9 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
     let text = ''
     const activityWrites: Promise<void>[] = []
     const auth = await dependencies.resolveCredential(input.credentialRef)
+    const extensionSecrets = input.localExtensionSnapshot && dependencies.resolveExtensionSecrets
+      ? await dependencies.resolveExtensionSecrets(input.localExtensionSnapshot)
+      : undefined
     const activity = async (event: Parameters<NonNullable<PiGenerateOptions['onActivity']>>[0]): Promise<void> => {
       sequence += 1
       const phase = event.phase
@@ -48,6 +53,7 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
       await options.onActivity(runtimeEvent)
     }
     const finalText = await generate({ ...auth, modelId: input.agent.modelId || auth.modelId }, {
+      runId: input.runId,
       skill: input.skill,
       agent: input.agent,
       prompt: input.prompt,
@@ -55,6 +61,8 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
       enabledToolIds: input.effectiveToolIds,
       customTools: input.customTools ?? [],
       outlineSnapshot: input.outlineSnapshot,
+      extensionSnapshot: input.localExtensionSnapshot,
+      extensionSecrets,
     }, {
       signal: options.signal,
       onDelta: (nextText) => {

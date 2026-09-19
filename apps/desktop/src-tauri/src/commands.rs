@@ -99,9 +99,72 @@ fn command_error(error: impl std::fmt::Display) -> String {
 
 fn validate_local_credential_reference(reference: &str) -> Result<(), String> {
     if matches!(reference, "local-openai" | "local-openai-codex") {
+        return Ok(());
+    }
+
+    let Some(scoped) = reference.strip_prefix("forage-extension/") else {
+        return Err("invalid local credential reference".to_string());
+    };
+    let Some((installation_id, setting_key)) = scoped.split_once('/') else {
+        return Err("invalid local credential reference".to_string());
+    };
+    let installation_is_valid = !installation_id.is_empty()
+        && installation_id.len() <= 128
+        && installation_id
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphanumeric())
+        && installation_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
+        });
+    let setting_is_valid = !setting_key.is_empty()
+        && setting_key.len() <= 64
+        && setting_key
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_lowercase())
+        && setting_key
+            .chars()
+            .all(|character| {
+                character.is_ascii_lowercase()
+                    || character.is_ascii_digit()
+                    || character == '_'
+            });
+    if installation_is_valid && setting_is_valid {
         Ok(())
     } else {
         Err("invalid local credential reference".to_string())
+    }
+}
+
+#[cfg(test)]
+mod local_credential_reference_tests {
+    use super::validate_local_credential_reference;
+
+    #[test]
+    fn accepts_model_and_scoped_extension_references() {
+        assert!(validate_local_credential_reference("local-openai").is_ok());
+        assert!(validate_local_credential_reference("local-openai-codex").is_ok());
+        assert!(validate_local_credential_reference(
+            "forage-extension/installation-1/api_token"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_unscoped_or_malformed_extension_references() {
+        for reference in [
+            "extension-secret",
+            "forage-extension//api_token",
+            "forage-extension/installation-1/ApiToken",
+            "forage-extension/installation-1/api/token",
+            "forage-extension/../api_token",
+        ] {
+            assert!(
+                validate_local_credential_reference(reference).is_err(),
+                "accepted {reference}"
+            );
+        }
     }
 }
 

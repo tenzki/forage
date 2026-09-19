@@ -23,6 +23,21 @@ import {
   SessionManager,
   type AgentSession,
 } from '@earendil-works/pi-coding-agent'
+import {
+  localExtensionSnapshotSchema,
+  type LocalExtensionSnapshot,
+} from '@forage/agent-runtime'
+import {
+  ExtensionConfigurationStore,
+  acquireManagedRevisionLeases,
+  inventoryExtensions,
+  loadForageExtension,
+  runExtensionEndHooks,
+  runExtensionStartHooks,
+  sanitizeExtensionText,
+  verifyLocalExtensionSnapshot,
+  type LoadedForageExtension,
+} from '@forage/extension-host'
 
 import {
   createCustomHttpTool,
@@ -37,6 +52,8 @@ import {
 } from './tools'
 import { createAuthenticatedModelRuntime } from './runtime-auth'
 import { FinalResponseTracker } from './final-response'
+import { adaptExtensionTools } from './extension-tools'
+import { effectiveTools } from './tool-policy'
 
 // ── constants ───────────────────────────────────────────────────────────────
 
@@ -45,12 +62,16 @@ const MAX_CONTEXT_CHARACTERS = 40_000
 const STDOUT_CHUNK_SIZE = 32_768
 
 interface RunPayload {
+  runId: string
   instructions: string
   prompt: string
   context: string[]
   enabledToolIds: string[]
+  requiredToolIds: string[]
   customTools: CustomToolConfig[]
   outlineSnapshot?: string
+  extensionSnapshot?: LocalExtensionSnapshot
+  extensionSecrets: Record<string, Record<string, string>>
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -78,14 +99,36 @@ function decodePayload(encoded: string): RunPayload {
     : []
   const outlineSnapshot = typeof value.outlineSnapshot === 'string'
     ? value.outlineSnapshot.slice(0, MAX_PAYLOAD_BYTES) : ''
+  const extensionSnapshot = value.extensionSnapshot === undefined
+    ? undefined
+    : localExtensionSnapshotSchema.parse(value.extensionSnapshot)
   return {
+    runId: typeof value.runId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.runId)
+      ? value.runId : `run-${Date.now()}`,
     instructions: value.instructions.slice(0, 20_000),
     prompt: value.prompt.slice(0, 20_000),
     context: value.context,
     enabledToolIds: asStrings(value.enabledToolIds, 50),
+    requiredToolIds: asStrings(value.requiredToolIds, 50),
     customTools,
     outlineSnapshot,
+    extensionSnapshot,
+    extensionSecrets: parseExtensionSecrets(value.extensionSecrets),
   }
+}
+
+function parseExtensionSecrets(value: unknown): Record<string, Record<string, string>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const output: Record<string, Record<string, string>> = {}
+  for (const [installationId, rawSecrets] of Object.entries(value as Record<string, unknown>).slice(0, 128)) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(installationId) || !rawSecrets || typeof rawSecrets !== 'object' || Array.isArray(rawSecrets)) continue
+    const secrets: Record<string, string> = {}
+    for (const [key, secret] of Object.entries(rawSecrets as Record<string, unknown>).slice(0, 64)) {
+      if (/^[a-z][a-z0-9_]{0,63}$/.test(key) && typeof secret === 'string' && secret.length <= 20_000) secrets[key] = secret
+    }
+    output[installationId] = secrets
+  }
+  return output
 }
 
 function taskMessage(payload: RunPayload): string {
@@ -204,9 +247,13 @@ async function main(): Promise<void> {
 
     const abortController = new AbortController()
     currentAbort = abortController
+    let currentSecrets: string[] = [accessToken!]
+    let finishExtensions: (() => Promise<void>) | undefined
+    let extensionOutcome: 'completed' | 'failed' | 'cancelled' = 'failed'
 
     try {
       const payload = decodePayload(command.payload)
+      currentSecrets = currentSecrets.concat(Object.values(payload.extensionSecrets).flatMap((secrets) => Object.values(secrets)))
       const outlineSnapshot: OutlineSnapshotNode[] = payload.outlineSnapshot
         ? (() => { try { return JSON.parse(payload.outlineSnapshot) as OutlineSnapshotNode[] } catch { return [] } })()
         : []
@@ -216,15 +263,62 @@ async function main(): Promise<void> {
       const toolSet = new Set(payload.enabledToolIds)
       const customToolConfigs = payload.customTools.filter((t) => toolSet.has(t.name))
       const customTools = customToolConfigs.map(createCustomHttpTool)
-      const allTools = [
-        createWebSearchTool(),
-        createWebFetchTool(),
-        createImageTool(generatedImages),
-        createEmitOutlineTool(generatedImages),
+      const builtInTools = [
+        createWebSearchTool(), createWebFetchTool(), createImageTool(generatedImages),
         createSearchOutlineTool(() => outlineSnapshot),
-        ...customTools,
       ]
+      const admittedExtensions = await loadAdmittedExtensions(payload, customToolConfigs.map((tool) => tool.name), currentSecrets)
+      const extensions = admittedExtensions.extensions
+      finishExtensions = () => admittedExtensions.release()
+      const extensionToolOwners = new Map(extensions.flatMap((extension) => (
+        [...extension.tools.keys()].map((toolId) => [toolId, {
+          installationId: extension.entry.source.installationId,
+          extensionId: extension.entry.manifest!.id,
+        }] as const)
+      )))
+      const snapshottedExtensionTools = new Set(payload.extensionSnapshot?.sources.flatMap((source) => source.toolIds) ?? [])
+      const authorizedExtensionTools = new Set([...toolSet].filter((toolId) => snapshottedExtensionTools.has(toolId)))
+      const knownSecrets = currentSecrets
+      const extensionTools = adaptExtensionTools(extensions, authorizedExtensionTools, {
+        signal: abortController.signal,
+        secrets: payload.extensionSecrets,
+        onProgress: (installationId, extensionId, toolId, progress) => emit({
+          type: 'extension_progress', installationId, extensionId, toolName: toolId, progress,
+        }),
+        onLog: (entry) => emit({
+          type: 'extension_log',
+          ...entry,
+          message: sanitizeExtensionText(entry.message, knownSecrets),
+          ...(entry.data === undefined ? {} : { data: sanitizeLogData(entry.data, knownSecrets) }),
+        }),
+      })
+      const allTools = effectiveTools({
+        builtIns: builtInTools,
+        custom: customTools,
+        extensions: extensionTools,
+        authorizedToolIds: toolSet,
+        requiredToolIds: payload.requiredToolIds,
+        outputTool: createEmitOutlineTool(generatedImages),
+      })
       const allToolNames = allTools.map((t) => t.name)
+
+      const extensionExecution = {
+        signal: abortController.signal,
+        onLog: (entry: Parameters<NonNullable<Parameters<LoadedForageExtension['runStart']>[1]['onLog']>>[0]) => emit({
+          type: 'extension_log',
+          ...entry,
+          message: sanitizeExtensionText(entry.message, knownSecrets),
+          ...(entry.data === undefined ? {} : { data: sanitizeLogData(entry.data, knownSecrets) }),
+        }),
+      }
+      finishExtensions = async () => {
+        try {
+          await runExtensionEndHooks(extensions, payload.runId, extensionOutcome, extensionExecution)
+        } finally {
+          await admittedExtensions.release()
+        }
+      }
+      await runExtensionStartHooks(extensions, payload.runId, extensionExecution)
 
       // Build system prompt. Skip AGENTS.md — this is an outline agent.
       const loader = new DefaultResourceLoader({
@@ -257,20 +351,24 @@ async function main(): Promise<void> {
             emit(event)
             break
           case 'tool_execution_start':
+            const startOwner = extensionToolOwners.get(event.toolName)
             emit({
               type: 'tool_execution_start',
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               args: event.args,
+              ...(startOwner ?? {}),
             })
             break
           case 'tool_execution_end':
+            const endOwner = extensionToolOwners.get(event.toolName)
             emit({
               type: 'tool_execution_end',
               toolCallId: event.toolCallId,
               toolName: event.toolName,
               result: event.result,
               isError: event.isError,
+              ...(endOwner ?? {}),
             })
             break
           case 'agent_end':
@@ -301,10 +399,12 @@ async function main(): Promise<void> {
       try {
         // Check if already aborted before we send the prompt.
         if (abortController.signal.aborted) {
+          extensionOutcome = 'cancelled'
           emit({ type: 'agent_settled' })
           return
         }
         await session.prompt(taskMessage(payload))
+        extensionOutcome = abortController.signal.aborted ? 'cancelled' : 'completed'
         // If emit_outline's `terminate: true` didn't fire or session ended
         // without agent_end event, emit settled as a safety net.
         if (!abortController.signal.aborted) {
@@ -318,17 +418,75 @@ async function main(): Promise<void> {
       }
     } catch (error) {
       if (abortController.signal.aborted) {
+        extensionOutcome = 'cancelled'
         emit({ type: 'agent_settled' })
       } else {
-        emit({ type: 'process_error', error: errorMessage(error) })
+        emit({ type: 'process_error', error: sanitizeExtensionText(errorMessage(error), currentSecrets) })
       }
     } finally {
+      if (finishExtensions) {
+        try { await finishExtensions() } catch (error) {
+          process.stderr.write(`[forage-extension] run:end failed: ${sanitizeExtensionText(errorMessage(error), currentSecrets)}\n`)
+        }
+      }
       currentAbort = null
     }
   }
 
   // Signal readiness.
   emit({ type: 'ready' })
+}
+
+async function loadAdmittedExtensions(
+  payload: RunPayload,
+  customToolIds: string[],
+  knownSecrets: readonly string[],
+): Promise<{ extensions: LoadedForageExtension[]; release: () => Promise<void> }> {
+  if (!payload.extensionSnapshot) return { extensions: [], release: async () => undefined }
+  const store = new ExtensionConfigurationStore({ root: process.env.FORAGE_CONFIGURATION_ROOT })
+  const configuration = await store.read()
+  const catalog = await inventoryExtensions({
+    configurationRoot: store.root,
+    configuration,
+    customHttpToolIds: customToolIds,
+  })
+  verifyLocalExtensionSnapshot(payload.extensionSnapshot, catalog, configuration)
+  const lease = await acquireManagedRevisionLeases(store.root, payload.extensionSnapshot, catalog)
+  const loaded: LoadedForageExtension[] = []
+  try {
+    for (const source of payload.extensionSnapshot.sources) {
+      const entry = catalog.entries.find((candidate) => candidate.source.installationId === source.installationId)
+      const configured = configuration.sources.find((candidate) => candidate.installationId === source.installationId)
+      if (!entry || !configured) throw new Error(`Admitted extension ${source.installationId} is unavailable.`)
+      for (const setting of entry.manifest?.contributes.settings ?? []) {
+        if (setting.type === 'secret' && setting.required && !payload.extensionSecrets[source.installationId]?.[setting.key]) {
+          throw new Error(`Required secret ${setting.key} is unavailable for extension ${source.extensionId}.`)
+        }
+      }
+      loaded.push(await loadForageExtension(entry, {
+        configuration: configured,
+        cacheKey: source.entryDigest,
+        stderr: (line) => process.stderr.write(`[forage-extension:${source.extensionId}] ${sanitizeExtensionText(
+          line,
+          knownSecrets.concat(Object.values(payload.extensionSecrets[source.installationId] ?? {})),
+        )}\n`),
+      }))
+    }
+    return { extensions: loaded, release: () => lease.release() }
+  } catch (error) {
+    await lease.release()
+    throw error
+  }
+}
+
+function sanitizeLogData(value: unknown, secrets: readonly string[]): unknown {
+  if (typeof value === 'string') return sanitizeExtensionText(value, secrets)
+  if (Array.isArray(value)) return value.slice(0, 1_000).map((item) => sanitizeLogData(item, secrets))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 100)
+      .map(([key, item]) => [key, sanitizeLogData(item, secrets)]))
+  }
+  return value
 }
 
 main().catch((error) => {

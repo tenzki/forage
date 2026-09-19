@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.forage.app",
   "build": {
-    "beforeDevCommand": "pnpm dev:web",
+    "beforeDevCommand": "pnpm --filter forage-sidecar build && pnpm dev:web",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm --filter forage-sidecar build && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -29,7 +29,7 @@
     "resources": [
       "resources/pi/ai-chat-bridge.ts",
       "resources/pi/codex-image-generation.ts",
-      "resources/pi/sidecar"
+      "resources/pi/sidecar/dist"
     ]
   }
 }

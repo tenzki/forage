@@ -7,6 +7,7 @@ interface ConfirmButtonProps {
   className?: string
   ariaLabel?: string
   confirmAriaLabel?: string
+  disabled?: boolean
 }
 
 export function ConfirmButton({
@@ -16,6 +17,7 @@ export function ConfirmButton({
   className = '',
   ariaLabel,
   confirmAriaLabel,
+  disabled = false,
 }: ConfirmButtonProps) {
   const [confirming, setConfirming] = useState(false)
 
@@ -24,6 +26,7 @@ export function ConfirmButton({
       type="button"
       className={`danger-action ${className}`.trim()}
       aria-label={confirming ? confirmAriaLabel : ariaLabel}
+      disabled={disabled}
       onBlur={() => setConfirming(false)}
       onKeyDown={(event) => {
         if (event.key === 'Escape') setConfirming(false)

@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { SettingsPanel } from './SettingsPanel'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
+import { useExtensionStore } from '../../store/extensionStore'
 
 vi.mock('../../agent/codexAuth', () => ({
   loginWithChatGpt: vi.fn(),
@@ -80,6 +81,11 @@ describe('settings panel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setLoadedSettings()
+    useExtensionStore.setState({
+      catalog: { version: 1, revision: 'a'.repeat(64), entries: [] },
+      configuration: { version: 1, revision: 0, sources: [] },
+      extensionsDirectory: '/extensions', isLoaded: true, isLoading: false, error: null,
+    })
   })
 
   it('navigates between focused settings views', async () => {
@@ -98,6 +104,10 @@ describe('settings panel', () => {
     expect(screen.getByRole('heading', { name: 'Tools' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Server agent executor' })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Codex' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Extensions' }))
+    expect(screen.getByRole('heading', { name: 'Extensions' })).toBeTruthy()
+    expect(screen.getByText(/Trusted local code/i)).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Advanced' }))
     expect(screen.getByRole('heading', { name: 'Agent runtimes' })).toBeTruthy()

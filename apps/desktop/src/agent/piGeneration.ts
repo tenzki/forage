@@ -2,6 +2,7 @@ import { resolveCodexAuth, type CodexAuthConfig, type GenerateInput, type Genera
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
 import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
 import { safeToolDetail, type ActivityReporter } from './activity'
+import type { LocalExtensionSnapshot } from '@forage/agent-runtime'
 
 export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
@@ -13,18 +14,27 @@ export interface PiGenerateOptions extends GenerateOptions {
 }
 
 interface RunPayload {
+  runId: string
   instructions: string
   prompt: string
   context: string[]
   enabledToolIds: string[]
+  requiredToolIds: string[]
   customTools: Array<{ name: string; description: string; urlTemplate: string }>
   /** Serialized outline snapshot for the search_outline tool. */
   outlineSnapshot?: string
+  extensionSnapshot?: LocalExtensionSnapshot
+  extensionSecrets?: Record<string, Record<string, string>>
 }
 
 export async function generateWithPi(
   auth: CodexAuthConfig,
-  input: GenerateInput & { outlineSnapshot?: string },
+  input: GenerateInput & {
+    runId?: string
+    outlineSnapshot?: string
+    extensionSnapshot?: LocalExtensionSnapshot
+    extensionSecrets?: Record<string, Record<string, string>>
+  },
   options: PiGenerateOptions,
 ): Promise<string> {
   const resolvedAuth = await resolveCodexAuth(auth, options.signal)
@@ -69,8 +79,8 @@ export async function generateWithPi(
         id: toolId,
         phase: 'start',
         kind: 'tool',
-        label: toolName,
-        detail,
+        label: extensionActivityLabel(event, toolName),
+        detail: extensionActivityDetail(event, detail),
       })
       options.onToolActivity?.([`${toolName}: ${detail}`])
     }
@@ -83,8 +93,26 @@ export async function generateWithPi(
         id: toolId ?? `tool-${event.toolName}`,
         phase: event.isError ? 'error' : 'complete',
         kind: 'tool',
-        label: event.toolName,
-        detail: startDetail ? `${startDetail} · ${outcome}` : outcome,
+        label: extensionActivityLabel(event, event.toolName),
+        detail: extensionActivityDetail(event, startDetail ? `${startDetail} · ${outcome}` : outcome),
+      })
+    }
+    if (event.type === 'extension_progress' && typeof event.toolName === 'string') {
+      const progress = asRecord(event.progress)
+      const detail = typeof progress?.message === 'string' ? progress.message.slice(0, 500) : 'Extension progress'
+      options.onActivity?.({
+        id: `extension-${String(event.installationId ?? 'unknown')}-${event.toolName}`,
+        phase: 'start', kind: 'tool', label: extensionActivityLabel(event, event.toolName), detail,
+      })
+    }
+    if (event.type === 'extension_log' && typeof event.message === 'string') {
+      const level = typeof event.level === 'string' ? event.level : 'info'
+      options.onActivity?.({
+        id: `extension-log-${String(event.installationId ?? 'unknown')}-${Date.now()}`,
+        phase: level === 'error' ? 'error' : 'start',
+        kind: level === 'error' ? 'error' : 'thinking',
+        label: extensionActivityLabel(event, 'Extension log'),
+        detail: event.message.slice(0, 2_000),
       })
     }
     const emitted = emittedOutline(event)
@@ -124,12 +152,16 @@ export async function generateWithPi(
     })
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
     const payload = encodePayload({
+      runId: input.runId ?? `run-${startedAt}`,
       instructions: [input.agent?.systemPrompt, input.skill.systemPrompt].filter(Boolean).join('\n\n'),
       prompt: input.prompt,
       context: input.context,
       enabledToolIds,
+      requiredToolIds: input.skill.requiredToolIds,
       customTools,
       outlineSnapshot: input.outlineSnapshot,
+      extensionSnapshot: input.extensionSnapshot,
+      extensionSecrets: input.extensionSecrets,
     })
     for (let attempt = 0; attempt < 2 && !outline && !text; attempt += 1) {
       const settled = client.waitForSettled()
@@ -185,6 +217,14 @@ function validateNode(value: unknown): PiOutlineNode[] {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function extensionActivityLabel(event: PiRpcEvent, fallback: string): string {
+  return typeof event.extensionId === 'string' ? `${fallback} · ${event.extensionId}` : fallback
+}
+
+function extensionActivityDetail(event: PiRpcEvent, detail: string): string {
+  return typeof event.installationId === 'string' ? `${detail} · ${event.installationId}` : detail
 }
 
 export function encodePayload(payload: RunPayload): string {

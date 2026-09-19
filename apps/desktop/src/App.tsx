@@ -50,6 +50,7 @@ import type { StreamedBatch } from './sync/syncEngine'
 import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
+import { useExtensionStore } from './store/extensionStore'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -101,6 +102,7 @@ export default function App() {
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
   const loadSettings = useSettingsStore((state) => state.load)
+  const refreshExtensions = useExtensionStore((state) => state.refresh)
   const [session] = useState(() => new OutlineSession())
   const sessionStatus = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const persistentHistory = useRef<PersistentHistoryState>({ undo: [], redo: [] })
@@ -154,7 +156,10 @@ export default function App() {
   useEffect(() => {
     void readOutline()
     void loadSettings()
-  }, [loadSettings, readOutline])
+    // This is a manifest-only local inventory. It never imports extension code,
+    // opens a modal, or performs package/network lifecycle work.
+    void refreshExtensions().catch(() => undefined)
+  }, [loadSettings, readOutline, refreshExtensions])
 
   useEffect(() => {
     if (!loaded) return

@@ -1,0 +1,16 @@
+{
+  "name": "@forage/extension-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.1"
+  }
+}

@@ -30,7 +30,7 @@ Run admission SHALL snapshot the source, prompt/context, target, outline revisio
 - **THEN** the queued run uses its original snapshot and a newly admitted run uses the new revision
 
 ### Requirement: Bounded and authorized tools
-The executor SHALL expose only tools supported by the active environment and allowed by the agent, skill, global configuration, and run policy. It SHALL reject a run before model invocation when a required tool is unavailable and SHALL NOT expose a general shell, unrestricted filesystem, or arbitrary authenticated HTTP tool.
+The executor SHALL expose only tools supported by the active environment and allowed by the agent, skill, global configuration, and run policy. It SHALL reject a run before model invocation when a required tool is unavailable and SHALL NOT expose a general shell, unrestricted filesystem, or arbitrary authenticated HTTP tool directly to the model. Explicitly trusted local Forage extensions MAY implement bounded declared tools using local process capabilities, but their tools SHALL remain subject to the same authorization intersection. Server executors SHALL NOT load or fall back to local extensions.
 
 #### Scenario: Skill requires an unavailable transcript tool
 - **WHEN** a skill requiring `youtube_transcript` is admitted on an executor without a configured transcript provider
@@ -39,6 +39,10 @@ The executor SHALL expose only tools supported by the active environment and all
 #### Scenario: Model asks for an unauthorized tool
 - **WHEN** a model emits a tool call outside the effective tool set
 - **THEN** the runtime returns a bounded tool error and performs no requested action
+
+#### Scenario: Server run references a local extension tool
+- **WHEN** a server-mode run requires a tool available only from a trusted desktop extension
+- **THEN** admission reports the tool unavailable and does not execute the extension on the desktop
 
 ### Requirement: Executor-owned provider credentials
 Model and provider credentials SHALL be stored and refreshed by the active executor. Portable agent configuration SHALL contain neither a model nor a credential reference. Each environment SHALL resolve its active versioned compute profile only when admitting a run, and secrets SHALL NOT enter model context, outline events, activity payloads, API responses after enrollment, or logs.

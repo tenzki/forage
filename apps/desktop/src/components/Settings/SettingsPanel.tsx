@@ -26,16 +26,23 @@ import { ServerAgentSettings } from './ServerAgentSettings'
 import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { ExtensionsSettings } from './ExtensionsSettings'
+import {
+  extensionAttentionCount,
+  extensionToolOptions,
+  useExtensionStore,
+} from '../../store/extensionStore'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-type SettingsView = 'connection' | 'agents' | 'advanced'
+type SettingsView = 'connection' | 'agents' | 'extensions' | 'advanced'
 
 const SETTINGS_VIEWS: Array<{ id: SettingsView; label: string }> = [
   { id: 'connection', label: 'Connection' },
   { id: 'agents', label: 'Agents' },
+  { id: 'extensions', label: 'Extensions' },
   { id: 'advanced', label: 'Advanced' },
 ]
 
@@ -57,6 +64,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const setToolEnabled = useSettingsStore((state) => state.setToolEnabled)
   const addCustomTool = useSettingsStore((state) => state.addCustomTool)
   const removeCustomTool = useSettingsStore((state) => state.removeCustomTool)
+  const extensionCatalog = useExtensionStore((state) => state.catalog)
 
   const [activeView, setActiveView] = useState<SettingsView>('connection')
   const [draft, setDraft] = useState('')
@@ -72,6 +80,19 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const [toolPath, setToolPath] = useState<string>(APPROVED_TOOL_ORIGINS[0].examplePath)
   const loginController = useRef<AbortController | null>(null)
   const modelOptions = useMemo(() => codexModelOptions(authMode), [authMode])
+  const extensionTools = useMemo(() => extensionToolOptions(extensionCatalog), [extensionCatalog])
+  const extensionToolGroups = useMemo(() => {
+    const groups = new Map<string, typeof extensionTools>()
+    for (const tool of extensionTools) groups.set(tool.sourceName, [...(groups.get(tool.sourceName) ?? []), tool])
+    return [...groups.entries()]
+  }, [extensionTools])
+  const attentionCount = extensionAttentionCount(extensionCatalog)
+  const knownToolIds = new Set([
+    ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
+    ...customTools.map((tool) => tool.id),
+    ...extensionTools.map((tool) => tool.id),
+  ])
+  const unavailableEnabledToolIds = enabledToolIds.filter((toolId) => !knownToolIds.has(toolId))
 
   useEffect(() => {
     if (!isLoaded) void loadSettings()
@@ -228,7 +249,12 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
           ariaLabel="Settings sections"
           className="mb-7 w-full"
           value={activeView}
-          options={SETTINGS_VIEWS.map((settingsView) => ({ value: settingsView.id, label: settingsView.label }))}
+          options={SETTINGS_VIEWS.map((settingsView) => ({
+            value: settingsView.id,
+            label: settingsView.id === 'extensions' && attentionCount > 0
+              ? `${settingsView.label} (${attentionCount})`
+              : settingsView.label,
+          }))}
           onValueChange={(nextView) => {
             setActionError(null)
             setActiveView(nextView)
@@ -337,7 +363,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       </section>
 
       <div hidden={activeView !== 'agents'} className="settings-view" aria-label="Agent settings">
-        <AgentSettings reportError={(error) => setActionError(describeError(error))} />
+        <AgentSettings extensionTools={extensionTools} reportError={(error) => setActionError(describeError(error))} />
       </div>
 
       <section hidden={activeView !== 'agents'} className="settings-section settings-tools-section" aria-labelledby="tools-heading">
@@ -345,6 +371,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         <p className="settings-hint">
           Globally enabled tools may be called through Pi only when the selected agent also allows them. Image generation is opt-in; subscription mode uses Codex limits and API-key mode uses API billing.
         </p>
+        <h3>Built-in</h3>
         <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
           {BUILTIN_TOOL_OPTIONS.map((tool) => (
             <SwitchFieldInput
@@ -357,6 +384,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
               disabled={!isLoaded}
             />
           ))}
+        </div>
+        {customTools.length > 0 && <><h3>Custom HTTP</h3><div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
           {customTools.map((tool) => (
             <SwitchFieldInput
               key={tool.id}
@@ -384,7 +413,13 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
               )}
             />
           ))}
-        </div>
+        </div></>}
+        {extensionToolGroups.length > 0 && <><h3>Extensions</h3>{extensionToolGroups.map(([sourceName, tools]) => <div key={sourceName} className="extension-tool-group"><h4>{sourceName}</h4><div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
+          {tools.map((tool) => <SwitchFieldInput key={`${tool.installationId}:${tool.id}`} className="border-b border-neutral-100 last:border-b-0" label={tool.name} hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason}`} checked={enabledToolIds.includes(tool.id)} onCheckedChange={(checked) => void toggleTool(tool.id, checked)} switchAriaLabel={`Enable ${tool.name}`} disabled={!isLoaded || !tool.available} />)}
+        </div></div>)}</>}
+        {unavailableEnabledToolIds.length > 0 && <><h3>Unavailable references</h3><div className="tool-list">
+          {unavailableEnabledToolIds.map((toolId) => <div key={toolId} className="tool-setting"><span><strong>{toolId}</strong><small>The configured provider is missing or unavailable. This reference is retained.</small></span><button type="button" className="settings-secondary" onClick={() => void toggleTool(toolId, false)}>Disable reference</button></div>)}
+        </div></>}
 
         {showToolForm ? (
           <div className="custom-tool-form">
@@ -454,6 +489,12 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       <div hidden={activeView !== 'agents'} className="settings-view">
         <ServerAgentSettings />
       </div>
+
+        {activeView === 'extensions' && (
+          <div className="settings-view">
+            <ExtensionsSettings onConfigureTools={() => setActiveView('agents')} />
+          </div>
+        )}
 
         <div hidden={activeView !== 'advanced'} className="settings-view">
           <PiRuntimeSettings />

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { localExtensionSnapshotSchema } from './extensions'
 
 const MAX_AGENT_PROMPT_CHARS = 20_000
 const MAX_NODE_DEPTH = 8
@@ -221,6 +222,7 @@ export const runInputSchema = z.object({
   context: z.array(z.string().max(20_000)).max(100),
   customTools: z.array(customToolDefinitionSchema).max(100).optional(),
   outlineSnapshot: z.string().max(500_000).optional(),
+  localExtensionSnapshot: localExtensionSnapshotSchema.optional(),
 }).strict().superRefine((input, context) => {
   if (input.skill.agentId !== input.agent.id) {
     context.addIssue({ code: 'custom', path: ['skill', 'agentId'], message: 'Skill does not reference the snapshotted agent' })
@@ -234,6 +236,13 @@ export const runInputSchema = z.object({
         message: `Required tool is unavailable: ${requiredToolId}`,
       })
     }
+  }
+  if (input.executionMode === 'server' && input.localExtensionSnapshot) {
+    context.addIssue({
+      code: 'custom',
+      path: ['localExtensionSnapshot'],
+      message: 'Local extension snapshots cannot be sent to the server executor',
+    })
   }
 })
 

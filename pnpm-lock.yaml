@@ -198,9 +198,18 @@ importers:
 
   apps/desktop/src-tauri/resources/pi/sidecar:
     dependencies:
+      '@earendil-works/pi-ai':
+        specifier: 0.84.2
+        version: 0.84.2(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.2
-        version: 0.84.2
+        version: 0.84.2(ws@8.21.3)(zod@4.5.4)
+      '@forage/agent-runtime':
+        specifier: workspace:*
+        version: link:../../../../../../packages/agent-runtime
+      '@forage/extension-host':
+        specifier: workspace:*
+        version: link:../../../../../../packages/extension-host
       typebox:
         specifier: 1.3.7
         version: 1.3.7
@@ -208,12 +217,18 @@ importers:
         specifier: 8.9.0
         version: 8.9.0
     devDependencies:
+      '@forage/extensions':
+        specifier: workspace:*
+        version: link:../../../../../../packages/extensions
       tsx:
         specifier: 4.23.12
         version: 4.23.12
       typescript:
         specifier: ^5
         version: 5.9.3
+      vite:
+        specifier: 6.4.1
+        version: 6.4.1(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0)
       vitest:
         specifier: 4.1.1
         version: 4.1.1(@opentelemetry/api@1.9.0)(@types/node@26.6.2)(jsdom@29.0.1)(vite@6.4.1(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0))
@@ -272,6 +287,9 @@ importers:
 
   packages/agent-runtime:
     dependencies:
+      '@forage/extension-api':
+        specifier: workspace:*
+        version: link:../extension-api
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -305,6 +323,47 @@ importers:
       zod:
         specifier: 4.5.4
         version: 4.5.4
+
+  packages/extension-api:
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.0)(@types/node@26.6.2)(jsdom@29.0.1)(vite@6.4.1(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/extension-host:
+    dependencies:
+      '@forage/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@forage/extension-api':
+        specifier: workspace:*
+        version: link:../extension-api
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.0)(@types/node@26.2.0)(jsdom@29.0.1)(vite@6.4.1(@types/node@26.2.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  packages/extensions:
+    dependencies:
+      '@forage/extension-api':
+        specifier: workspace:*
+        version: link:../extension-api
+    devDependencies:
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.0)(@types/node@26.6.2)(jsdom@29.0.1)(vite@6.4.1(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/protocol:
     dependencies:
@@ -3535,7 +3594,7 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.1': {}
 
-  '@earendil-works/pi-agent-core@0.84.4':
+  '@earendil-works/pi-agent-core@0.84.4(ws@8.21.3)(zod@4.5.4)':
     dependencies:
       '@earendil-works/pi-ai': 0.84.2(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-telemetry': 0.84.4
@@ -3576,9 +3635,9 @@ snapshots:
     dependencies:
       '@earendil-works/pi-protocol': 0.84.4
 
-  '@earendil-works/pi-coding-agent@0.84.2':
+  '@earendil-works/pi-coding-agent@0.84.2(ws@8.21.3)(zod@4.5.4)':
     dependencies:
-      '@earendil-works/pi-agent-core': 0.84.4
+      '@earendil-works/pi-agent-core': 0.84.4(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-ai': 0.84.2(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-client': 0.84.4
       '@earendil-works/pi-protocol': 0.84.4

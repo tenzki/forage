@@ -3,7 +3,7 @@ import { DEFAULT_AGENT_ID, validateAgentDraft, validateSkillDraft } from './defi
 import { BUILTIN_TOOL_OPTIONS } from './tools'
 
 describe('agent and skill definitions', () => {
-  it('bounds an agent tool allowlist to known tools', () => {
+  it('retains syntactically valid unavailable tool references', () => {
     const agent = validateAgentDraft({
       id: DEFAULT_AGENT_ID,
       name: 'Researcher',
@@ -12,15 +12,15 @@ describe('agent and skill definitions', () => {
       toolIds: ['web_search', 'unknown', 'web_search'],
     }, BUILTIN_TOOL_OPTIONS)
 
-    expect(agent.toolIds).toEqual(['web_search'])
+    expect(agent.toolIds).toEqual(['web_search', 'unknown'])
   })
 
-  it('allows the image tool per agent while dropping unknown tools', () => {
+  it('allows known tools while dropping malformed unavailable references', () => {
     const agent = validateAgentDraft({
       name: 'Illustrator',
       description: 'Creates visuals',
       systemPrompt: 'Use images only when requested.',
-      toolIds: ['generate_image', 'unknown'],
+      toolIds: ['generate_image', 'Not valid!'],
     }, BUILTIN_TOOL_OPTIONS)
 
     expect(agent.toolIds).toEqual(['generate_image'])

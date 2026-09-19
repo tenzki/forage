@@ -13,7 +13,7 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
   - `/image <prompt>` — generate an image under the current bullet (via Codex or the OpenAI Images API)
 - **Bi-directional links** — type `[[` to link any bullet to any other via stable IDs: click to jump, and a backlinks panel shows everything that references the current bullet. Links survive reordering and nesting, and linked branches can be pinned as explicit agent context.
 - **Your notes as agent memory** — every skill invocation automatically carries the bullet's full ancestry and branch, and agents can search your whole outline (`search_outline`) before writing, so answers build on what you already know instead of duplicating it.
-- **Extensible agents and skills** — every agent and slash-command skill is a typed definition you can edit in Settings (Cmd+,): model, instructions, and a per-agent tool allowlist. Add your own custom HTTP tools, new skills, or whole new agents.
+- **Extensible agents and skills** — every agent and slash-command skill is a typed definition you can edit in Settings (Cmd+,): model, instructions, and a per-agent tool allowlist. Add custom HTTP tools, new skills, whole new agents, or explicitly trusted local extensions.
 - **Optional unattended server execution** — in server storage mode, manual skills and opt-in Inbox link policies run durably on the self-hosted server, including bounded webpage/X reading and replaceable YouTube transcription.
 - **Tags, shortcuts, and trash** — tag bullets, pin frequently used branches to the sidebar, and recover deleted branches from trash.
 
@@ -44,3 +44,7 @@ Forage follows [Pi](https://pi.dev)'s philosophy of agents as small, inspectable
 ## Architecture
 
 See [Forage Architecture](docs/architecture.md) for the current component, authority, storage-mode, and agent-execution map.
+
+## Extension development
+
+Forage has a native extension manifest and host API inspired by Pi's registration style without using Pi's extension format. Start with the [Extensions guide](docs/extensions.md), [`@forage/extension-api`](packages/extension-api/README.md), and the [runnable reference extension](packages/extensions/README.md).

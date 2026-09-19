@@ -1,0 +1,29 @@
+{
+  "$schema": "https://forage.app/schemas/extension-manifest-v1.json",
+  "manifestVersion": 1,
+  "id": "dev.forage.text-stats",
+  "name": "Text Stats",
+  "version": "0.1.0",
+  "description": "Counts words and Unicode characters in bounded text.",
+  "entry": "./dist/index.js",
+  "apiVersion": "1",
+  "contributes": {
+    "tools": [
+      {
+        "id": "text_stats",
+        "name": "Text statistics",
+        "description": "Count whitespace-delimited words and Unicode characters in text."
+      }
+    ],
+    "hooks": ["run:start", "run:end"],
+    "settings": [
+      {
+        "key": "progress_message",
+        "label": "Progress message",
+        "description": "Message shown while text statistics are being calculated.",
+        "type": "string",
+        "default": "Counting text"
+      }
+    ]
+  }
+}

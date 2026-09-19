@@ -4,7 +4,7 @@
 - **Date:** 2026-08-14
 - **Deciders:** AI Chat project team
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** ADR-0021 only for explicitly trusted local extensions
 
 ## Context
 
@@ -135,6 +135,11 @@ V1 includes `web_search`, `web_fetch`, and simple GET URL-template tools for sta
 
 Do not add arbitrary origins, custom headers/secrets, POST bodies, imported OpenAPI operations, executable plugins, or local-resource tools without revisiting this security boundary.
 
+ADR-0021 revisits that boundary for explicitly installed, reviewed, and enabled
+local Forage extensions. Those extensions are trusted code rather than
+declarative tools or a sandbox. This ADR continues to govern built-in tools,
+custom HTTP tools, model authorization, and every server-side executor.
+
 ## Validation
 
 - Disabled tools are absent from model-visible definitions and cannot execute.
@@ -154,3 +159,4 @@ Do not add arbitrary origins, custom headers/secrets, POST bodies, imported Open
 - `src/store/settingsStore.ts`
 - `src-tauri/capabilities/default.json`
 - `docs/tools-architecture.md`
+- [ADR-0021: Allow Explicitly Trusted Local Code Through a Forage Extension Contract](ADR-0021-trusted-local-forage-extensions.md)

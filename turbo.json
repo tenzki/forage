@@ -19,8 +19,13 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "forage-sidecar#build": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "test": {
-      "cache": false
+      "cache": false,
+      "dependsOn": ["build", "^build"]
     },
     "typecheck": {
       "cache": false

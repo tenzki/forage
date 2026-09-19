@@ -10,6 +10,14 @@ import { BUILTIN_TOOL_OPTIONS, type ToolOption } from '../../agent/tools'
 import { useSettingsStore } from '../../store/settingsStore'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ConfirmButton } from './ConfirmButton'
+import type { ExtensionToolOption } from '../../store/extensionStore'
+
+interface SelectorTool extends ToolOption {
+  group: string
+  available: boolean
+  isExtension?: boolean
+  unavailableReason?: string
+}
 
 const EMPTY_AGENT: AgentDraft = {
   name: '', description: '', systemPrompt: '', toolIds: [],
@@ -34,7 +42,7 @@ function useInlineSave<T>(onSave: (draft: T) => Promise<void>) {
 
 function AgentForm({ initial, tools, onSave, onCancel }: {
   initial: AgentDraft
-  tools: ToolOption[]
+  tools: SelectorTool[]
   onSave: (draft: AgentDraft) => Promise<void>
   onCancel: () => void
 }) {
@@ -50,16 +58,19 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
       <label>Description<input aria-label="Agent description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></label>
       <label>Instructions<textarea aria-label="Agent instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></label>
       <fieldset className="agent-tool-list"><legend>Allowed tools</legend>
-        {tools.map((tool) => (
-          <SwitchFieldInput
-            key={tool.id}
-            checked={draft.toolIds.includes(tool.id)}
-            label={tool.name}
-            hint={tool.description}
-            onCheckedChange={(checked) => update('toolIds', checked
-                ? [...draft.toolIds, tool.id]
-                : draft.toolIds.filter((id) => id !== tool.id))}
-          />
+        {groupTools(tools).map(([group, groupedTools]) => (
+          <div className="agent-tool-group" key={group}><strong>{group}</strong>{groupedTools.map((tool) => (
+            <SwitchFieldInput
+              key={tool.id}
+              checked={draft.toolIds.includes(tool.id)}
+              label={tool.name}
+              hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason ?? 'provider missing'}`}
+              disabled={!tool.available}
+              onCheckedChange={(checked) => update('toolIds', checked
+                  ? [...draft.toolIds, tool.id]
+                  : draft.toolIds.filter((id) => id !== tool.id))}
+            />
+          ))}</div>
         ))}
       </fieldset>
       {error && <p className="settings-error" role="alert">{error}</p>}
@@ -74,7 +85,7 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
 function SkillForm({ initial, agents, tools, onSave, onCancel }: {
   initial: SkillDraft
   agents: AgentDefinition[]
-  tools: ToolOption[]
+  tools: SelectorTool[]
   onSave: (draft: SkillDraft) => Promise<void>
   onCancel: () => void
 }) {
@@ -109,6 +120,7 @@ function SkillForm({ initial, agents, tools, onSave, onCancel }: {
             checked={requiredToolIds.includes(tool.id)}
             label={tool.name}
             hint={tool.description}
+            disabled={!tool.available}
             onCheckedChange={(checked) => update('requiredToolIds', checked
                 ? [...requiredToolIds, tool.id]
                 : requiredToolIds.filter((id) => id !== tool.id))}
@@ -173,7 +185,10 @@ function SkillRow({ skill, agentName, onEdit, onRemove }: {
   )
 }
 
-export function AgentSettings({ reportError }: { reportError: (error: unknown) => void }) {
+export function AgentSettings({ extensionTools = [], reportError }: {
+  extensionTools?: ExtensionToolOption[]
+  reportError: (error: unknown) => void
+}) {
   const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
   const customTools = useSettingsStore((state) => state.customTools)
@@ -187,7 +202,31 @@ export function AgentSettings({ reportError }: { reportError: (error: unknown) =
   const [syncError, setSyncError] = useState<{ section: 'agents' | 'skills'; message: string } | null>(null)
   const agentsHeadingId = useId()
   const skillsHeadingId = useId()
-  const tools = [...BUILTIN_TOOL_OPTIONS, ...customTools.map(({ id, name, description }) => ({ id, name, description }))]
+  const knownTools: SelectorTool[] = [
+    ...BUILTIN_TOOL_OPTIONS.map((tool) => ({ ...tool, group: 'Built-in', available: true })),
+    ...customTools.map(({ id, name, description }) => ({ id, name, description, group: 'Custom HTTP', available: true })),
+    ...extensionTools.map((tool) => ({
+      id: tool.id,
+      name: tool.name,
+      description: tool.description,
+      group: `Extension · ${tool.sourceName}`,
+      available: tool.available,
+      isExtension: true,
+      unavailableReason: tool.unavailableReason,
+    })),
+  ]
+  const knownIds = new Set(knownTools.map((tool) => tool.id))
+  const retainedIds = [...new Set([
+    ...agents.flatMap((agent) => agent.toolIds),
+    ...skills.flatMap((skill) => skill.requiredToolIds),
+  ])].filter((toolId) => !knownIds.has(toolId))
+  const tools: SelectorTool[] = [
+    ...knownTools,
+    ...retainedIds.map((id) => ({
+      id, name: id, description: 'This configured tool provider is missing or unavailable.',
+      group: 'Unavailable references', available: false,
+    })),
+  ]
 
   // In server mode, Inbox automation only sees published skills, so every local change is published right away.
   const publish = async (section: 'agents' | 'skills') => {
@@ -238,7 +277,10 @@ export function AgentSettings({ reportError }: { reportError: (error: unknown) =
             onCancel={() => setAgentDraft(null)}
           />
         ) : (
-          <button type="button" className="settings-secondary add-tool" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.map((tool) => tool.id) })}>+ Add agent</button>
+          <button type="button" className="settings-secondary add-tool" onClick={() => setAgentDraft({
+            ...EMPTY_AGENT,
+            toolIds: tools.filter((tool) => tool.available && !tool.isExtension).map((tool) => tool.id),
+          })}>+ Add agent</button>
         )}
       </section>
 
@@ -278,4 +320,10 @@ export function AgentSettings({ reportError }: { reportError: (error: unknown) =
       </section>
     </>
   )
+}
+
+function groupTools(tools: SelectorTool[]): Array<[string, SelectorTool[]]> {
+  const groups = new Map<string, SelectorTool[]>()
+  for (const tool of tools) groups.set(tool.group, [...(groups.get(tool.group) ?? []), tool])
+  return [...groups.entries()]
 }

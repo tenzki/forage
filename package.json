@@ -14,7 +14,8 @@
     "server:tokens": "cross-env DATABASE_URL=postgres://forage:forage@127.0.0.1:55437/forage_test pnpm --filter @forage/server tokens",
     "tauri": "pnpm --filter @forage/desktop tauri",
     "build": "turbo run build",
-    "test": "vitest run --reporter=verbose",
+    "test": "pnpm test:extensions && vitest run --reporter=verbose",
+    "test:extensions": "turbo run test --filter=@forage/extension-api --filter=@forage/extension-host --filter=@forage/extensions --filter=forage-sidecar",
     "test:workspace": "node --test scripts/workspace-layout.test.mjs"
   },
   "pnpm": {

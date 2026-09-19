@@ -32,8 +32,7 @@
           "cmd": "node",
           "sidecar": false,
           "args": [
-            { "validator": "^.+node_modules/tsx/dist/cli\\.mjs$" },
-            { "validator": "^.+sidecar/index\\.ts$" }
+            { "validator": "^.+sidecar/dist/(?:index|management)\\.mjs$" }
           ]
         },
         {

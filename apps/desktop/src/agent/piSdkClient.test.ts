@@ -4,6 +4,8 @@ const startupEvent = vi.hoisted(() => ({
   value: { type: 'process_error', error: 'Missing AI_CHAT_API_KEY' } as Record<string, unknown>,
 }))
 const createCommand = vi.hoisted(() => vi.fn())
+const childKill = vi.hoisted(() => vi.fn(async () => undefined))
+let stderrHandler: ((value: string) => void) | undefined
 
 vi.mock('@tauri-apps/api/path', () => ({
   appDataDir: vi.fn(async () => '/tmp/ai-chat'),
@@ -17,11 +19,11 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
       let stdoutHandler: ((value: string) => void) | undefined
       return {
         stdout: { on: (_event: string, handler: (value: string) => void) => { stdoutHandler = handler } },
-        stderr: { on: vi.fn() },
+        stderr: { on: (_event: string, handler: (value: string) => void) => { stderrHandler = handler } },
         on: (event: string, handler: (value: unknown) => void) => { handlers.set(event, handler) },
         spawn: async () => {
           stdoutHandler?.(`${JSON.stringify(startupEvent.value)}\n`)
-          return { kill: vi.fn(), write: vi.fn(async () => undefined) }
+          return { kill: childKill, write: vi.fn(async () => undefined) }
         },
       }
     }),
@@ -30,7 +32,11 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 
 import { PiRpcClient } from './piSdkClient'
 
-beforeEach(() => createCommand.mockClear())
+beforeEach(() => {
+  createCommand.mockClear()
+  childKill.mockClear()
+  stderrHandler = undefined
+})
 
 describe('Pi SDK startup', () => {
   it('rejects start immediately when the sidecar reports a startup error', async () => {
@@ -90,11 +96,35 @@ describe('Pi SDK startup', () => {
 
     expect(createCommand).toHaveBeenCalledWith(
       'node-sidecar',
-      expect.any(Array),
+      ['/resources/resources/pi/sidecar/dist/index.mjs'],
       expect.objectContaining({
         env: expect.objectContaining({ AI_CHAT_OAUTH_EXPIRES: '2000000000000' }),
       }),
     )
+    await client.stop()
+  })
+
+  it('terminates an unresponsive run after the cancellation grace period', async () => {
+    vi.useFakeTimers()
+    startupEvent.value = { type: 'ready' }
+    const client = new PiRpcClient()
+    const starting = client.start({ provider: 'openai', modelId: 'gpt-test', apiKey: 'test-key', accountId: '' })
+    await vi.runAllTicks()
+    await starting
+    await client.abort()
+    await vi.advanceTimersByTimeAsync(1_501)
+    expect(childKill).toHaveBeenCalledTimes(1)
+    await client.stop()
+    vi.useRealTimers()
+  })
+
+  it('redacts known model credentials from sidecar stderr', async () => {
+    startupEvent.value = { type: 'ready' }
+    const client = new PiRpcClient()
+    await client.start({ provider: 'openai', modelId: 'gpt-test', apiKey: 'model-secret', accountId: '' })
+    stderrHandler?.('extension printed model-secret')
+    expect(client.getStderr()).toContain('extension printed [REDACTED]')
+    expect(client.getStderr()).not.toContain('model-secret')
     await client.stop()
   })
 })

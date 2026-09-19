@@ -120,6 +120,26 @@ describe('agent runtime contracts', () => {
     expect(parseRunSnapshot(JSON.stringify(input)).runId).toBe('run-1')
     expect(() => parseRunSnapshot(JSON.stringify({ ...input, apiKey: 'sk-secret' }))).toThrow(/secret/i)
     expect(() => parseRunSnapshot(JSON.stringify({ ...input, source: { ...input.source, accessToken: 'secret' } }))).toThrow(/secret/i)
+
+    const localExtensionSnapshot = {
+      version: 1,
+      catalogRevision: 'a'.repeat(64),
+      configurationRevision: 4,
+      sources: [{
+        installationId: 'installation-1', extensionId: 'dev.example.tools',
+        sourceRevision: 'b'.repeat(64), entryDigest: 'c'.repeat(64),
+        toolIds: ['text_stats'], hooks: ['run:start'],
+      }],
+    }
+    const localInput = {
+      ...input,
+      executionMode: 'local',
+      agent: { ...agent, toolIds: ['web_fetch', 'text_stats'] },
+      effectiveToolIds: ['web_fetch', 'text_stats'],
+      localExtensionSnapshot,
+    }
+    expect(parseRunSnapshot(JSON.stringify(localInput)).localExtensionSnapshot).toEqual(localExtensionSnapshot)
+    expect(() => runInputSchema.parse({ ...input, localExtensionSnapshot })).toThrow(/server executor/i)
   })
 
   it('keeps activity payloads bounded and free of raw model reasoning', () => {

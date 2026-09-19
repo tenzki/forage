@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@forage/extension-api": "workspace:*",
     "zod": "^4.1.5"
   }
 }

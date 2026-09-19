@@ -71,7 +71,9 @@ export function validateAgentDraft(draft: AgentDraft, availableTools: ToolOption
     name: cleanText(draft.name, 'Agent name', 80),
     description: cleanText(draft.description, 'Agent description', 300),
     systemPrompt: cleanText(draft.systemPrompt, 'Agent instructions', 20_000),
-    toolIds: [...new Set(draft.toolIds.filter((id) => allowedTools.has(id)))],
+    // Known tools are validated by the catalog. Syntactically valid unknown ids are
+    // retained so synchronized or temporarily missing extension tools can recover.
+    toolIds: [...new Set(draft.toolIds.filter((id) => allowedTools.has(id) || /^[a-z][a-z0-9_]{0,63}$/.test(id)))],
   }
 }
 
