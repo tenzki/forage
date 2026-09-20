@@ -49,6 +49,7 @@ export function applyActivityEvent(
       timestamp: now,
       durationMs: isCallEvent ? event.durationMs : undefined,
       nodeId: isCallEvent ? event.nodeId : undefined,
+      placementPending: event.placementPending,
       events: isCallEvent ? [] : [nextEvent],
     }].slice(-MAX_ACTIVITY_CALLS)
   }
@@ -66,6 +67,7 @@ export function applyActivityEvent(
         status: isCallEvent ? status : call.status,
         durationMs: isCallEvent ? event.durationMs ?? call.durationMs : call.durationMs,
         nodeId: isCallEvent ? event.nodeId ?? call.nodeId : call.nodeId,
+        placementPending: event.placementPending ?? call.placementPending,
         events,
       }
     : call)
@@ -98,7 +100,7 @@ export function runActivityLabel(skillLabel: string, prompt: string): string {
 }
 
 function runStatus(run: LocalAgentRunHistory['run']): ActivityStatus {
-  if (run.status === 'completed') return 'complete'
+  if (run.status === 'completed' || run.status === 'completed_unplaced') return 'complete'
   if (run.status === 'failed') return 'error'
   if (run.status === 'cancelled' || run.status === 'interrupted') return 'cancelled'
   return 'running'
@@ -121,14 +123,18 @@ export function callsFromHistory(history: LocalAgentRunHistory[], now: number = 
     const startedAt = timestamp(entry.run.createdAt, now)
     const settledAt = timestamp(entry.run.updatedAt, startedAt)
     const status = runStatus(entry.run)
+    const prompt = entry.run.snapshot.version === 2
+      ? entry.run.snapshot.context.prompt
+      : entry.run.snapshot.prompt
     const withCall = applyActivityEvent(calls, {
       id: entry.run.id,
       phase: 'complete',
       kind: 'skill',
-      label: runActivityLabel(entry.run.snapshot.skill.label, entry.run.snapshot.prompt),
-      detail: entry.run.snapshot.prompt || undefined,
+      label: runActivityLabel(entry.run.snapshot.skill.label, prompt),
+      detail: prompt || undefined,
       status,
       nodeId: entry.run.snapshot.source.nodeId,
+      placementPending: entry.run.status === 'completed_unplaced',
       ...(status === 'running' ? {} : { durationMs: Math.max(0, settledAt - startedAt) }),
     }, startedAt)
     return entry.activity.reduce(

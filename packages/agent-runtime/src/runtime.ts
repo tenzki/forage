@@ -1,6 +1,7 @@
 import {
   activityEventSchema,
   parseStructuredResult,
+  requireStructuredResultV1,
   runInputSchema,
   untrustedSourceMaterialSchema,
   type ActivityEvent,
@@ -158,7 +159,7 @@ export async function runAgent(
       await settleThinking('complete', 'success')
 
       if (response.type === 'structured_result') {
-        const result = parseStructuredResult(response.result)
+        const result = requireStructuredResultV1(parseStructuredResult(response.result))
         await report({ phase: 'complete', kind: 'output', label: 'Response ready', status: 'success' })
         return {
           ...result,

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { ExtensionCatalog, LocalExtensionSnapshot } from '@forage/agent-runtime'
+import type { ExtensionCatalog } from '@forage/agent-runtime'
 import { ExtensionConfigurationStore } from './configuration'
 
 const REMOVAL_MARKER = '.remove-pending'
@@ -10,9 +10,9 @@ export interface ManagedRevisionLease {
   release(): Promise<void>
 }
 
-export async function acquireManagedRevisionLeases(
+export async function acquireManagedRevisionLeases<T extends { sources: ReadonlyArray<{ installationId: string }> }>(
   configurationRoot: string,
-  snapshot: LocalExtensionSnapshot,
+  snapshot: T,
   catalog: ExtensionCatalog,
 ): Promise<ManagedRevisionLease> {
   const store = new ExtensionConfigurationStore({ root: configurationRoot })

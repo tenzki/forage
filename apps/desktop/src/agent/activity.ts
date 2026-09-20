@@ -12,6 +12,7 @@ export interface ActivityEvent {
   /** Outline bullet this event points at, used for sidebar navigation. */
   nodeId?: string
   status?: ActivityStatus
+  placementPending?: boolean
   durationMs?: number
 }
 

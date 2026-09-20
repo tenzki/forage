@@ -1,7 +1,3 @@
-export const FORAGE_EXTENSION_MANIFEST_VERSION = 1 as const
-export const FORAGE_EXTENSION_API_VERSION = '1' as const
-export const FORAGE_EXTENSION_MANIFEST_SCHEMA = 'https://forage.app/schemas/extension-manifest-v1.json' as const
-
 export interface ExtensionToolContribution {
   readonly id: string
   readonly name: string
@@ -20,12 +16,7 @@ interface ExtensionSettingBase {
 export type ExtensionSettingDeclaration = ExtensionSettingBase & (
   | { readonly type: 'string'; readonly default?: string }
   | { readonly type: 'multiline'; readonly default?: string }
-  | {
-    readonly type: 'number'
-    readonly minimum?: number
-    readonly maximum?: number
-    readonly default?: number
-  }
+  | { readonly type: 'number'; readonly minimum?: number; readonly maximum?: number; readonly default?: number }
   | { readonly type: 'boolean'; readonly default?: boolean }
   | {
     readonly type: 'select'
@@ -35,24 +26,72 @@ export type ExtensionSettingDeclaration = ExtensionSettingBase & (
   | { readonly type: 'secret' }
 )
 
+export type ExtensionJsonPrimitive = null | boolean | number | string
+export type ExtensionJsonValue = ExtensionJsonPrimitive | ExtensionJsonValue[] | {
+  [key: string]: ExtensionJsonValue
+}
+export type ExtensionJsonObject = { [key: string]: ExtensionJsonValue }
+
+interface ExtensionSkillFieldBase {
+  readonly key: string
+  readonly label: string
+  readonly description?: string
+  readonly required?: boolean
+}
+
+export type ExtensionSkillConfigurationField = ExtensionSkillFieldBase & (
+  | { readonly type: 'text' | 'multiline'; readonly default?: string; readonly minLength?: number; readonly maxLength?: number }
+  | { readonly type: 'number'; readonly default?: number; readonly minimum?: number; readonly maximum?: number; readonly integer?: boolean }
+  | { readonly type: 'boolean'; readonly default?: boolean }
+  | {
+    readonly type: 'choice'
+    readonly options: ReadonlyArray<{ readonly value: string; readonly label: string; readonly description?: string }>
+    readonly default?: string
+  }
+  | { readonly type: 'object'; readonly fields: ReadonlyArray<ExtensionSkillConfigurationField> }
+  | {
+    readonly type: 'repeat'
+    readonly minimumItems?: number
+    readonly maximumItems: number
+    readonly fields: ReadonlyArray<ExtensionSkillConfigurationField>
+  }
+)
+
+export interface ExtensionSkillConfigurationCondition {
+  readonly field: string
+  readonly equals: string | number | boolean | null
+}
+
+export interface ExtensionSkillConfigurationBranch {
+  readonly when: ExtensionSkillConfigurationCondition
+  readonly fields: ReadonlyArray<ExtensionSkillConfigurationField>
+}
+
+export interface ExtensionSkillConfigurationForm {
+  readonly fields: ReadonlyArray<ExtensionSkillConfigurationField>
+  readonly branches?: ReadonlyArray<ExtensionSkillConfigurationBranch>
+}
+
+export interface ExtensionSkillExecutorContribution {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly allowEmptyPrompt?: boolean
+  readonly configuration: ExtensionSkillConfigurationForm
+}
+
 export interface ExtensionManifest {
-  readonly $schema?: typeof FORAGE_EXTENSION_MANIFEST_SCHEMA
-  readonly manifestVersion: typeof FORAGE_EXTENSION_MANIFEST_VERSION
   readonly id: string
   readonly name: string
   readonly version: string
   readonly description: string
   readonly entry: string
-  readonly apiVersion: typeof FORAGE_EXTENSION_API_VERSION
   readonly contributes: {
     readonly tools: ReadonlyArray<ExtensionToolContribution>
     readonly hooks: ReadonlyArray<ExtensionHookName>
     readonly settings: ReadonlyArray<ExtensionSettingDeclaration>
+    readonly executors?: ReadonlyArray<ExtensionSkillExecutorContribution>
   }
-}
-
-export type ExtensionJsonValue = null | boolean | number | string | ExtensionJsonValue[] | {
-  [key: string]: ExtensionJsonValue
 }
 
 export type ExtensionToolInputSchema = Readonly<Record<string, ExtensionJsonValue>>
@@ -72,12 +111,15 @@ export interface ExtensionLogEntry {
 
 export type ExtensionSettingValue = string | number | boolean
 
-export interface ExtensionToolExecutionContext {
+interface ExtensionOperationContext {
   readonly signal: AbortSignal
   readonly settings: Readonly<Record<string, ExtensionSettingValue>>
+  log(entry: ExtensionLogEntry): void
+}
+
+export interface ExtensionToolExecutionContext extends ExtensionOperationContext {
   readonly secrets: Readonly<Record<string, string | undefined>>
   reportProgress(progress: ExtensionProgress): void
-  log(entry: ExtensionLogEntry): void
 }
 
 export interface ExtensionToolDefinition {
@@ -86,6 +128,108 @@ export interface ExtensionToolDefinition {
   readonly description: string
   readonly inputSchema: ExtensionToolInputSchema
   execute(input: unknown, context: ExtensionToolExecutionContext): Promise<ExtensionToolResult>
+}
+
+export interface ExtensionSkillContextNode {
+  readonly id: string
+  readonly text: string
+  readonly documentOrder: number
+  readonly children?: ReadonlyArray<ExtensionSkillContextNode>
+}
+
+export interface ExtensionSkillContextSnapshot {
+  readonly prompt: string
+  readonly invocation: {
+    readonly id: string
+    readonly text: string
+    readonly parentId?: string
+    readonly documentOrder: number
+  }
+  readonly roots: ReadonlyArray<ExtensionSkillContextNode>
+  readonly provenance: {
+    readonly ancestorPathIds: ReadonlyArray<string>
+    readonly localParentId?: string
+    readonly localBranchRootId?: string
+    readonly explicitLinkedRootIds: ReadonlyArray<string>
+  }
+}
+
+export interface ExtensionSkillConfigurationIssue {
+  readonly path: ReadonlyArray<string | number>
+  readonly message: string
+}
+
+export type ExtensionSkillConfigurationValidation =
+  | { readonly valid: true }
+  | { readonly valid: false; readonly issues: ReadonlyArray<ExtensionSkillConfigurationIssue> }
+
+export interface ExtensionSkillPlanAnnotation {
+  readonly nodeId: string
+  readonly kind: 'selected' | 'shared' | 'excluded' | 'information'
+  readonly label: string
+}
+
+/** Returned by extension code. IDs are requests which still require host admission. */
+export interface ExtensionSkillPreparedPlan {
+  readonly selectedNodeIds: ReadonlyArray<string>
+  readonly requestedReferenceIds: ReadonlyArray<string>
+  readonly annotations: ReadonlyArray<ExtensionSkillPlanAnnotation>
+  readonly data: ExtensionJsonObject
+}
+
+/** Constructed only by the host after validating the extension's requested IDs. */
+export interface ExtensionSkillAdmittedPlan extends ExtensionSkillPreparedPlan {
+  readonly admittedReferenceIds: ReadonlyArray<string>
+}
+
+export interface ExtensionSkillValidationInput {
+  readonly configuration: ExtensionJsonObject
+}
+
+export interface ExtensionSkillPreparationInput {
+  readonly runId: string
+  readonly configuration: ExtensionJsonObject
+  readonly context: ExtensionSkillContextSnapshot
+}
+
+export type ExtensionSkillResultSegment =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'internal-reference'; readonly nodeId: string; readonly label: string }
+
+export interface ExtensionSkillResultNode {
+  readonly type: 'text'
+  readonly segments: ReadonlyArray<ExtensionSkillResultSegment>
+  readonly children?: ReadonlyArray<ExtensionSkillResultNode>
+}
+
+export interface ExtensionSkillResult {
+  readonly nodes: ReadonlyArray<ExtensionSkillResultNode>
+  readonly sources?: ReadonlyArray<{ readonly url: string; readonly label: string }>
+}
+
+export interface ExtensionSkillExecutionInput {
+  readonly runId: string
+  readonly configuration: ExtensionJsonObject
+  readonly context: ExtensionSkillContextSnapshot
+  readonly plan: ExtensionSkillAdmittedPlan
+}
+
+export interface ExtensionSkillValidationContext extends ExtensionOperationContext {}
+export interface ExtensionSkillPreparationContext extends ExtensionOperationContext {
+  reportProgress(progress: ExtensionProgress): void
+}
+export interface ExtensionSkillExecutionContext extends ExtensionOperationContext {
+  readonly secrets: Readonly<Record<string, string | undefined>>
+  reportProgress(progress: ExtensionProgress): void
+}
+
+export interface ExtensionSkillExecutorDefinition extends ExtensionSkillExecutorContribution {
+  validateConfiguration(
+    input: ExtensionSkillValidationInput,
+    context: ExtensionSkillValidationContext,
+  ): Promise<ExtensionSkillConfigurationValidation>
+  prepare(input: ExtensionSkillPreparationInput, context: ExtensionSkillPreparationContext): Promise<ExtensionSkillPreparedPlan>
+  execute(input: ExtensionSkillExecutionInput, context: ExtensionSkillExecutionContext): Promise<ExtensionSkillResult>
 }
 
 export interface ExtensionRunContext {
@@ -102,16 +246,13 @@ export interface ExtensionRunEndContext extends ExtensionRunContext {
 
 export interface ForageExtensionHost {
   registerTool(tool: ExtensionToolDefinition): void
+  registerSkillExecutor(executor: ExtensionSkillExecutorDefinition): void
   on(event: 'run:start', listener: (context: ExtensionRunContext) => void | Promise<void>): void
   on(event: 'run:end', listener: (context: ExtensionRunEndContext) => void | Promise<void>): void
 }
 
 export type ForageExtensionSetup = (host: ForageExtensionHost) => void | Promise<void>
 
-/**
- * Declares a Forage extension entry point while preserving its inferred setup type.
- * Runtime validation and admission remain the responsibility of the Forage host.
- */
-export function defineExtension<T extends ForageExtensionSetup>(setup: T): T {
+export function defineExtension(setup: ForageExtensionSetup): ForageExtensionSetup {
   return setup
 }

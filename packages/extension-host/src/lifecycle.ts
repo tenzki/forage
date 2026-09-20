@@ -74,13 +74,13 @@ export class ExtensionPackageLifecycle {
         : await this.stageGit(requestedSource)
     try {
       const entry = await inspectExtensionSource(staged.source)
-      if (!entry.manifest && !entry.inspection) {
-        throw new Error(entry.diagnostics[0]?.message ?? 'The source is not a compatible Forage extension.')
+      if (!entry.manifest) {
+        throw new Error(entry.diagnostics[0]?.message ?? 'The source is not a valid Forage extension.')
       }
       if (requestedSource.kind !== 'local' && entry.manifest && entry.status !== 'error') {
         await this.validateEntrySyntax(entry)
       }
-      staged.installable = Boolean(entry.manifest && entry.status !== 'error' && entry.status !== 'incompatible')
+      staged.installable = Boolean(entry.manifest && entry.status !== 'error')
       this.previews.set(staged.previewId, staged)
       return { previewId: staged.previewId, requestedSource, entry }
     } catch (error) {
@@ -180,8 +180,8 @@ export class ExtensionPackageLifecycle {
     let promotedRoot: string | undefined
     try {
       const entry = await inspectExtensionSource(staged.source)
-      if (!entry.manifest || entry.status === 'error' || entry.status === 'incompatible') {
-        throw new Error(entry.diagnostics[0]?.message ?? 'The update is not a compatible Forage extension.')
+      if (!entry.manifest || entry.status === 'error') {
+        throw new Error(entry.diagnostics[0]?.message ?? 'The update is not a valid Forage extension.')
       }
       if (configuration.trust.accepted && configuration.trust.extensionId !== entry.manifest.id) {
         throw new Error('The update changed the extension identity accepted for this installation.')
@@ -309,7 +309,7 @@ export class ExtensionPackageLifecycle {
   }
 
   private async validateEntrySyntax(entry: ExtensionCatalogEntry): Promise<void> {
-    if (!entry.manifest) throw new Error('A compatible manifest is required for entry validation.')
+    if (!entry.manifest) throw new Error('A valid current manifest is required for entry validation.')
     const entryPath = path.resolve(entry.source.canonicalPath, entry.manifest.entry.slice(2))
     await this.command(process.execPath, ['--check', entryPath])
   }

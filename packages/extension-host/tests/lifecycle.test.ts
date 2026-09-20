@@ -28,13 +28,11 @@ async function temporaryRoot(): Promise<string> {
 async function writeExtension(root: string, version = '1.0.0', options: { installScript?: boolean; missingEntry?: boolean } = {}): Promise<void> {
   await mkdir(root, { recursive: true })
   await writeFile(path.join(root, 'forage.extension.json'), JSON.stringify({
-    manifestVersion: 1,
     id: 'dev.example.lifecycle',
     name: 'Lifecycle fixture',
     version,
     description: 'Exercises package lifecycle behavior.',
     entry: './index.js',
-    apiVersion: '1',
     contributes: { tools: [], hooks: [], settings: [] },
   }))
   if (!options.missingEntry) await writeFile(path.join(root, 'index.js'), 'export default () => {}\n')
@@ -117,18 +115,16 @@ describe('Forage-owned extension package lifecycle', () => {
     expect(await readFile(path.join(source, 'index.js'), 'utf8')).toContain('export default')
   })
 
-  it('keeps an incompatible Forage manifest inspectable but prevents registration', async () => {
+  it('rejects a manifest with removed version discriminators without registering it', async () => {
     const root = await temporaryRoot()
     const source = path.join(root, 'future-source')
     await writeExtension(source)
     const manifestPath = path.join(source, 'forage.extension.json')
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
-    await writeFile(manifestPath, JSON.stringify({ ...manifest, apiVersion: '2' }))
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, apiVersion: '1' }))
     const { store, service } = lifecycle(path.join(root, '.forage'), new FakeRunner())
 
-    const preview = await service.preview({ kind: 'local', path: source })
-    expect(preview.entry).toMatchObject({ status: 'incompatible', inspection: { apiVersion: '2' } })
-    await expect(service.install(preview.requestedSource, preview.previewId)).rejects.toThrow('not installable')
+    await expect(service.preview({ kind: 'local', path: source })).rejects.toThrow(/current Forage extension contract/i)
     expect((await store.read()).sources).toEqual([])
   })
 
@@ -283,12 +279,17 @@ describe('Forage-owned extension package lifecycle', () => {
     await expect(stat(path.join(store.packagesPath, installationId))).rejects.toMatchObject({ code: 'ENOENT' })
 
     const localPath = path.join(root, 'external-local')
+    const ordinaryOutputPath = path.join(root, 'outline-data', 'saved-extension-output.json')
+    const ordinaryOutput = JSON.stringify({ type: 'text', text: 'Saved ordinary linked output', nodeId: 'source-note' })
+    await mkdir(path.dirname(ordinaryOutputPath), { recursive: true })
+    await writeFile(ordinaryOutputPath, ordinaryOutput)
     await writeExtension(localPath)
     const localPreview = await service.preview({ kind: 'local', path: localPath })
     const localId = await service.install(localPreview.requestedSource, localPreview.previewId)
     const local = (await store.read()).sources.find((source) => source.installationId === localId)!
     await service.remove(local)
     expect((await stat(localPath)).isDirectory()).toBe(true)
+    expect(await readFile(ordinaryOutputPath, 'utf8')).toBe(ordinaryOutput)
   })
 
   it('never invokes package commands during inventory, refresh-equivalent reads, or missing-resource inspection', async () => {

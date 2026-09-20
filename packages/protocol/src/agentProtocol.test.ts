@@ -3,6 +3,7 @@ import {
   agentActivityPageSchema,
   agentConfigurationPublishRequestSchema,
   agentConfigurationResponseSchema,
+  parseAgentConfigurationResponse,
   agentRunAdmissionRequestSchema,
   agentRunAdmissionResponseSchema,
   agentRunCancelResponseSchema,
@@ -24,10 +25,10 @@ const skill = {
   systemPrompt: 'Summarize it.', agentId: agent.id, requiredToolIds: ['web_fetch'],
 }
 const configuration = {
-  version: 2 as const,
+  version: 3 as const,
   revision: 4,
   agents: [{ ...agent, modelId: undefined }].map(({ modelId: _modelId, ...portable }) => portable),
-  skills: [skill],
+  skills: [{ ...skill, execution: 'llm' as const }],
   customTools: [],
   globallyEnabledToolIds: ['web_fetch'],
 }
@@ -43,6 +44,17 @@ describe('agent HTTP protocol', () => {
       baseRevision: 3,
       configuration: { ...configuration, apiKey: 'sk-secret' },
     })).toThrow()
+
+    const historical = parseAgentConfigurationResponse({
+      configuration: {
+        version: 2, revision: 3, agents: configuration.agents,
+        skills: [skill], customTools: [], globallyEnabledToolIds: ['web_fetch'],
+      },
+      publishedAt: '2026-08-31T09:00:00.000Z',
+    })
+    expect(historical.configuration).toMatchObject({
+      version: 3, revision: 3, skills: [{ id: 'research', execution: 'llm' }],
+    })
   })
 
   it('validates bounded ordered automation policies and dispatcher choices', () => {

@@ -17,7 +17,7 @@ The repository SHALL contain `packages/extension-api`, named `@forage/extension-
 - **THEN** a conforming extension continues to use the same manifest and public API
 
 ### Requirement: Dedicated reference extensions project
-The repository SHALL contain `packages/extensions`, named `@forage/extensions`, as a pnpm workspace project with a `forage.extension.json` manifest and explicit build, typecheck, and test commands integrated with repository checks. It SHALL depend on `@forage/extension-api` and SHALL NOT import the embedded SDK or application internals.
+The repository SHALL contain `extensions/reference`, named `@forage/extensions`, as a pnpm workspace project with a `forage.extension.json` manifest and explicit build, typecheck, and test commands integrated with repository checks. It SHALL depend on `@forage/extension-api` and SHALL NOT import the embedded SDK or application internals.
 
 #### Scenario: Verify the workspace project independently
 - **WHEN** a contributor runs the documented filtered build, typecheck, and test commands

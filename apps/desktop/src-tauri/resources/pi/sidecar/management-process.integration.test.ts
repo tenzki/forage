@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { extensionManagementResponseSchema, type ExtensionManagementResponse } from '@forage/agent-runtime'
 
 const sidecarRoot = path.dirname(fileURLToPath(import.meta.url))
-const referenceRoot = path.resolve(sidecarRoot, '../../../../../../packages/extensions')
+const referenceRoot = path.resolve(sidecarRoot, '../../../../../../extensions/reference')
 const temporaryDirectories: string[] = []
 const processes: ChildProcessWithoutNullStreams[] = []
 

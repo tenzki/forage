@@ -31,7 +31,9 @@ describe('shared HTTP protocol schemas', () => {
       minimumAgentClientVersion: '0.2.0',
       documentSchemaVersion: 1,
       minimumClientVersion: '0.1.0',
+      agentConfigurationVersions: [1, 2, 3],
     })
     expect(status.apiVersions).toEqual([1])
+    expect(status.agentConfigurationVersions).toEqual([1, 2, 3])
   })
 })

@@ -1,0 +1,147 @@
+{
+  "id": "app.forage.system-one",
+  "name": "System One",
+  "version": "0.1.0",
+  "description": "Evaluate outline candidates with Choice, Score, and Noul through TypeSafe Jev.",
+  "entry": "./dist/index.js",
+  "contributes": {
+    "tools": [],
+    "hooks": [],
+    "settings": [
+      {
+        "key": "typesafe_api_key",
+        "label": "TypeSafe API key",
+        "description": "Device-local credential used only for direct System One evaluation.",
+        "type": "secret",
+        "required": true
+      }
+    ],
+    "executors": [
+      {
+        "id": "evaluate",
+        "name": "System One",
+        "description": "Compare, classify, score, or filter outline candidates with typed System One questions.",
+        "allowEmptyPrompt": true,
+        "configuration": {
+          "fields": [
+            {
+              "key": "model",
+              "label": "Jev model",
+              "description": "Aliases can move; the concrete model returned by TypeSafe is reported with each run.",
+              "type": "choice",
+              "options": [
+                { "value": "jev-latest", "label": "Jev latest" },
+                { "value": "jev-preview", "label": "Jev preview" },
+                { "value": "jev-1.13.0", "label": "Jev 1.13.0 (pinned)" }
+              ],
+              "default": "jev-latest",
+              "required": true
+            },
+            {
+              "key": "kind",
+              "label": "Question type",
+              "type": "choice",
+              "options": [
+                { "value": "choice-comparison", "label": "Choice: compare candidates" },
+                { "value": "choice-classification", "label": "Choice: classify candidates" },
+                { "value": "score", "label": "Score candidates" },
+                { "value": "noul", "label": "Noul: filter candidates" }
+              ],
+              "default": "score",
+              "required": true
+            },
+            {
+              "key": "question",
+              "label": "Question",
+              "description": "A complete explicit question. Candidate IDs are never used as inferred instructions.",
+              "type": "multiline",
+              "required": true,
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            {
+              "key": "candidate_scope",
+              "label": "Candidate scope",
+              "type": "choice",
+              "options": [
+                { "value": "siblings", "label": "Direct siblings with subtree evidence" },
+                { "value": "descendants", "label": "All descendants of the parent branch" }
+              ],
+              "default": "siblings",
+              "required": true
+            },
+            {
+              "key": "ordering",
+              "label": "Result order",
+              "type": "choice",
+              "options": [
+                { "value": "document", "label": "Document order" },
+                { "value": "ascending", "label": "Numeric ascending" },
+                { "value": "descending", "label": "Numeric descending" }
+              ],
+              "default": "document",
+              "required": true
+            },
+            {
+              "key": "decimal_places",
+              "label": "Displayed decimal places",
+              "type": "number",
+              "integer": true,
+              "minimum": 0,
+              "maximum": 6,
+              "default": 2,
+              "required": true
+            }
+          ],
+          "branches": [
+            {
+              "when": { "field": "kind", "equals": "choice-classification" },
+              "fields": [
+                {
+                  "key": "categories",
+                  "label": "Categories",
+                  "description": "Unordered answer choices with explicit stable IDs and definitions.",
+                  "type": "repeat",
+                  "minimumItems": 2,
+                  "maximumItems": 50,
+                  "required": true,
+                  "fields": [
+                    { "key": "id", "label": "Category ID", "type": "text", "required": true, "minLength": 1, "maxLength": 64 },
+                    { "key": "label", "label": "Label", "type": "text", "required": true, "minLength": 1, "maxLength": 100 },
+                    { "key": "description", "label": "Definition", "type": "multiline", "required": true, "minLength": 1, "maxLength": 1000 }
+                  ]
+                }
+              ]
+            },
+            {
+              "when": { "field": "kind", "equals": "score" },
+              "fields": [
+                {
+                  "key": "levels",
+                  "label": "Ordered score levels",
+                  "description": "Two to ten explicit levels, from low to high.",
+                  "type": "repeat",
+                  "minimumItems": 2,
+                  "maximumItems": 10,
+                  "required": true,
+                  "fields": [
+                    { "key": "label", "label": "Level label", "type": "text", "required": true, "minLength": 1, "maxLength": 100 },
+                    { "key": "description", "label": "Level definition", "type": "multiline", "required": true, "minLength": 1, "maxLength": 1000 }
+                  ]
+                }
+              ]
+            },
+            {
+              "when": { "field": "kind", "equals": "noul" },
+              "fields": [
+                { "key": "yes_definition", "label": "Yes definition", "type": "multiline", "maxLength": 1000 },
+                { "key": "no_definition", "label": "No definition", "type": "multiline", "maxLength": 1000 },
+                { "key": "threshold", "label": "Inclusive yes threshold", "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "required": true }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

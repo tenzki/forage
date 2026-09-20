@@ -80,6 +80,7 @@ describe('native event repository', () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(2)
 
     await repository.admitAgentRun(run)
@@ -90,13 +91,14 @@ describe('native event repository', () => {
     expect((await repository.agentActivityAfter('run-1', 0))[0]?.event.kind).toBe('thinking')
     await repository.cancelAgentRun('run-1', '2026-08-31T10:00:02.000Z')
     await repository.settleAgentRun('run-1', 'cancelled', null, null, null, '2026-08-31T10:00:02.000Z')
+    await repository.placeAgentRunResult('run-placed', '2026-08-31T10:00:02.000Z')
     await repository.retryAgentRun('run-1', { ...run, id: 'run-2', retryOfRunId: 'run-1' })
     expect(await repository.interruptUnfinishedAgentRuns('2026-08-31T10:00:03.000Z')).toBe(2)
 
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
       'agent_run_admit', 'agent_run_begin_attempt', 'agent_run_append_activity',
       'agent_run_activity_after', 'agent_run_cancel', 'agent_run_settle',
-      'agent_run_retry', 'agent_run_interrupt_unfinished',
+      'agent_run_place_result', 'agent_run_retry', 'agent_run_interrupt_unfinished',
     ])
   })
 })

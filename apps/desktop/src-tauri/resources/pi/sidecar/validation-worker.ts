@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(result)}\n`)
   } catch (error) {
     process.stdout.write(`${JSON.stringify({
-      tools: [], hooks: [], diagnostics: [{
+      tools: [], executors: [], hooks: [], diagnostics: [{
         code: 'entry_validation_failed', severity: 'error', message: message(error).slice(0, 2_000),
       }],
     })}\n`)

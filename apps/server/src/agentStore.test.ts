@@ -30,7 +30,12 @@ describe('in-memory agent store', () => {
   it('publishes immutable configuration and policy revisions with compare-and-swap', async () => {
     const store = new InMemoryAgentStore()
     await expect(store.publishConfiguration('outline-1', 0, configuration)).resolves.toMatchObject({
-      configuration: { version: 2, revision: 1, agents: [expect.not.objectContaining({ modelId: expect.anything() })] },
+      configuration: {
+        version: 3,
+        revision: 1,
+        agents: [expect.not.objectContaining({ modelId: expect.anything() })],
+        skills: [expect.objectContaining({ execution: 'llm' })],
+      },
     })
     await expect(store.publishConfiguration('outline-1', 0, configuration)).rejects.toBeInstanceOf(AgentStoreError)
     await store.publishAutomation('outline-1', 0, policies)

@@ -1,4 +1,7 @@
 export * from './configuration'
+export * from './executor-host'
+export * from './executor-process'
+export * from './executor-worker'
 export * from './inventory'
 export * from './lifecycle'
 export * from './leases'

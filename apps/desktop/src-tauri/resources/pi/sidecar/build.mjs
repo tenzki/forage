@@ -21,6 +21,9 @@ await build({
       input: {
         index: path.join(root, 'index.ts'),
         management: path.join(root, 'management.ts'),
+        executor: path.join(root, 'executor.ts'),
+        'executor-process': path.join(root, 'executor-process.ts'),
+        'executor-worker': path.join(root, 'executor-worker.ts'),
         'validation-worker': path.join(root, 'validation-worker.ts'),
       },
       output: {

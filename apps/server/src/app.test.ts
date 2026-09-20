@@ -74,6 +74,7 @@ describe('Forage server', () => {
     const status = await app.inject({ method: 'GET', url: '/api/v1/status' })
     expect(status.json()).toMatchObject({
       instanceId: 'instance-test', apiVersions: [1], documentSchemaVersion: 1,
+      agentConfigurationVersions: [1, 2, 3],
     })
   })
 
@@ -304,6 +305,30 @@ describe('Forage server', () => {
     })
     expect(missingSource.statusCode).toBe(409)
     expect(missingSource.json().error.code).toBe('source_missing')
+
+    const extensionConfiguration = {
+      version: 3 as const, revision: 2, agents: [],
+      skills: [{
+        id: 'research', label: 'research', description: 'Retained generic skill.', execution: 'extension' as const,
+        executor: { extensionId: 'dev.example.notes', executorId: 'summarize' },
+        configuration: { arbitrary: { retained: true } },
+      }],
+      customTools: [], globallyEnabledToolIds: [],
+    }
+    expect((await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`, headers,
+      payload: { baseRevision: 1, configuration: extensionConfiguration },
+    })).statusCode).toBe(200)
+    await app.inject({
+      method: 'DELETE', url: `/api/v1/outlines/${outlineId}/agent-credentials/${credentialRef}`, headers,
+    })
+    const unavailableRetry = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs/${runId}/retry`, headers,
+    })
+    expect(unavailableRetry.statusCode).toBe(422)
+    expect(unavailableRetry.json().error).toMatchObject({
+      code: 'capability_unavailable', recoveryAction: 'run_locally',
+    })
   })
 
   it('uses the canonical outline when the in-memory search cache is missing a source', async () => {
@@ -337,9 +362,65 @@ describe('Forage server', () => {
 
     expect(published.statusCode).toBe(200)
     expect(published.json().configuration).toEqual({
-      ...configuration, version: 2,
+      ...configuration, version: 3,
       agents: configuration.agents.map(({ modelId: _modelId, ...agent }) => agent),
+      skills: configuration.skills.map((skill) => ({ ...skill, execution: 'llm' })),
     })
+  })
+
+  it('retains generic extension configuration but rejects server execution before compute admission', async () => {
+    const { app, repository, deviceToken, outlineId, inboxId } = await testServer()
+    const configuration = {
+      version: 3 as const,
+      revision: 1,
+      agents: [],
+      skills: [{
+        id: 'label-notes', label: 'label-notes', description: 'Label notes', execution: 'extension' as const,
+        executor: { extensionId: 'dev.example.notes', executorId: 'label_notes' },
+        configuration: { prefix: 'Match' },
+      }],
+      customTools: [],
+      globallyEnabledToolIds: [],
+    }
+    const headers = { authorization: `Bearer ${deviceToken}` }
+    const published = await app.inject({
+      method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`, headers,
+      payload: { baseRevision: 0, configuration },
+    })
+    expect(published.statusCode).toBe(200)
+    expect(published.json().configuration.skills[0]).toEqual(configuration.skills[0])
+
+    for (const forbidden of [
+      { apiKey: 'synthetic-secret' },
+      { nested: { canonicalPath: '/tmp/local-extension' } },
+      { nested: { trustStatus: 'trusted' } },
+    ]) {
+      const rejected = await app.inject({
+        method: 'PUT', url: `/api/v1/outlines/${outlineId}/agent-configuration`, headers,
+        payload: {
+          baseRevision: 1,
+          configuration: {
+            ...configuration, revision: 2,
+            skills: [{ ...configuration.skills[0]!, configuration: forbidden }],
+          },
+        },
+      })
+      expect(rejected.statusCode).toBe(400)
+    }
+
+    const admission = await app.inject({
+      method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-runs`, headers,
+      payload: {
+        version: 2, invocationId: 'extension-server', sourceNodeId: inboxId,
+        skillId: 'label-notes', prompt: 'Run.', acknowledgedOutlineRevision: 0,
+      },
+    })
+    expect(admission.statusCode).toBe(422)
+    expect(admission.json().error).toMatchObject({
+      code: 'capability_unavailable', recoveryAction: 'run_locally',
+    })
+    expect(admission.json().error.message).toMatch(/no desktop fallback/i)
+    expect(await repository.agentStore.listRuns(outlineId, 10)).toEqual([])
   })
 
   it('imports a desktop ChatGPT credential without returning its tokens', async () => {
@@ -450,6 +531,27 @@ describe('Forage server', () => {
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ trigger: 'inbox_automation', skillId: 'summarize', policyId: 'high' })
     expect(runs[0]?.input.target.parentId).toBe(first.response.noteId)
+
+    const current = (await repository.agentStore.currentConfiguration(outlineId))!.configuration
+    await repository.agentStore.publishConfiguration(outlineId, 1, {
+      ...current,
+      revision: 2,
+      skills: [...current.skills, {
+        id: 'local-label', label: 'local-label', description: 'Local-only generic executor.',
+        execution: 'extension', executor: { extensionId: 'dev.example.notes', executorId: 'label' },
+        configuration: { retained: true },
+      }],
+    })
+    await repository.agentStore.publishAutomation(outlineId, 1, {
+      version: 1, revision: 2, enabled: true, policies: [{
+        id: 'high', name: 'YouTube', enabled: true, priority: 2, match: { urlTypes: ['youtube'] },
+        skillIds: ['summarize', 'local-label'], dispatcher: { enabled: false, allowedSkillIds: [] },
+      }],
+    })
+    await repository.createNote(principal, 'capture-with-local-skill', { text: 'https://youtu.be/second', source: { kind: 'share' } })
+    const afterLocalOnlyMatch = await repository.agentStore.listRuns(outlineId, 10)
+    expect(afterLocalOnlyMatch).toHaveLength(2)
+    expect(afterLocalOnlyMatch.every((run) => run.skillId === 'summarize')).toBe(true)
   })
 
   it('admits only the first matching site rule for subdomain captures', async () => {

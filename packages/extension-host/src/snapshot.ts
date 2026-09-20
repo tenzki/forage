@@ -1,9 +1,12 @@
 import {
   createLocalExtensionSnapshotFromCatalog,
+  createLocalExtensionExecutorSnapshotFromCatalog,
   localExtensionSnapshotSchema,
+  localExtensionExecutorSnapshotSchema,
   type ExtensionCatalog,
   type ExtensionConfiguration,
   type LocalExtensionSnapshot,
+  type LocalExtensionExecutorSnapshot,
 } from '@forage/agent-runtime'
 
 export class ExtensionSnapshotError extends Error {
@@ -11,6 +14,39 @@ export class ExtensionSnapshotError extends Error {
     super(message)
     this.name = 'ExtensionSnapshotError'
   }
+}
+
+export function createLocalExtensionExecutorSnapshot(
+  catalog: ExtensionCatalog,
+  configuration: ExtensionConfiguration,
+  selection: { extensionId: string; executorId: string },
+): LocalExtensionExecutorSnapshot {
+  return createLocalExtensionExecutorSnapshotFromCatalog(catalog, configuration.revision, selection)
+}
+
+export function verifyLocalExtensionExecutorSnapshot(
+  snapshot: LocalExtensionExecutorSnapshot,
+  catalog: ExtensionCatalog,
+  configuration: ExtensionConfiguration,
+): ExtensionCatalog['entries'][number] {
+  const parsed = localExtensionExecutorSnapshotSchema.parse(snapshot)
+  if (parsed.configurationRevision !== configuration.revision || parsed.catalogRevision !== catalog.revision) {
+    throw new ExtensionSnapshotError('stale_extension_revision', 'Extension catalog or local configuration changed after executor admission; retry against the current catalog.')
+  }
+  const entry = catalog.entries.find((candidate) => candidate.source.installationId === parsed.source.installationId)
+  if (!entry || entry.status !== 'ready' || !entry.manifest || !entry.provenance?.entryDigest) {
+    throw new ExtensionSnapshotError('unavailable_extension_revision', 'The admitted skill executor revision is no longer available.')
+  }
+  if (entry.manifest.id !== parsed.source.extensionId
+    || entry.provenance.sourceRevision !== parsed.source.sourceRevision
+    || entry.provenance.entryDigest !== parsed.source.entryDigest) {
+    throw new ExtensionSnapshotError('stale_extension_revision', 'The skill executor source changed after admission.')
+  }
+  const executor = (entry.executors ?? []).find((candidate) => candidate.id === parsed.source.executorId)
+  if (!executor?.available) {
+    throw new ExtensionSnapshotError('unavailable_extension_revision', 'The admitted skill executor is unavailable.')
+  }
+  return entry
 }
 
 export function createLocalExtensionSnapshot(

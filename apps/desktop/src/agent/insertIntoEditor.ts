@@ -24,7 +24,14 @@ import { buildOutlineSnapshot } from './outlineSnapshot'
 import type { ActivityReporter } from './activity'
 import { NativeAssetRepository } from '../persistence/assetStore'
 import type { GeneratedImageReference } from '../editor/generatedImage'
-import type { StructuredResult, StructuredResultNode } from '@forage/agent-runtime'
+import {
+  parseStructuredResult,
+  requireStructuredResultV1,
+  type StructuredResult,
+  type StructuredResultNode,
+  type StructuredResultV2,
+  type StructuredResultV2Node,
+} from '@forage/agent-runtime'
 import { clearStreamingText, showStreamingText, type StreamingTextRange } from '../editor/agentStreamingText'
 
 function contextText(item: ProseMirrorNode): string {
@@ -431,6 +438,7 @@ export function commitStructuredAgentResult(
   skillLabel: string,
   result: StructuredResult,
 ): string[] {
+  const materializable = requireStructuredResultV1(result)
   let invocation: { pos: number; node: ProseMirrorNode } | null = null
   editor.state.doc.descendants((node, pos) => {
     if (invocation || node.type.name !== 'listItem' || node.attrs.nodeId !== invocationNodeId) return
@@ -439,7 +447,7 @@ export function commitStructuredAgentResult(
   })
   if (!invocation) throw new Error('The skill invocation target is no longer available.')
   const target = invocation as { pos: number; node: ProseMirrorNode }
-  const nodes = result.nodes.map(structuredToStored)
+  const nodes = materializable.nodes.map(structuredToStored)
   const items = nodes.flatMap((node) => createAiOutlineItem(editor, node, newNodeId()))
   if (!items.length) throw new Error('The agent returned no outline nodes.')
 
@@ -463,6 +471,135 @@ export function commitStructuredAgentResult(
   return nodeIds
 }
 
+function extensionResultNodeId(runId: string, path: readonly number[]): string {
+  return `extension-result-${runId}-${path.join('-')}`.slice(0, 128)
+}
+
+function extensionInlineContent(
+  editor: Editor,
+  node: StructuredResultV2Node,
+): ProseMirrorNode[] {
+  const mark = editor.schema.marks.internalLink
+  if (!mark) throw new Error('The editor cannot materialize internal references.')
+  const inline: ProseMirrorNode[] = []
+  node.segments.forEach((segment) => {
+    const text = segment.type === 'text' ? segment.text : segment.label
+    const marks = segment.type === 'internal-reference'
+      ? [mark.create({ targetId: segment.nodeId })]
+      : undefined
+    text.split('\n').forEach((line, index) => {
+      if (index > 0) inline.push(editor.schema.nodes.hardBreak.create())
+      if (line) inline.push(editor.schema.text(line, marks))
+    })
+  })
+  return inline
+}
+
+function createExtensionResultItem(
+  editor: Editor,
+  node: StructuredResultV2Node,
+  runId: string,
+  path: readonly number[],
+): ProseMirrorNode {
+  const content: ProseMirrorNode[] = [
+    editor.schema.nodes.paragraph.create(null, extensionInlineContent(editor, node)),
+  ]
+  if (node.children?.length) {
+    content.push(editor.schema.nodes.bulletList.create(null, node.children.map((child, index) => (
+      createExtensionResultItem(editor, child, runId, [...path, index])
+    ))))
+  }
+  return editor.schema.nodes.listItem.create({
+    nodeId: extensionResultNodeId(runId, path),
+    nodeType: 'ai',
+  }, content)
+}
+
+function findListItem(
+  editor: Editor,
+  nodeId: string,
+): { pos: number; node: ProseMirrorNode } | null {
+  let found: { pos: number; node: ProseMirrorNode } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (found || node.type.name !== 'listItem' || node.attrs.nodeId !== nodeId) return
+    found = { pos, node }
+    return false
+  })
+  return found
+}
+
+function validatedExtensionResult(
+  result: StructuredResult,
+  admittedReferenceIds: Iterable<string>,
+): StructuredResultV2 {
+  const parsed = parseStructuredResult(result, { allowedReferenceIds: admittedReferenceIds })
+  if (parsed.version !== 2) throw new Error('Extension skill output must use reference-aware structured results.')
+  return parsed
+}
+
+/**
+ * Materialize a complete generic extension result as ordinary list items in one
+ * transaction. Deterministic run-scoped ids make recovery idempotent if the app
+ * closes after the document event is persisted but before the retained run is
+ * marked placed.
+ */
+export function insertExtensionSkillResult(
+  editor: Editor,
+  targetNodeId: string,
+  runId: string,
+  result: StructuredResult,
+  admittedReferenceIds: Iterable<string>,
+): string[] {
+  const materializable = validatedExtensionResult(result, admittedReferenceIds)
+  const rootNodeIds = materializable.nodes.map((_, index) => extensionResultNodeId(runId, [index]))
+  const existing = rootNodeIds.filter((nodeId) => findListItem(editor, nodeId))
+  if (existing.length === rootNodeIds.length) return rootNodeIds
+  if (existing.length) throw new Error('The retained extension result is only partially present in the outline.')
+  const target = findListItem(editor, targetNodeId)
+  if (!target) throw new Error('The extension skill output target is no longer available.')
+  const items = materializable.nodes.map((node, index) => createExtensionResultItem(editor, node, runId, [index]))
+  const transaction = editor.state.tr
+  transaction.insert(
+    target.pos + target.node.nodeSize - 1,
+    editor.schema.nodes.bulletList.create(null, items),
+  )
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', runId)
+  editor.view.dispatch(transaction)
+  revealAgentResult(editor, rootNodeIds)
+  return rootNodeIds
+}
+
+/** Place under the original invocation and remove only its slash-command prefix. */
+export function commitExtensionSkillResult(
+  editor: Editor,
+  invocationNodeId: string,
+  skillLabel: string,
+  runId: string,
+  result: StructuredResult,
+  admittedReferenceIds: Iterable<string>,
+): string[] {
+  const materializable = validatedExtensionResult(result, admittedReferenceIds)
+  const target = findListItem(editor, invocationNodeId)
+  if (!target) throw new Error('The extension skill invocation target is no longer available.')
+  const rootNodeIds = materializable.nodes.map((_, index) => extensionResultNodeId(runId, [index]))
+  const items = materializable.nodes.map((node, index) => createExtensionResultItem(editor, node, runId, [index]))
+  const paragraph = target.node.firstChild
+  const text = paragraph?.textContent ?? ''
+  const prefix = `/${skillLabel}`
+  let prefixLength = text.startsWith(prefix) ? prefix.length : 0
+  while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
+  const transaction = editor.state.tr
+  if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
+  const insertPosition = transaction.mapping.map(target.pos + target.node.nodeSize - 1, -1)
+  transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', runId)
+  editor.view.dispatch(transaction)
+  revealAgentResult(editor, rootNodeIds)
+  return rootNodeIds
+}
+
 export function commitStructuredAgentResultInto(
   editor: Editor,
   invocationNodeId: string,
@@ -470,6 +607,7 @@ export function commitStructuredAgentResultInto(
   skillLabel: string,
   result: StructuredResult,
 ): string[] {
+  const materializable = requireStructuredResultV1(result)
   let invocation: { pos: number; node: ProseMirrorNode } | null = null
   editor.state.doc.descendants((node, pos) => {
     if (invocation || node.type.name !== 'listItem' || node.attrs.nodeId !== invocationNodeId) return
@@ -484,7 +622,7 @@ export function commitStructuredAgentResultInto(
     if (child.type.name === 'listItem' && typeof child.attrs.nodeId === 'string') existingIds.push(child.attrs.nodeId)
   })
   let existingIndex = 0
-  const items = result.nodes.flatMap((node) => {
+  const items = materializable.nodes.flatMap((node) => {
     const nodeId = node.type === 'image' ? newNodeId() : existingIds[existingIndex++] ?? newNodeId()
     return createAiOutlineItem(editor, structuredToStored(node), nodeId)
   })

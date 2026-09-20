@@ -26,6 +26,7 @@ export interface ActivityCall {
   durationMs?: number
   /** Bullet the skill was invoked from. */
   nodeId?: string
+  placementPending?: boolean
   events: ActivityEntry[]
 }
 
@@ -55,12 +56,20 @@ export function ActivitySidebar({
   calls,
   onClear,
   onOpenNode,
+  onPlaceResult,
+  onCancel,
+  canCancel,
   collapsed = false,
 }: {
   calls: ActivityCall[]
   onClear: () => void
   /** Reveal a bullet in the outline; `contextNodeId` is the branch it lives under. */
   onOpenNode?: (nodeId: string, contextNodeId?: string) => void
+  /** Place a durably retained completed result under the current bullet. */
+  onPlaceResult?: (runId: string) => void
+  /** Cancel a currently executing local extension run. */
+  onCancel?: (runId: string) => void
+  canCancel?: (runId: string) => boolean
   collapsed?: boolean
 }) {
   const [collapsedCalls, setCollapsedCalls] = useState<Set<string>>(new Set())
@@ -147,6 +156,25 @@ export function ActivitySidebar({
                       {duration && <span className="activity-duration">{duration}</span>}
                       <span className="activity-status-icon">{statusIcon(call.status)}</span>
                     </button>
+                    {call.placementPending && (
+                      <button
+                        type="button"
+                        className="activity-place-result"
+                        onClick={() => onPlaceResult?.(call.id)}
+                        disabled={!onPlaceResult}
+                      >
+                        Place here
+                      </button>
+                    )}
+                    {call.status === 'running' && onCancel && canCancel?.(call.id) && (
+                      <button
+                        type="button"
+                        className="activity-cancel-run"
+                        onClick={() => onCancel(call.id)}
+                      >
+                        Cancel
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="activity-call-toggle"

@@ -16,7 +16,7 @@ import {
   type CodexOAuthCredential,
 } from './codexAuth'
 import type { AgentDefinition } from './definitions'
-import type { Skill } from './skills'
+import type { LegacySkillDefinition, LlmSkillDefinition } from '@forage/agent-runtime'
 import {
   resolveTools,
   type CustomHttpToolConfig,
@@ -37,7 +37,7 @@ export interface GenerateOptions {
 }
 
 export interface GenerateInput {
-  skill: Skill
+  skill: LegacySkillDefinition | LlmSkillDefinition
   agent?: AgentDefinition
   prompt: string
   context: string[]

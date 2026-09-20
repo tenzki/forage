@@ -25,7 +25,7 @@ Extensions settings SHALL accept npm package specifications, Git repositories wi
 - **AND** installation does not trust, enable, configure, or authorize its tools
 
 #### Scenario: Register a local development package
-- **WHEN** a user adds the repository's `packages/extensions` directory as a local source
+- **WHEN** a user adds the repository's `extensions/reference` directory as a local source
 - **THEN** Forage references that directory without copying, deleting, or changing its files
 
 #### Scenario: Package prerequisite is unavailable
@@ -73,5 +73,5 @@ Managed installs and updates SHALL use staging and switch registrations only aft
 Removal SHALL unregister the source and delete only Forage-managed package data after active users release it. It SHALL never delete a registered external directory. Configured tool references SHALL remain visible as unavailable after removal.
 
 #### Scenario: Remove a local development source
-- **WHEN** a user removes the registered `packages/extensions` source
+- **WHEN** a user removes the registered `extensions/reference` source
 - **THEN** Forage removes its registration but leaves the repository and extension files intact

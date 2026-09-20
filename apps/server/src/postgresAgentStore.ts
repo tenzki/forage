@@ -1,15 +1,15 @@
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import {
   activityEventSchema,
-  agentConfigurationSchema,
   portableAgentConfigurationSchema,
+  supportedAgentConfigurationSchema,
   computeProfileSchema,
-  migrateLegacyAgentConfiguration,
+  migrateAgentConfiguration,
   runInputSchema,
   runStatusSchema,
   type ActivityEvent,
-  type AgentConfiguration,
   type PortableAgentConfiguration,
+  type SupportedAgentConfiguration,
   type ComputeProfile,
   type RunInput,
   type RunStatus,
@@ -38,7 +38,7 @@ export class PostgresAgentStore implements AgentStore {
     return result.rows[0] ? { configuration: normalizeConfiguration(result.rows[0].configuration), publishedAt: result.rows[0].published_at.toISOString() } : null
   }
 
-  async publishConfiguration(outlineId: string, baseRevision: number, configuration: AgentConfiguration | PortableAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration> {
+  async publishConfiguration(outlineId: string, baseRevision: number, configuration: SupportedAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration> {
     if (!publishedBy) throw new AgentStoreError('invalid_state', 'Publishing credential is required.')
     const parsed = normalizeConfiguration(configuration)
     return this.transaction(async (client) => {
@@ -414,7 +414,7 @@ function runFromRow(row: AgentRunRow): AgentRunRecord {
 function normalizeConfiguration(raw: unknown): PortableAgentConfiguration {
   const portable = portableAgentConfigurationSchema.safeParse(raw)
   if (portable.success) return portable.data
-  return migrateLegacyAgentConfiguration(agentConfigurationSchema.parse(raw)).configuration
+  return migrateAgentConfiguration(supportedAgentConfigurationSchema.parse(raw)).configuration
 }
 
 function resultFromRow(row: ResultRow): AgentRunResult {

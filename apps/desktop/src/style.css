@@ -638,6 +638,32 @@ body {
   text-align: left;
 }
 
+.activity-place-result,
+.activity-cancel-run {
+  flex: 0 0 auto;
+  margin-right: 4px;
+  padding: 5px 7px;
+  border: 1px solid #d9d0f5;
+  border-radius: 6px;
+  background: #faf8ff;
+  color: #6247bd;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.activity-cancel-run {
+  border-color: #e8b4ad;
+  color: #9f2d20;
+  background: #fff7f5;
+}
+
+.activity-place-result:hover:not(:disabled) { background: #f1edff; }
+.activity-cancel-run:hover { background: #fde9e5; }
+.activity-place-result:disabled { cursor: default; opacity: 0.55; }
+
 .activity-call-open {
   flex: 1 1 auto;
 }
@@ -1174,6 +1200,19 @@ body {
   background: #e7f5f1;
   box-shadow: inset 3px 0 #27836d;
   transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.outliner-editor li.skill-context-shared > p {
+  background: #eaf3fb;
+}
+
+.outliner-editor li.skill-context-candidate > p {
+  box-shadow: inset 3px 0 0 #27836d;
+  background: #e2f6ed;
+}
+
+.outliner-editor li.skill-context-excluded > p {
+  opacity: 0.55;
 }
 .outliner-editor li.skill-context-invocation > p {
   background: #fff4dd;

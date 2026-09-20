@@ -112,7 +112,7 @@ describe('compute settings', () => {
         baseRevision: 0,
         configuration: expect.objectContaining({
           revision: 1,
-          version: 2,
+          version: 3,
           agents: [expect.not.objectContaining({ modelId: expect.anything() })],
           skills: [expect.objectContaining({ id: 'ask' })],
           customTools: [expect.objectContaining({ id: 'weather' })],
@@ -159,7 +159,7 @@ describe('compute settings', () => {
       if (command === 'server_agent_configuration') {
         return {
           configuration: {
-            version: 2, revision: 4, skills: [], customTools: [], globallyEnabledToolIds: [],
+            version: 3, revision: 4, skills: [], customTools: [], globallyEnabledToolIds: [],
             agents: [{
               id: 'general', name: 'General', description: 'General assistant', systemPrompt: 'Be useful.',
               toolIds: [],

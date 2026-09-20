@@ -62,4 +62,28 @@ describe('activity sidebar', () => {
 
     expect(screen.getByRole('button', { name: 'Collapse execution for Run /research tauri' })).toBeTruthy()
   })
+
+  it('offers explicit recovery for a retained unplaced result', () => {
+    const onPlaceResult = vi.fn()
+    render(<ActivitySidebar calls={[{
+      id: 'run-unplaced', label: 'Run /label', status: 'complete', timestamp: 1,
+      placementPending: true, events: [],
+    }]} onClear={() => undefined} onPlaceResult={onPlaceResult} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Place here' }))
+    expect(onPlaceResult).toHaveBeenCalledWith('run-unplaced')
+  })
+
+  it('offers cancellation only for a registered running extension execution', () => {
+    const onCancel = vi.fn()
+    render(<ActivitySidebar calls={[
+      { id: 'extension-run', label: 'Run /label', status: 'running', timestamp: 1, events: [] },
+      { id: 'other-run', label: 'Run /research', status: 'running', timestamp: 2, events: [] },
+    ]} onClear={() => undefined} onCancel={onCancel} canCancel={(runId) => runId === 'extension-run'} />)
+
+    const cancel = screen.getByRole('button', { name: 'Cancel' })
+    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
+    fireEvent.click(cancel)
+    expect(onCancel).toHaveBeenCalledWith('extension-run')
+  })
 })

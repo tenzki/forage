@@ -3,6 +3,7 @@ import type {
   ExtensionCatalog,
   ExtensionCatalogEntry,
   ExtensionConfiguration,
+  ExtensionSkillConfigurationForm,
   ExtensionSourceConfiguration,
   ExtensionSourceRequest,
 } from '@forage/agent-runtime'
@@ -36,6 +37,19 @@ export interface ExtensionToolOption {
   installationId: string
   extensionId: string
   sourceName: string
+  unavailableReason?: string
+}
+
+export interface ExtensionExecutorOption {
+  extensionId: string
+  executorId: string
+  name: string
+  description: string
+  sourceName: string
+  installationId: string
+  allowEmptyPrompt: boolean
+  configuration: ExtensionSkillConfigurationForm
+  available: boolean
   unavailableReason?: string
 }
 
@@ -180,7 +194,7 @@ export function extensionConfigurationFor(
 export function extensionToolOptions(catalog: ExtensionCatalog | null): ExtensionToolOption[] {
   if (!catalog) return []
   return catalog.entries.flatMap((entry) => {
-    const declaration = entry.manifest ?? entry.inspection
+    const declaration = entry.manifest
     if (!declaration) return []
     return entry.tools.map((tool) => ({
       id: tool.id,
@@ -197,8 +211,35 @@ export function extensionToolOptions(catalog: ExtensionCatalog | null): Extensio
   })
 }
 
+export function extensionExecutorOptions(catalog: ExtensionCatalog | null): ExtensionExecutorOption[] {
+  if (!catalog) return []
+  return catalog.entries.flatMap((entry) => {
+    const manifest = entry.manifest
+    if (!manifest) return []
+    return (entry.executors ?? []).map((executor) => {
+      const available = entry.status === 'ready' && executor.available
+      return {
+        extensionId: manifest.id,
+        executorId: executor.id,
+        name: executor.name,
+        description: executor.description,
+        sourceName: manifest.name,
+        installationId: entry.source.installationId,
+        allowEmptyPrompt: executor.allowEmptyPrompt ?? false,
+        configuration: executor.configuration,
+        available,
+        ...(available ? {} : {
+          unavailableReason: executor.diagnostics[0]?.message
+            ?? entry.diagnostics[0]?.message
+            ?? statusLabel(entry),
+        }),
+      }
+    })
+  })
+}
+
 export function extensionAttentionCount(catalog: ExtensionCatalog | null): number {
-  return catalog?.entries.filter((entry) => ['needs_review', 'needs_configuration', 'incompatible', 'error'].includes(entry.status)).length ?? 0
+  return catalog?.entries.filter((entry) => ['needs_review', 'needs_configuration', 'error'].includes(entry.status)).length ?? 0
 }
 
 export function statusLabel(entry: ExtensionCatalogEntry): string {
@@ -207,7 +248,6 @@ export function statusLabel(entry: ExtensionCatalogEntry): string {
     disabled: 'Disabled',
     needs_configuration: 'Needs configuration',
     ready: 'Ready',
-    incompatible: 'Incompatible',
     error: 'Error',
   } as const)[entry.status]
 }

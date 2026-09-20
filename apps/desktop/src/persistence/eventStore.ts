@@ -6,9 +6,11 @@ import {
 } from '@forage/domain'
 import {
   activityEventSchema,
+  parseStructuredResult,
+  runSnapshotSchema,
   runStatusSchema,
   type ActivityEvent,
-  type RunInput,
+  type RunSnapshot,
   type RunStatus,
   type StructuredResult,
 } from '@forage/agent-runtime'
@@ -80,7 +82,7 @@ function eventRecord(event: EventEnvelope) {
 export interface LocalAgentRun {
   id: string
   outlineId: string
-  snapshot: RunInput
+  snapshot: RunSnapshot
   status: RunStatus
   attemptCount: number
   resultIdentity: string | null
@@ -102,6 +104,16 @@ export interface LocalAgentActivity {
   sequence: number
   event: ActivityEvent
   createdAt: string
+}
+
+function parseLocalAgentRun(run: LocalAgentRun): LocalAgentRun {
+  const snapshot = runSnapshotSchema.parse(run.snapshot)
+  const result = run.result === null
+    ? null
+    : parseStructuredResult(run.result, snapshot.version === 2
+      ? { allowedReferenceIds: snapshot.plan.admittedReferenceIds }
+      : {})
+  return { ...run, snapshot, status: runStatusSchema.parse(run.status), result }
 }
 
 export class NativeEventRepository {
@@ -227,7 +239,7 @@ export class NativeEventRepository {
   async agentRun(runId: string): Promise<LocalAgentRun | null> {
     const run = await invoke<LocalAgentRun | null>('agent_run_get', { runId })
     if (!run) return null
-    return { ...run, status: runStatusSchema.parse(run.status) }
+    return parseLocalAgentRun(run)
   }
 
   async beginAgentAttempt(runId: string, startedAt: string): Promise<number> {
@@ -246,7 +258,7 @@ export class NativeEventRepository {
   async recentAgentRuns(outlineId: string, limit = 25): Promise<LocalAgentRunHistory[]> {
     const history = await invoke<LocalAgentRunHistory[]>('agent_run_recent', { outlineId, limit })
     return history.map(({ run, activity }) => ({
-      run: { ...run, status: runStatusSchema.parse(run.status) },
+      run: parseLocalAgentRun(run),
       activity: activity.map((record) => ({ ...record, event: activityEventSchema.parse(record.event) })),
     }))
   }
@@ -261,13 +273,17 @@ export class NativeEventRepository {
 
   async settleAgentRun(
     runId: string,
-    status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>,
+    status: Extract<RunStatus, 'completed' | 'completed_unplaced' | 'failed' | 'cancelled' | 'interrupted'>,
     resultIdentity: string | null,
     result: StructuredResult | null,
     errorCode: string | null,
     settledAt: string,
   ): Promise<void> {
     await invoke('agent_run_settle', { runId, status, resultIdentity, result, errorCode, settledAt })
+  }
+
+  async placeAgentRunResult(runId: string, placedAt: string): Promise<void> {
+    await invoke('agent_run_place_result', { runId, placedAt })
   }
 
   async retryAgentRun(originalRunId: string, run: LocalAgentRun): Promise<void> {

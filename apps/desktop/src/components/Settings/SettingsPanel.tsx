@@ -29,6 +29,7 @@ import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ExtensionsSettings } from './ExtensionsSettings'
 import {
   extensionAttentionCount,
+  extensionExecutorOptions,
   extensionToolOptions,
   useExtensionStore,
 } from '../../store/extensionStore'
@@ -81,6 +82,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const loginController = useRef<AbortController | null>(null)
   const modelOptions = useMemo(() => codexModelOptions(authMode), [authMode])
   const extensionTools = useMemo(() => extensionToolOptions(extensionCatalog), [extensionCatalog])
+  const extensionExecutors = useMemo(() => extensionExecutorOptions(extensionCatalog), [extensionCatalog])
   const extensionToolGroups = useMemo(() => {
     const groups = new Map<string, typeof extensionTools>()
     for (const tool of extensionTools) groups.set(tool.sourceName, [...(groups.get(tool.sourceName) ?? []), tool])
@@ -363,7 +365,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
       </section>
 
       <div hidden={activeView !== 'agents'} className="settings-view" aria-label="Agent settings">
-        <AgentSettings extensionTools={extensionTools} reportError={(error) => setActionError(describeError(error))} />
+        <AgentSettings extensionTools={extensionTools} extensionExecutors={extensionExecutors} reportError={(error) => setActionError(describeError(error))} />
       </div>
 
       <section hidden={activeView !== 'agents'} className="settings-section settings-tools-section" aria-labelledby="tools-heading">

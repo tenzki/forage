@@ -2,19 +2,16 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  FORAGE_EXTENSION_API_VERSION,
-  FORAGE_EXTENSION_MANIFEST_VERSION,
   RESERVED_EXTENSION_TOOL_IDS,
   extensionCatalogSchema,
-  extensionManifestSchema,
   extensionSourceSchema,
-  parseExtensionManifestInspection,
+  parseExtensionManifest,
+  resolveExtensionExecutorAvailability,
   resolveExtensionToolAvailability,
   type ExtensionCatalog,
   type ExtensionCatalogEntry,
   type ExtensionConfiguration,
   type ExtensionDiagnostic,
-  type ExtensionManifestInspection,
   type ExtensionSource,
 } from '@forage/agent-runtime'
 import {
@@ -143,46 +140,23 @@ export async function inspectExtensionSource(
     )
   }
 
-  let inspection: ExtensionManifestInspection
+  let manifest: NonNullable<ExtensionCatalogEntry['manifest']>
   try {
-    inspection = parseExtensionManifestInspection(serialized)
+    manifest = parseExtensionManifest(serialized)
   } catch {
-    return errorEntry(candidate.source, diagnostic('invalid_manifest', 'forage.extension.json is malformed or contains unsupported declarations.'))
+    return errorEntry(candidate.source, diagnostic(
+      'invalid_manifest',
+      'forage.extension.json does not match the current Forage extension contract.',
+    ))
   }
 
   const sourceRevision = sha256(serialized)
   const provenance = {
     installationId: candidate.source.installationId,
-    extensionId: inspection.id,
+    extensionId: manifest.id,
     sourceKind: candidate.source.kind,
     sourceRevision,
   } as const
-  const compatible = extensionManifestSchema.safeParse(inspection)
-  if (!compatible.success) {
-    if (inspection.manifestVersion !== FORAGE_EXTENSION_MANIFEST_VERSION) {
-      diagnostics.push(diagnostic(
-        'incompatible_manifest_version',
-        `Manifest version ${inspection.manifestVersion} is not supported by this Forage version.`,
-      ))
-    }
-    if (inspection.apiVersion !== FORAGE_EXTENSION_API_VERSION) {
-      diagnostics.push(diagnostic(
-        'incompatible_api_version',
-        `Extension API version ${inspection.apiVersion} is not supported by this Forage version.`,
-      ))
-    }
-    if (diagnostics.length === 0) {
-      diagnostics.push(diagnostic('incompatible_manifest', 'The extension manifest is not compatible with this Forage version.'))
-    }
-    return extensionCatalogEntry(candidate, {
-      inspection,
-      provenance,
-      status: 'incompatible',
-      diagnostics,
-    })
-  }
-
-  const manifest = compatible.data
   if (candidate.source.kind !== 'local' && manifest.entry.endsWith('.ts')) {
     diagnostics.push(diagnostic(
       'typescript_entry_requires_local_source',
@@ -232,7 +206,6 @@ export async function inspectExtensionSource(
 
   return extensionCatalogEntry(candidate, {
     manifest,
-    inspection,
     provenance: { ...provenance, ...(entryDigest ? { entryDigest } : {}) },
     status,
     diagnostics,
@@ -243,13 +216,12 @@ function extensionCatalogEntry(
   candidate: InventoryCandidate,
   value: {
     manifest?: ExtensionCatalogEntry['manifest']
-    inspection: ExtensionManifestInspection
     provenance: ExtensionCatalogEntry['provenance']
     status: ExtensionCatalogEntry['status']
     diagnostics: ExtensionDiagnostic[]
   },
 ): ExtensionCatalogEntry {
-  const declaration = value.manifest ?? value.inspection
+  const declaration = value.manifest!
   return extensionCatalogSchema.shape.entries.element.parse({
     source: candidate.source,
     ...value,
@@ -257,6 +229,11 @@ function extensionCatalogEntry(
       ...tool,
       available: value.status === 'ready',
       globallyAuthorized: false,
+      diagnostics: value.status === 'ready' ? [] : value.diagnostics,
+    })),
+    executors: declaredExecutors(declaration).map((executor) => ({
+      ...executor,
+      available: value.status === 'ready',
       diagnostics: value.status === 'ready' ? [] : value.diagnostics,
     })),
   })
@@ -267,6 +244,7 @@ function errorEntry(source: ExtensionSource, ...diagnostics: ExtensionDiagnostic
     source,
     status: 'error',
     tools: [],
+    executors: [],
     diagnostics,
   })
 }
@@ -344,6 +322,12 @@ function applyStaticAvailability(
     toolIds: entry.manifest!.contributes.tools.map((tool) => tool.id),
   })), customHttpToolIds)
   const availabilityByTool = new Map(availability.map((item) => [`${item.installationId}:${item.toolId}`, item]))
+  const executorAvailability = resolveExtensionExecutorAvailability(readyEntries.map((entry) => ({
+    installationId: entry.source.installationId,
+    extensionId: entry.manifest!.id,
+    executorIds: declaredExecutors(entry.manifest!).map((executor) => executor.id),
+  })))
+  const availabilityByExecutor = new Map(executorAvailability.map((item) => [`${item.installationId}:${item.executorId}`, item]))
   const reserved = new Set<string>(RESERVED_EXTENSION_TOOL_IDS)
 
   return entries.map((entry) => {
@@ -364,26 +348,60 @@ function applyStaticAvailability(
         diagnostics: toolDiagnostic ? [...tool.diagnostics, toolDiagnostic] : tool.diagnostics,
       }
     })
+    const executors = (entry.executors ?? []).map((executor) => {
+      const item = availabilityByExecutor.get(`${entry.source.installationId}:${executor.id}`)
+      const executorDiagnostic = item && !item.available
+        ? diagnostic(
+          item.diagnosticCode ?? 'executor_collision',
+          `Skill executor ${entry.manifest?.id ?? entry.source.installationId}/${executor.id} conflicts with another active installation.`,
+          undefined,
+          undefined,
+          executor.id,
+        )
+        : undefined
+      if (executorDiagnostic) hasCollision = true
+      return {
+        ...executor,
+        available: executor.available && !executorDiagnostic,
+        diagnostics: executorDiagnostic ? [...executor.diagnostics, executorDiagnostic] : executor.diagnostics,
+      }
+    })
     if (!hasCollision) return entry
-    const addedDiagnostics = tools.flatMap((tool) => tool.diagnostics)
-      .filter((item) => !entry.diagnostics.some((existing) => existing.code === item.code && existing.toolId === item.toolId))
+    const addedDiagnostics = [...tools.flatMap((tool) => tool.diagnostics), ...executors.flatMap((executor) => executor.diagnostics)]
+      .filter((item) => !entry.diagnostics.some((existing) => (
+        existing.code === item.code && existing.toolId === item.toolId && existing.executorId === item.executorId
+      )))
     return extensionCatalogSchema.shape.entries.element.parse({
       ...entry,
       status: entry.status === 'ready' ? 'error' : entry.status,
       tools,
+      executors,
       diagnostics: [...entry.diagnostics, ...addedDiagnostics],
     })
   })
 }
 
-function diagnostic(code: string, message: string, diagnosticPath?: string, toolId?: string): ExtensionDiagnostic {
+function diagnostic(
+  code: string,
+  message: string,
+  diagnosticPath?: string,
+  toolId?: string,
+  executorId?: string,
+): ExtensionDiagnostic {
   return {
     code,
     severity: 'error',
     message,
     ...(diagnosticPath ? { path: diagnosticPath } : {}),
     ...(toolId ? { toolId } : {}),
+    ...(executorId ? { executorId } : {}),
   }
+}
+
+function declaredExecutors(
+  declaration: NonNullable<ExtensionCatalogEntry['manifest']>,
+) {
+  return declaration.contributes.executors ?? []
 }
 
 function isWithin(root: string, candidate: string): boolean {

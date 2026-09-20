@@ -47,4 +47,4 @@ See [Forage Architecture](docs/architecture.md) for the current component, autho
 
 ## Extension development
 
-Forage has a native extension manifest and host API inspired by Pi's registration style without using Pi's extension format. Start with the [Extensions guide](docs/extensions.md), [`@forage/extension-api`](packages/extension-api/README.md), and the [runnable reference extension](packages/extensions/README.md).
+Forage has a native extension manifest and host API inspired by Pi's registration style without using Pi's extension format. Start with the [Extensions guide](docs/extensions.md), [`@forage/extension-api`](packages/extension-api/README.md), and the [runnable reference extension](extensions/reference/README.md).

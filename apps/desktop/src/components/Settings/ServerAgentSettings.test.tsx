@@ -40,9 +40,9 @@ describe('server agent settings', () => {
     expect(screen.getByText('Publish agents and skills first.')).toBeTruthy()
 
     act(() => usePublishedServerConfiguration.getState().accept({
-      version: 2, revision: 4, customTools: [], globallyEnabledToolIds: [],
+      version: 3, revision: 4, customTools: [], globallyEnabledToolIds: [],
       agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Help.', toolIds: [] }],
-      skills: [{ id: 'research-inbox', label: 'research-inbox', description: 'Inbox', systemPrompt: 'Read.', agentId: 'agent', requiredToolIds: [] }],
+      skills: [{ id: 'research-inbox', execution: 'llm', label: 'research-inbox', description: 'Inbox', systemPrompt: 'Read.', agentId: 'agent', requiredToolIds: [] }],
     }))
 
     await user.click(screen.getByRole('combobox', { name: 'Add skill to GitHub' }))
@@ -54,9 +54,9 @@ describe('server agent settings', () => {
     vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
       if (command === 'server_agent_configuration') return {
         configuration: {
-          version: 2, revision: 3, customTools: [], globallyEnabledToolIds: [],
+          version: 3, revision: 3, customTools: [], globallyEnabledToolIds: [],
           agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Help.', toolIds: [] }],
-          skills: [{ id: 'document-repo', label: 'document-repo', description: 'Document', systemPrompt: 'Document', agentId: 'agent', requiredToolIds: [] }],
+          skills: [{ id: 'document-repo', execution: 'llm', label: 'document-repo', description: 'Document', systemPrompt: 'Document', agentId: 'agent', requiredToolIds: [] }],
         },
         publishedAt: timestamp,
       }

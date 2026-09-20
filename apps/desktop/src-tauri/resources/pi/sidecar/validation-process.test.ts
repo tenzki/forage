@@ -19,8 +19,8 @@ async function fixture(sourceCode: string) {
   const source = path.join(root, 'source')
   await mkdir(path.join(source, 'dist'), { recursive: true })
   await writeFile(path.join(source, 'forage.extension.json'), JSON.stringify({
-    manifestVersion: 1, id: 'dev.example.process', name: 'Process', version: '1.0.0',
-    description: 'Validation process fixture.', entry: './dist/index.mjs', apiVersion: '1',
+    id: 'dev.example.process', name: 'Process', version: '1.0.0',
+    description: 'Validation process fixture.', entry: './dist/index.mjs',
     contributes: { tools: [], hooks: [], settings: [] },
   }))
   await writeFile(path.join(source, 'dist/index.mjs'), sourceCode)

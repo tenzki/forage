@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => ({
       'scripts/**',
       'packages/extension-api/**',
       'packages/extension-host/**',
-      'packages/extensions/**',
+      'extensions/**',
       'apps/desktop/src-tauri/resources/pi/sidecar/**',
     ],
     env: loadEnv(mode, process.cwd(), ''),

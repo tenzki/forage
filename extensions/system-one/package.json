@@ -1,0 +1,22 @@
+{
+  "name": "@forage/extension-system-one",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@forage/extension-api": "workspace:*"
+  },
+  "devDependencies": {
+    "@forage/agent-runtime": "workspace:*",
+    "@forage/extension-host": "workspace:*",
+    "@types/node": "^26.2.0",
+    "typescript": "^5",
+    "vitest": "4.1.1"
+  }
+}

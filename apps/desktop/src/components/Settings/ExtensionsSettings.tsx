@@ -33,6 +33,10 @@ function sourceLabel(entry: ExtensionCatalogEntry): string {
   return `Git · ${entry.source.url}`
 }
 
+function declaredExecutors(entry: ExtensionCatalogEntry) {
+  return entry.manifest?.contributes.executors ?? []
+}
+
 function SettingsForm({ entry }: { entry: ExtensionCatalogEntry }) {
   const configuration = useExtensionStore((state) => extensionConfigurationFor(state, entry.source.installationId))
   const configure = useExtensionStore((state) => state.configure)
@@ -109,7 +113,7 @@ function SettingsForm({ entry }: { entry: ExtensionCatalogEntry }) {
 
 function declaredValues(
   values: Record<string, string | number | boolean> | undefined,
-  declarations: ExtensionSettingDeclaration[],
+  declarations: readonly ExtensionSettingDeclaration[],
 ): Record<string, string | number | boolean> {
   const allowed = new Set(declarations.filter((setting) => setting.type !== 'secret').map((setting) => setting.key))
   return Object.fromEntries(Object.entries(values ?? {}).filter(([key]) => allowed.has(key)))
@@ -168,7 +172,7 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
   const busy = useExtensionStore((state) => state.busyInstallationId === entry.source.installationId)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
   const [error, setError] = useState<string | null>(null)
-  const declaration = entry.manifest ?? entry.inspection
+  const declaration = entry.manifest
   if (!declaration) return <p className="settings-error">This source has no readable Forage manifest.</p>
   const act = async (action: () => Promise<void>) => {
     setError(null)
@@ -188,7 +192,7 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
         <div><dt>Version</dt><dd>{declaration.version}</dd></div>
         <div><dt>Source</dt><dd>{sourceLabel(entry)}</dd></div>
         <div><dt>Revision</dt><dd><code>{entry.provenance?.sourceRevision ?? 'Unavailable'}</code></dd></div>
-        <div><dt>Compatibility</dt><dd>{entry.manifest ? 'Forage manifest/API v1' : 'Not compatible with this Forage version'}</dd></div>
+        <div><dt>Contract</dt><dd>{entry.manifest ? 'Current Forage extension contract' : 'Invalid extension manifest'}</dd></div>
         <div><dt>Authorization</dt><dd>{entry.tools.filter((tool) => enabledToolIds.includes(tool.id)).length} of {entry.tools.length} tools globally enabled</dd></div>
       </dl>
 
@@ -198,6 +202,10 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
       </div>
 
       <section><h3>Declared tools</h3>{declaration.contributes.tools.length ? <ul>{declaration.contributes.tools.map((tool) => <li key={tool.id}><strong>{tool.name}</strong> <code>{tool.id}</code><small>{tool.description}</small></li>)}</ul> : <p className="settings-hint">No tools declared.</p>}</section>
+      <section><h3>Skill executors</h3>{declaredExecutors(entry).length ? <ul>{declaredExecutors(entry).map((executor) => {
+        const readiness = entry.executors?.find((candidate) => candidate.id === executor.id)
+        return <li key={executor.id}><strong>{executor.name}</strong> <code>{declaration.id}/{executor.id}</code><small>{executor.description} {executor.configuration.fields.length} configuration field(s). {readiness?.available ? 'Ready for explicit skill selection.' : 'Unavailable.'}</small></li>
+      })}</ul> : <p className="settings-hint">No skill executors declared.</p>}</section>
       <section><h3>Lifecycle hooks</h3><p className="settings-hint">{declaration.contributes.hooks.join(', ') || 'No hooks declared.'}</p></section>
       <section><h3>Declared settings</h3><p className="settings-hint">{declaration.contributes.settings.map((setting) => `${setting.label} (${setting.type}${setting.required ? ', required' : ''})`).join(' · ') || 'No settings declared.'}</p></section>
 
@@ -229,20 +237,20 @@ function InstallPreviewCard({ preview, busy, onBack, onInstall }: {
   onBack: () => void
   onInstall: () => void
 }) {
-  const declaration = preview.entry.manifest ?? preview.entry.inspection!
+  const declaration = preview.entry.manifest!
   const revision = preview.entry.source.kind === 'npm'
     ? preview.entry.source.resolvedVersion
     : preview.entry.source.kind === 'git'
       ? preview.entry.source.resolvedCommit
       : preview.entry.provenance?.sourceRevision ?? 'local directory'
-  const installable = Boolean(preview.entry.manifest && preview.entry.status !== 'error' && preview.entry.status !== 'incompatible')
+  const installable = Boolean(preview.entry.manifest && preview.entry.status !== 'error')
   return <div className="extension-install-preview">
     <h3>{declaration.name} <small>{declaration.version}</small></h3>
     <p>{declaration.description}</p>
     <dl className="extension-metadata">
       <div><dt>Identity</dt><dd><code>{declaration.id}</code></dd></div>
       <div><dt>Resolved revision</dt><dd><code>{revision}</code></dd></div>
-      <div><dt>Contributions</dt><dd>{declaration.contributes.tools.length} tool(s), {declaration.contributes.hooks.length} hook(s), {declaration.contributes.settings.length} setting(s)</dd></div>
+      <div><dt>Contributions</dt><dd>{declaration.contributes.tools.length} tool(s), {declaration.contributes.executors?.length ?? 0} executor(s), {declaration.contributes.hooks.length} hook(s), {declaration.contributes.settings.length} setting(s)</dd></div>
       <div><dt>Compatibility</dt><dd>{installable ? 'Compatible with this Forage version' : 'Cannot be installed — review diagnostics'}</dd></div>
     </dl>
     {preview.entry.diagnostics.length > 0 && <div className="extension-diagnostics"><pre>{preview.entry.diagnostics.map((item) => `[${item.severity}] ${item.message}`).join('\n')}</pre></div>}
@@ -273,7 +281,7 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
   useEffect(() => { if (!isLoaded && !isLoading) void refresh().catch(() => undefined) }, [isLoaded, isLoading, refresh])
   const selected = catalog?.entries.find((entry) => entry.source.installationId === selectedId)
   const groups = useMemo(() => [
-    ['Needs attention', catalog?.entries.filter((entry) => ['needs_review', 'needs_configuration', 'incompatible', 'error'].includes(entry.status)) ?? []],
+    ['Needs attention', catalog?.entries.filter((entry) => ['needs_review', 'needs_configuration', 'error'].includes(entry.status)) ?? []],
     ['Enabled', catalog?.entries.filter((entry) => entry.status === 'ready') ?? []],
     ['Disabled', catalog?.entries.filter((entry) => entry.status === 'disabled') ?? []],
   ] as const, [catalog])
@@ -309,7 +317,7 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
     <section className="settings-section extensions-settings" aria-labelledby="extensions-heading">
       <div className="extensions-toolbar"><div><h2 id="extensions-heading">Extensions</h2><p className="settings-hint">Inventory reads Forage manifests only. It does not execute code or contact package registries.</p></div><div className="settings-actions"><button type="button" className="settings-secondary" onClick={() => setShowInstall((shown) => !shown)}>Install</button><button type="button" className="settings-secondary" disabled={!extensionsDirectory} onClick={() => extensionsDirectory && void revealItemInDir(extensionsDirectory)}>Open folder</button><button type="button" className="settings-secondary" disabled={isLoading} onClick={() => void refresh().catch(() => undefined)}>{isLoading ? 'Refreshing…' : 'Refresh'}</button></div></div>
       <div className="extension-warning"><strong>Extensions are trusted local code</strong><p>Review the manifest and source before enabling. Installation, enablement, configuration, and model tool authorization are separate decisions.</p></div>
-      <div className="extension-local-only"><strong>Local execution only.</strong> When server execution is authoritative, local extension tools are unavailable and Forage will not fall back to this device.</div>
+      <div className="extension-local-only"><strong>Local execution only.</strong> When server execution is authoritative, local extension tools and skill executors are unavailable and Forage will not fall back to this device.</div>
       {showInstall && <div className="custom-tool-form extension-install-flow">
         <strong>Install or register an extension</strong>
         {!preview ? <>
@@ -326,7 +334,7 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
       </div>}
       {(actionError || error) && <p className="settings-error" role="alert">{actionError || error}</p>}
       {!isLoading && catalog?.entries.length === 0 && <div className="extension-empty"><strong>No extensions found</strong><p>Put a manifest-bearing directory in the Extensions folder or register a local development directory.</p></div>}
-      {groups.map(([label, entries]) => entries.length > 0 && <section key={label} className="extension-group" aria-label={label}><h3>{label} <span>{entries.length}</span></h3><div className="tool-list">{entries.map((entry) => { const declaration = entry.manifest ?? entry.inspection; return <button key={entry.source.installationId} type="button" className="tool-setting extension-row" onClick={() => setSelectedId(entry.source.installationId)}><span><strong>{declaration?.name ?? entry.source.installationId}</strong><small>{declaration ? `${declaration.version} · ${sourceLabel(entry)}` : sourceLabel(entry)}</small><code>{entry.tools.length} tool(s) · {declaration?.contributes.hooks.length ?? 0} hook(s)</code></span><span className={`extension-status is-${entry.status}`}>{statusLabel(entry)}</span></button> })}</div></section>)}
+      {groups.map(([label, entries]) => entries.length > 0 && <section key={label} className="extension-group" aria-label={label}><h3>{label} <span>{entries.length}</span></h3><div className="tool-list">{entries.map((entry) => { const declaration = entry.manifest; return <button key={entry.source.installationId} type="button" className="tool-setting extension-row" onClick={() => setSelectedId(entry.source.installationId)}><span><strong>{declaration?.name ?? entry.source.installationId}</strong><small>{declaration ? `${declaration.version} · ${sourceLabel(entry)}` : sourceLabel(entry)}</small><code>{entry.tools.length} tool(s) · {entry.executors?.length ?? 0} executor(s) · {declaration?.contributes.hooks.length ?? 0} hook(s)</code></span><span className={`extension-status is-${entry.status}`}>{statusLabel(entry)}</span></button> })}</div></section>)}
     </section>
   )
 }

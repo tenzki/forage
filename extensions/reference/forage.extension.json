@@ -1,0 +1,52 @@
+{
+  "id": "dev.forage.text-stats",
+  "name": "Text Stats",
+  "version": "0.1.0",
+  "description": "Counts words and Unicode characters in bounded text.",
+  "entry": "./dist/index.js",
+  "contributes": {
+    "tools": [
+      {
+        "id": "text_stats",
+        "name": "Text statistics",
+        "description": "Count whitespace-delimited words and Unicode characters in text."
+      }
+    ],
+    "hooks": ["run:start", "run:end"],
+    "settings": [
+      {
+        "key": "progress_message",
+        "label": "Progress message",
+        "description": "Message shown while text statistics are being calculated.",
+        "type": "string",
+        "default": "Counting text"
+      }
+    ],
+    "executors": [
+      {
+        "id": "label_notes",
+        "name": "Label matching notes",
+        "description": "Select notes containing configured text and return ordinary linked labels.",
+        "allowEmptyPrompt": true,
+        "configuration": {
+          "fields": [
+            { "key": "contains", "label": "Text to match", "type": "text", "required": true, "minLength": 1, "maxLength": 200 },
+            { "key": "prefix", "label": "Output prefix", "type": "text", "default": "Match", "maxLength": 100 },
+            { "key": "include_ids", "label": "Include stable IDs", "type": "boolean", "default": false }
+          ],
+          "branches": [
+            {
+              "when": { "field": "include_ids", "equals": true },
+              "fields": [
+                { "key": "id_separator", "label": "ID separator", "type": "choice", "options": [
+                  { "value": "dash", "label": "Dash" },
+                  { "value": "colon", "label": "Colon" }
+                ], "default": "dash" }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -38,16 +38,17 @@ export function buildServerAgentConfiguration(
     ...new Set(ids.map((id) => serverToolIds.get(id) ?? id)),
   ]
   return {
-    version: 2,
+    version: 3,
     revision,
     agents: settings.agents.map((agent) => ({
       id: agent.id, name: agent.name, description: agent.description, systemPrompt: agent.systemPrompt,
       toolIds: normalizeToolIds(agent.toolIds),
     })),
-    skills: settings.skills.map((skill) => ({
-      ...skill,
-      requiredToolIds: normalizeToolIds(skill.requiredToolIds),
-    })),
+    skills: settings.skills.map((skill) => (
+      'execution' in skill && skill.execution === 'extension'
+        ? skill
+        : { ...skill, execution: 'llm' as const, requiredToolIds: normalizeToolIds(skill.requiredToolIds) }
+    )),
     customTools: settings.customTools.map((tool) => ({
       ...tool,
       id: serverToolIds.get(tool.id)!,

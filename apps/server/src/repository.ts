@@ -10,8 +10,8 @@ import {
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
 import { createOutlineSchema, findSystemNode, queryCanonicalOutline } from '@forage/document'
 import { InMemoryAgentStore, type AgentStore } from './agentStore.js'
-import type { AgentDefinition, StructuredResult } from '@forage/agent-runtime'
-import { resolveEffectiveToolIds, type RunInput } from '@forage/agent-runtime'
+import type { AgentDefinition, StructuredResult, StructuredResultV1 } from '@forage/agent-runtime'
+import { requireStructuredResultV1, resolveEffectiveToolIds, type RunInput } from '@forage/agent-runtime'
 import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
 export type TokenScope = 'notes:create' | 'sync' | 'agents:read' | 'agents:execute' | 'agents:manage'
@@ -322,6 +322,7 @@ export class InMemoryServerRepository implements ServerRepository {
     const admissions: Array<Parameters<AgentStore['admitRun']>[0]> = []
     for (const match of matches) {
       const skill = configuration.skills.find((candidate) => candidate.id === match.skillId)
+      if (skill?.execution === 'extension') continue
       const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
       const credentialRef = compute.credentialRef
       if (!skill || !agent || !await this.credentialAvailable(this.ownerId, this.outlineId, credentialRef)) continue
@@ -454,9 +455,10 @@ export class InMemoryServerRepository implements ServerRepository {
   }
 
   async commitAgentResult(runId: string, workerId: string, result: StructuredResult) {
+    const materializable = requireStructuredResultV1(result)
     const run = await this.agentStore.getRun(this.outlineId, runId)
     if (!run) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
-    await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, result)
+    await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, materializable)
     const target = queryCanonicalOutline(this.state!).resolve(run.input.target.parentId)
     if (target.state !== 'live') {
       await this.agentStore.completeUnplaced(runId, workerId, `target_${target.state}`)
@@ -465,16 +467,16 @@ export class InMemoryServerRepository implements ServerRepository {
     const ownership = await this.agentStore.renewLease(runId, workerId, new Date(), 60_000)
     if (!ownership.owned) throw new RepositoryError('conflict', 'Run lease was lost.')
     if (ownership.cancelRequested) throw new RepositoryError('conflict', 'Run cancellation was requested.')
-    const nodes = assignResultNodeIds(result.nodes, runId)
+    const nodes = assignResultNodeIds(materializable.nodes, runId)
     const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
     if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
-    const provenance = { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: result.sources.map((source) => source.url).slice(0, 20) }
+    const provenance = { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: materializable.sources.map((source) => source.url).slice(0, 20) }
     const event = parseEventEnvelope({
       id: `event_${randomUUID()}`, outlineId: run.outlineId, actorId: this.ownerId, deviceId: `agent_${this.instanceId}`,
       type: 'agent.result_committed', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
       baseRevision: this.revision, revision: this.revision + 1, origin: 'agent', agentProvenance: provenance,
       changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
-      payload: { runId, targetNodeId: run.input.target.parentId, nodes, sources: result.sources },
+      payload: { runId, targetNodeId: run.input.target.parentId, nodes, sources: materializable.sources },
     })
     this.revision += 1
     this.events.push(event)
@@ -493,7 +495,8 @@ export class InMemoryServerRepository implements ServerRepository {
     requireLiveCanonicalNode(queryCanonicalOutline(this.state!), targetNodeId, 'target')
     if (run.result) return run.result
     if (run.status !== 'completed_unplaced') throw new RepositoryError('conflict', 'Run output is not awaiting placement.')
-    const nodes = assignResultNodeIds(output.result.nodes, runId)
+    const materializable = requireStructuredResultV1(output.result)
+    const nodes = assignResultNodeIds(materializable.nodes, runId)
     const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
     if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
     const revision = this.revision + 1
@@ -501,9 +504,9 @@ export class InMemoryServerRepository implements ServerRepository {
       id: `event_${randomUUID()}`, outlineId: run.outlineId, actorId: principal.ownerId, deviceId: `agent_${this.instanceId}`,
       type: 'agent.result_committed', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
       baseRevision: this.revision, revision, origin: 'agent',
-      agentProvenance: { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: output.result.sources.map((source) => source.url) },
+      agentProvenance: { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: materializable.sources.map((source) => source.url) },
       changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
-      payload: { runId, targetNodeId, nodes, sources: output.result.sources },
+      payload: { runId, targetNodeId, nodes, sources: materializable.sources },
     })
     this.revision = revision
     this.events.push(event)
@@ -544,7 +547,7 @@ export class InMemoryServerRepository implements ServerRepository {
 
 export const NOTE_PROJECTOR_SCHEMA_VERSION = 1
 
-function assignResultNodeIds(nodes: StructuredResult['nodes'], runId: string, prefix = ''): Array<
+function assignResultNodeIds(nodes: StructuredResultV1['nodes'], runId: string, prefix = ''): Array<
   | { type: 'text'; nodeId: string; text: string; children?: ReturnType<typeof assignResultNodeIds> }
   | { type: 'image'; assetId: string; alt: string }
 > {

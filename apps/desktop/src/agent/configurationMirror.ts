@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { canonicalJson, sha256Hex } from '@forage/domain'
-import { portableAgentConfigurationSchema, type PortableAgentConfiguration } from '@forage/agent-runtime'
+import {
+  migrateAgentConfiguration,
+  portableAgentConfigurationSchema,
+  supportedAgentConfigurationSchema,
+  type PortableAgentConfiguration,
+  type SupportedAgentConfiguration,
+} from '@forage/agent-runtime'
 
 export interface ConfigurationMirror {
   version: 1
@@ -26,10 +32,17 @@ export class NativeConfigurationMirrorStore implements ConfigurationMirrorStore 
     const value = await invoke<unknown | null>('server_agent_configuration_mirror')
     if (!value) return null
     const candidate = value as Partial<ConfigurationMirror>
-    return candidate.version === 1 && typeof candidate.serverRevision === 'number'
-      && typeof candidate.canonicalHash === 'string' && typeof candidate.confirmedAt === 'string'
-      ? { ...candidate, configuration: portableAgentConfigurationSchema.parse(candidate.configuration) } as ConfigurationMirror
-      : null
+    if (candidate.version !== 1 || typeof candidate.serverRevision !== 'number'
+      || typeof candidate.canonicalHash !== 'string' || typeof candidate.confirmedAt !== 'string') return null
+    const parsed = supportedAgentConfigurationSchema.parse(candidate.configuration)
+    const configuration = migrateAgentConfiguration(parsed).configuration
+    return {
+      ...candidate,
+      canonicalHash: parsed.version === 3
+        ? candidate.canonicalHash
+        : await portableConfigurationHash(configuration),
+      configuration,
+    } as ConfigurationMirror
   }
 
   async save(mirror: ConfigurationMirror): Promise<void> {
@@ -37,8 +50,9 @@ export class NativeConfigurationMirrorStore implements ConfigurationMirrorStore 
   }
 }
 
-export async function portableConfigurationHash(configuration: PortableAgentConfiguration): Promise<string> {
-  const { revision: _revision, ...portable } = portableAgentConfigurationSchema.parse(configuration)
+export async function portableConfigurationHash(configuration: SupportedAgentConfiguration): Promise<string> {
+  const current = migrateAgentConfiguration(supportedAgentConfigurationSchema.parse(configuration)).configuration
+  const { revision: _revision, ...portable } = portableAgentConfigurationSchema.parse(current)
   return sha256Hex(canonicalJson(portable))
 }
 

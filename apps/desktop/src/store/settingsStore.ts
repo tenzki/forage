@@ -26,7 +26,7 @@ import {
   type CustomHttpToolDraft,
   type ToolOption,
 } from '../agent/tools'
-import type { PortableAgentConfiguration } from '@forage/agent-runtime'
+import { skillDefinitionSchema, type PortableAgentConfiguration } from '@forage/agent-runtime'
 
 const STORE_FILE = 'settings.json'
 const AUTH_MODE_FIELD = 'codexAuthMode'
@@ -140,7 +140,10 @@ function validSkills(value: unknown, agents: AgentDefinition[]): SkillDefinition
   return value.flatMap((candidate) => {
     if (!candidate || typeof candidate !== 'object') return []
     try {
-      const skill = validateSkillDraft(candidate as SkillDraft, agents)
+      const raw = candidate as Record<string, unknown>
+      const skill = raw.execution === 'extension'
+        ? skillDefinitionSchema.parse(candidate)
+        : validateSkillDraft(candidate as SkillDraft, agents)
       if (labels.has(skill.label)) return []
       labels.add(skill.label)
       return [skill]
@@ -361,7 +364,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   removeAgent: async (agentId) => {
-    if (get().skills.some((skill) => skill.agentId === agentId)) {
+    if (get().skills.some((skill) => (!('execution' in skill) || skill.execution === 'llm') && skill.agentId === agentId)) {
       throw new Error('Remove or reassign this agent’s skills first.')
     }
     const previous = get().agents

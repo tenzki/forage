@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS local_agent_runs (
     outline_id TEXT NOT NULL,
     snapshot_json TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN (
-        'queued', 'running', 'retry_wait', 'completed', 'failed', 'cancelled', 'interrupted'
+        'queued', 'running', 'retry_wait', 'completed', 'completed_unplaced', 'failed', 'cancelled', 'interrupted'
     )),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     result_identity TEXT UNIQUE,

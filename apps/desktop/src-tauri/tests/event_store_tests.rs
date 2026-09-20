@@ -2,6 +2,8 @@ use forage_lib::persistence::{
     AgentRunRecord, CheckpointRecord, EventRecord, EventStore, StorageMode,
 };
 use serde_json::json;
+use rusqlite::Connection;
+use uuid::Uuid;
 
 fn event(id: &str, base_revision: i64) -> EventRecord {
     EventRecord {
@@ -493,6 +495,106 @@ fn persists_local_agent_runs_ordered_activity_and_one_terminal_result() {
         "2026-08-31T10:00:04.000Z",
     );
     assert!(duplicate.is_err());
+}
+
+#[test]
+fn retains_unplaced_local_results_until_explicit_placement() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    store
+        .admit_agent_run(&agent_run("run-unplaced", "queued"))
+        .expect("admit run");
+    store
+        .begin_agent_attempt("run-unplaced", "2026-09-20T10:00:01.000Z")
+        .expect("begin attempt");
+    let result = json!({
+        "version": 2,
+        "nodes": [{ "type": "text", "segments": [{ "type": "text", "text": "Retained" }] }],
+        "sources": []
+    });
+    store
+        .settle_agent_run(
+            "run-unplaced",
+            "completed_unplaced",
+            Some("result:run-unplaced"),
+            Some(&result),
+            None,
+            "2026-09-20T10:00:02.000Z",
+        )
+        .expect("retain result");
+
+    let retained = store.agent_run("run-unplaced").unwrap().unwrap();
+    assert_eq!(retained.status, "completed_unplaced");
+    assert_eq!(retained.result.as_ref(), Some(&result));
+    assert_eq!(store.clear_agent_runs("outline-1").unwrap(), 0);
+    assert!(store.agent_run("run-unplaced").unwrap().is_some());
+
+    store
+        .place_agent_run_result("run-unplaced", "2026-09-20T10:00:03.000Z")
+        .expect("place result");
+    store
+        .place_agent_run_result("run-unplaced", "2026-09-20T10:00:04.000Z")
+        .expect("idempotent placement");
+    assert_eq!(
+        store.agent_run("run-unplaced").unwrap().unwrap().status,
+        "completed"
+    );
+    assert_eq!(store.clear_agent_runs("outline-1").unwrap(), 1);
+}
+
+#[test]
+fn migrates_existing_local_run_history_for_unplaced_results() {
+    let path = std::env::temp_dir().join(format!("forage-agent-runs-{}.sqlite3", Uuid::new_v4()));
+    let connection = Connection::open(&path).expect("open legacy database");
+    connection
+        .execute_batch(
+            "CREATE TABLE local_agent_runs (
+                id TEXT PRIMARY KEY NOT NULL,
+                outline_id TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN (
+                    'queued', 'running', 'retry_wait', 'completed', 'failed', 'cancelled', 'interrupted'
+                )),
+                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+                result_identity TEXT UNIQUE,
+                result_json TEXT,
+                retry_of_run_id TEXT REFERENCES local_agent_runs(id),
+                cancel_requested_at TEXT,
+                error_code TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK ((result_identity IS NULL) = (result_json IS NULL))
+            );
+            INSERT INTO local_agent_runs
+                (id,outline_id,snapshot_json,status,attempt_count,created_at,updated_at)
+            VALUES
+                ('legacy-run','outline-1','{}','completed',1,
+                 '2026-09-19T10:00:00.000Z','2026-09-19T10:00:01.000Z');",
+        )
+        .expect("create legacy run table");
+    drop(connection);
+
+    let store = EventStore::open(&path).expect("migrate event store");
+    assert_eq!(store.agent_run("legacy-run").unwrap().unwrap().status, "completed");
+    store
+        .admit_agent_run(&agent_run("new-run", "queued"))
+        .expect("admit after migration");
+    store
+        .begin_agent_attempt("new-run", "2026-09-20T10:00:01.000Z")
+        .expect("begin new run");
+    store
+        .settle_agent_run(
+            "new-run",
+            "completed_unplaced",
+            Some("result:new-run"),
+            Some(&json!({ "version": 2, "nodes": [{ "type": "text", "segments": [{ "type": "text", "text": "Saved" }] }], "sources": [] })),
+            None,
+            "2026-09-20T10:00:02.000Z",
+        )
+        .expect("retain after migration");
+    drop(store);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
+    }
 }
 
 #[test]

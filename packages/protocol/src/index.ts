@@ -142,6 +142,7 @@ export const serverStatusSchema = z.object({
   documentSchemaVersion: z.number().int().positive(),
   minimumClientVersion: z.string().trim().min(1).max(50),
   agentAdmissionVersions: z.array(z.number().int().positive()).min(1).optional(),
+  agentConfigurationVersions: z.array(z.number().int().positive()).min(1).optional(),
   streamVersions: z.array(z.number().int().positive()).min(1).optional(),
 }).strict()
 

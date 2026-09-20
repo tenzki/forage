@@ -1,4 +1,5 @@
 packages:
   - apps/*
   - packages/*
+  - extensions/*
   - apps/desktop/src-tauri/resources/pi/sidecar

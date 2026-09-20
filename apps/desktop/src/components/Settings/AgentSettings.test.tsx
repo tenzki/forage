@@ -4,11 +4,25 @@ import userEvent from '@testing-library/user-event'
 import { useSettingsStore } from '../../store/settingsStore'
 import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
 import { AgentSettings } from './AgentSettings'
+import type { ExtensionExecutorOption } from '../../store/extensionStore'
 
 vi.mock('../../agent/serverConfigurationSync', () => ({ publishLocalAgentConfiguration: vi.fn(async () => 'local_only') }))
 
 const saveSkill = vi.fn(async (_draft: unknown) => undefined)
 const removeSkill = vi.fn(async (_id: string) => undefined)
+const executor: ExtensionExecutorOption = {
+  extensionId: 'dev.example.notes', executorId: 'label_notes', name: 'Label notes',
+  description: 'Labels notes without an LLM.', sourceName: 'Notes', installationId: 'notes-install',
+  allowEmptyPrompt: true, available: true,
+  configuration: {
+    fields: [
+      { key: 'contains', label: 'Text to match', type: 'text', required: true, minLength: 1 },
+      { key: 'include_ids', label: 'Include IDs', type: 'boolean', default: false },
+      { key: 'labels', label: 'Label', type: 'repeat', minimumItems: 1, maximumItems: 2, fields: [{ key: 'name', label: 'Label name', type: 'text', default: 'match' }] },
+    ],
+    branches: [{ when: { field: 'include_ids', equals: true }, fields: [{ key: 'separator', label: 'Separator', type: 'choice', required: true, options: [{ value: 'dash', label: 'Dash' }] }] }],
+  },
+}
 
 beforeEach(() => {
   saveSkill.mockReset()
@@ -113,4 +127,59 @@ describe('AgentSettings skill form', () => {
     await user.click(screen.getByRole('button', { name: 'Save skill' }))
     expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'writer', requiredToolIds: [] }))
   })
+
+  it('offers extension declarations without creating a skill and saves generic conditional/repeated configuration', async () => {
+    const user = userEvent.setup()
+    render(<AgentSettings extensionExecutors={[executor]} reportError={vi.fn()} />)
+    expect(useSettingsStore.getState().skills).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: /Add skill/ }))
+    await user.type(screen.getByLabelText('Slash command'), 'label-notes')
+    await user.type(screen.getByLabelText('Skill description'), 'Label matching notes')
+    await user.selectOptions(screen.getByLabelText('Skill execution'), 'dev.example.notes/label_notes')
+    expect(screen.queryByLabelText('Skill agent')).toBeNull()
+    expect(screen.getAllByLabelText('Label name')).toHaveLength(1)
+    expect(screen.queryByLabelText('Separator')).toBeNull()
+    await user.type(screen.getByLabelText('Text to match'), 'urgent')
+    await user.click(screen.getByLabelText('Include IDs'))
+    expect((screen.getByLabelText('Separator') as HTMLSelectElement).value).toBe('dash')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+
+    expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining({
+      execution: 'extension',
+      executor: { extensionId: 'dev.example.notes', executorId: 'label_notes' },
+      configuration: { contains: 'urgent', include_ids: true, labels: [{ name: 'match' }], separator: 'dash' },
+    }))
+  })
+
+  it('retains and identifies a missing executor selection and configuration', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.setState({ skills: [{
+      id: 'missing', label: 'missing', description: 'Missing executor', execution: 'extension',
+      executor: { extensionId: 'dev.example.missing', executorId: 'classify' }, configuration: { retained: 'yes' },
+    }] })
+    render(<AgentSettings extensionExecutors={[]} reportError={vi.fn()} />)
+
+    const skills = screen.getByRole('region', { name: 'Skills' })
+    await user.click(within(skills).getByRole('button', { name: 'Edit' }))
+    expect((screen.getByLabelText('Skill execution') as HTMLSelectElement).value).toBe('dev.example.missing/classify')
+    expect((screen.getByRole('option', { name: /unavailable/i }) as HTMLOptionElement).disabled).toBe(true)
+    expect(screen.getByRole('alert').textContent).toContain('not installed')
+    expect(useSettingsStore.getState().skills[0]).toMatchObject({ configuration: { retained: 'yes' } })
+  })
+
+  it('surfaces generic declaration validation before saving an extension skill', async () => {
+    const user = userEvent.setup()
+    render(<AgentSettings extensionExecutors={[executor]} reportError={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Add skill/ }))
+    await user.type(screen.getByLabelText('Slash command'), 'labels')
+    await user.type(screen.getByLabelText('Skill description'), 'Labels')
+    await user.selectOptions(screen.getByLabelText('Skill execution'), 'dev.example.notes/label_notes')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+
+    expect(screen.getByRole('alert').textContent).toContain('highlighted extension configuration')
+    expect(screen.getByText(/field is required/i)).toBeTruthy()
+    expect(saveSkill).not.toHaveBeenCalled()
+  })
+
 })

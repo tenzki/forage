@@ -1,17 +1,7 @@
 import { z } from 'zod'
 
-export {
-  FORAGE_EXTENSION_API_VERSION,
-  FORAGE_EXTENSION_MANIFEST_SCHEMA,
-  FORAGE_EXTENSION_MANIFEST_VERSION,
-} from '@forage/extension-api'
-import {
-  FORAGE_EXTENSION_API_VERSION,
-  FORAGE_EXTENSION_MANIFEST_SCHEMA,
-  FORAGE_EXTENSION_MANIFEST_VERSION,
-} from '@forage/extension-api'
-
 export type {
+  ExtensionJsonObject,
   ExtensionJsonValue,
   ExtensionLogEntry,
   ExtensionManifest,
@@ -20,6 +10,22 @@ export type {
   ExtensionRunEndContext,
   ExtensionSettingDeclaration,
   ExtensionSettingValue,
+  ExtensionSkillAdmittedPlan,
+  ExtensionSkillConfigurationField,
+  ExtensionSkillConfigurationForm,
+  ExtensionSkillConfigurationValidation,
+  ExtensionSkillContextNode,
+  ExtensionSkillContextSnapshot,
+  ExtensionSkillExecutionContext,
+  ExtensionSkillExecutionInput,
+  ExtensionSkillExecutorContribution,
+  ExtensionSkillExecutorDefinition,
+  ExtensionSkillPreparedPlan,
+  ExtensionSkillPreparationContext,
+  ExtensionSkillPreparationInput,
+  ExtensionSkillResult,
+  ExtensionSkillValidationContext,
+  ExtensionSkillValidationInput,
   ExtensionToolDefinition,
   ExtensionToolExecutionContext,
   ExtensionToolInputSchema,
@@ -27,7 +33,12 @@ export type {
   ForageExtensionHost,
   ForageExtensionSetup,
 } from '@forage/extension-api'
-import type { ExtensionJsonValue, ExtensionManifest } from '@forage/extension-api'
+import type {
+  ExtensionJsonObject,
+  ExtensionJsonValue,
+  ExtensionManifest,
+  ExtensionSkillConfigurationField,
+} from '@forage/extension-api'
 
 export const RESERVED_EXTENSION_TOOL_IDS = [
   'emit_outline',
@@ -43,6 +54,10 @@ const MAX_DIAGNOSTICS = 100
 const MAX_EXTENSIONS = 128
 const MAX_TOOLS = 64
 const MAX_SETTINGS = 64
+const MAX_EXECUTORS = 32
+const MAX_FORM_FIELDS = 100
+const MAX_FORM_BRANCHES = 32
+const MAX_FORM_DEPTH = 6
 
 export const extensionIdSchema = z.string().trim().min(3).max(128)
   .regex(
@@ -95,6 +110,129 @@ export const extensionToolContributionSchema = z.object({
 }).strict()
 
 export const extensionHookNameSchema = z.enum(['run:start', 'run:end'])
+export const extensionExecutorIdSchema = z.string().trim().min(1).max(64)
+  .regex(/^[a-z][a-z0-9_-]*$/, 'Invalid executor identifier')
+
+const formFieldBase = {
+  key: settingKeySchema,
+  label: z.string().trim().min(1).max(100),
+  description: z.string().trim().min(1).max(500).optional(),
+  required: z.boolean().optional(),
+}
+const stringFormField = (type: 'text' | 'multiline') => z.object({
+  ...formFieldBase,
+  type: z.literal(type),
+  default: z.string().max(type === 'text' ? 10_000 : 20_000).optional(),
+  minLength: z.number().int().nonnegative().max(20_000).optional(),
+  maxLength: z.number().int().positive().max(20_000).optional(),
+}).strict().refine(
+  (field) => field.minLength === undefined || field.maxLength === undefined || field.minLength <= field.maxLength,
+  'Minimum length cannot exceed maximum length',
+)
+
+export const extensionSkillConfigurationFieldSchema: z.ZodType<ExtensionSkillConfigurationField> = z.lazy(() => z.discriminatedUnion('type', [
+  stringFormField('text'),
+  stringFormField('multiline'),
+  z.object({
+    ...formFieldBase,
+    type: z.literal('number'),
+    default: z.number().finite().optional(),
+    minimum: z.number().finite().optional(),
+    maximum: z.number().finite().optional(),
+    integer: z.boolean().optional(),
+  }).strict().refine(
+    (field) => field.minimum === undefined || field.maximum === undefined || field.minimum <= field.maximum,
+    'Minimum cannot exceed maximum',
+  ).refine(
+    (field) => field.default === undefined
+      || (field.minimum === undefined || field.default >= field.minimum)
+      && (field.maximum === undefined || field.default <= field.maximum)
+      && (!field.integer || Number.isInteger(field.default)),
+    'Default must satisfy the declared numeric bounds',
+  ),
+  z.object({ ...formFieldBase, type: z.literal('boolean'), default: z.boolean().optional() }).strict(),
+  z.object({
+    ...formFieldBase,
+    type: z.literal('choice'),
+    options: z.array(z.object({
+      value: z.string().min(1).max(200),
+      label: z.string().trim().min(1).max(100),
+      description: z.string().trim().min(1).max(500).optional(),
+    }).strict()).min(1).max(50)
+      .refine((options) => uniqueBy(options, (option) => option.value), 'Choice values must be unique'),
+    default: z.string().min(1).max(200).optional(),
+  }).strict().refine(
+    (field) => field.default === undefined || field.options.some((option) => option.value === field.default),
+    'Default must match a declared choice',
+  ),
+  z.object({
+    ...formFieldBase,
+    type: z.literal('object'),
+    fields: z.array(extensionSkillConfigurationFieldSchema).min(1).max(MAX_FORM_FIELDS),
+  }).strict(),
+  z.object({
+    ...formFieldBase,
+    type: z.literal('repeat'),
+    minimumItems: z.number().int().nonnegative().max(50).optional(),
+    maximumItems: z.number().int().positive().max(50),
+    fields: z.array(extensionSkillConfigurationFieldSchema).min(1).max(MAX_FORM_FIELDS),
+  }).strict().refine(
+    (field) => field.minimumItems === undefined || field.minimumItems <= field.maximumItems,
+    'Minimum items cannot exceed maximum items',
+  ),
+]))
+
+function validateFormFields(
+  fields: readonly ExtensionSkillConfigurationField[],
+  context: z.RefinementCtx,
+  path: Array<string | number>,
+  state: { count: number },
+  depth = 1,
+): void {
+  if (depth > MAX_FORM_DEPTH) {
+    context.addIssue({ code: 'custom', path, message: `Configuration form exceeds maximum depth of ${MAX_FORM_DEPTH}` })
+    return
+  }
+  const keys = new Set<string>()
+  fields.forEach((field, index) => {
+    state.count += 1
+    if (keys.has(field.key)) context.addIssue({ code: 'custom', path: [...path, index, 'key'], message: `Duplicate field key: ${field.key}` })
+    keys.add(field.key)
+    if (field.type === 'object' || field.type === 'repeat') {
+      validateFormFields(field.fields, context, [...path, index, 'fields'], state, depth + 1)
+    }
+  })
+}
+
+export const extensionSkillConfigurationFormSchema = z.object({
+  fields: z.array(extensionSkillConfigurationFieldSchema).max(MAX_FORM_FIELDS),
+  branches: z.array(z.object({
+    when: z.object({
+      field: settingKeySchema,
+      equals: z.union([z.string().max(20_000), z.number().finite(), z.boolean(), z.null()]),
+    }).strict(),
+    fields: z.array(extensionSkillConfigurationFieldSchema).min(1).max(MAX_FORM_FIELDS),
+  }).strict()).max(MAX_FORM_BRANCHES).optional(),
+}).strict().superRefine((form, context) => {
+  const state = { count: 0 }
+  validateFormFields(form.fields, context, ['fields'], state)
+  form.branches?.forEach((branch, index) => validateFormFields(branch.fields, context, ['branches', index, 'fields'], state))
+  if (state.count > MAX_FORM_FIELDS) context.addIssue({ code: 'custom', message: `Configuration form exceeds ${MAX_FORM_FIELDS} fields` })
+  const rootKeys = new Set(form.fields.map((field) => field.key))
+  form.branches?.forEach((branch, index) => {
+    if (!rootKeys.has(branch.when.field)) {
+      context.addIssue({ code: 'custom', path: ['branches', index, 'when', 'field'], message: 'Conditional field must reference a top-level field' })
+    }
+  })
+})
+
+export const extensionSkillExecutorContributionSchema = z.object({
+  id: extensionExecutorIdSchema,
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().min(1).max(500),
+  allowEmptyPrompt: z.boolean().optional(),
+  configuration: extensionSkillConfigurationFormSchema,
+}).strict()
 
 const settingBase = {
   key: settingKeySchema,
@@ -153,15 +291,12 @@ export const extensionSettingDeclarationSchema = z.discriminatedUnion('type', [
   }).strict(),
 ])
 
-export const extensionManifestSchema = z.object({
-  $schema: z.literal(FORAGE_EXTENSION_MANIFEST_SCHEMA).optional(),
-  manifestVersion: z.literal(FORAGE_EXTENSION_MANIFEST_VERSION),
+export const extensionManifestSchema: z.ZodType<ExtensionManifest> = z.object({
   id: extensionIdSchema,
   name: z.string().trim().min(1).max(100),
   version: semverSchema,
   description: z.string().trim().min(1).max(1_000),
   entry: extensionEntryPathSchema,
-  apiVersion: z.literal(FORAGE_EXTENSION_API_VERSION),
   contributes: z.object({
     tools: z.array(extensionToolContributionSchema).max(MAX_TOOLS)
       .refine((tools) => uniqueBy(tools, (tool) => tool.id), 'Tool identifiers must be unique'),
@@ -169,39 +304,17 @@ export const extensionManifestSchema = z.object({
       .refine((hooks) => new Set(hooks).size === hooks.length, 'Hook names must be unique'),
     settings: z.array(extensionSettingDeclarationSchema).max(MAX_SETTINGS)
       .refine((settings) => uniqueBy(settings, (setting) => setting.key), 'Setting keys must be unique'),
+    executors: z.array(extensionSkillExecutorContributionSchema).max(MAX_EXECUTORS)
+      .refine((executors) => uniqueBy(executors, (executor) => executor.id), 'Executor identifiers must be unique')
+      .optional(),
   }).strict(),
 }).strict()
-
-export const extensionManifestInspectionSchema = z.object({
-  $schema: z.string().trim().min(1).max(500).optional(),
-  manifestVersion: z.number().int().nonnegative().max(1_000),
-  id: extensionIdSchema,
-  name: z.string().trim().min(1).max(100),
-  version: semverSchema,
-  description: z.string().trim().min(1).max(1_000),
-  entry: extensionEntryPathSchema,
-  apiVersion: z.string().trim().min(1).max(100),
-  contributes: z.object({
-    tools: z.array(extensionToolContributionSchema).max(MAX_TOOLS)
-      .refine((tools) => uniqueBy(tools, (tool) => tool.id), 'Tool identifiers must be unique'),
-    hooks: z.array(extensionHookNameSchema).max(2)
-      .refine((hooks) => new Set(hooks).size === hooks.length, 'Hook names must be unique'),
-    settings: z.array(extensionSettingDeclarationSchema).max(MAX_SETTINGS)
-      .refine((settings) => uniqueBy(settings, (setting) => setting.key), 'Setting keys must be unique'),
-  }).strict(),
-}).strict()
-
-export type ExtensionManifestInspection = z.infer<typeof extensionManifestInspectionSchema>
 
 export function parseExtensionManifest(serialized: string): ExtensionManifest {
   if (serialized.length > MAX_MANIFEST_CHARS) throw new Error('Extension manifest is too large')
   return extensionManifestSchema.parse(JSON.parse(serialized) as unknown)
 }
 
-export function parseExtensionManifestInspection(serialized: string): ExtensionManifestInspection {
-  if (serialized.length > MAX_MANIFEST_CHARS) throw new Error('Extension manifest is too large')
-  return extensionManifestInspectionSchema.parse(JSON.parse(serialized) as unknown)
-}
 
 const npmSpecSchema = z.string().trim().min(1).max(500)
   .regex(/^(?:npm:)?(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:@[^\s]+)?$/i, 'Invalid npm package specification')
@@ -269,6 +382,7 @@ export const extensionDiagnosticSchema = z.object({
   message: z.string().trim().min(1).max(2_000),
   path: z.string().trim().min(1).max(500).optional(),
   toolId: extensionToolIdSchema.optional(),
+  executorId: extensionExecutorIdSchema.optional(),
 }).strict()
 
 export type ExtensionDiagnostic = z.infer<typeof extensionDiagnosticSchema>
@@ -278,7 +392,6 @@ export const extensionStatusSchema = z.enum([
   'disabled',
   'needs_configuration',
   'ready',
-  'incompatible',
   'error',
 ])
 
@@ -296,16 +409,21 @@ export const extensionCatalogToolSchema = extensionToolContributionSchema.extend
   diagnostics: z.array(extensionDiagnosticSchema).max(MAX_DIAGNOSTICS),
 }).strict()
 
+export const extensionCatalogExecutorSchema = extensionSkillExecutorContributionSchema.extend({
+  available: z.boolean(),
+  diagnostics: z.array(extensionDiagnosticSchema).max(MAX_DIAGNOSTICS),
+}).strict()
+
 export const extensionCatalogEntrySchema = z.object({
   source: extensionSourceSchema,
   manifest: extensionManifestSchema.optional(),
-  inspection: extensionManifestInspectionSchema.optional(),
   provenance: extensionProvenanceSchema.optional(),
   status: extensionStatusSchema,
   tools: z.array(extensionCatalogToolSchema).max(MAX_TOOLS),
+  executors: z.array(extensionCatalogExecutorSchema).max(MAX_EXECUTORS).optional(),
   diagnostics: z.array(extensionDiagnosticSchema).max(MAX_DIAGNOSTICS),
 }).strict().superRefine((entry, context) => {
-  const declaration = entry.manifest ?? entry.inspection
+  const declaration = entry.manifest
   if (declaration && !entry.provenance) {
     context.addIssue({ code: 'custom', path: ['provenance'], message: 'Manifest-bearing catalog entries require provenance' })
   }
@@ -327,8 +445,18 @@ export const extensionCatalogEntrySchema = z.object({
     if (declared.length !== cataloged.length || declared.some((toolId, index) => toolId !== cataloged[index])) {
       context.addIssue({ code: 'custom', path: ['tools'], message: 'Catalog tools must exactly match manifest declarations' })
     }
+    const declaredExecutors = 'executors' in declaration.contributes
+      ? (declaration.contributes.executors ?? []).map((executor) => executor.id).sort()
+      : []
+    const catalogedExecutors = (entry.executors ?? []).map((executor) => executor.id).sort()
+    if (declaredExecutors.length !== catalogedExecutors.length
+      || declaredExecutors.some((executorId, index) => executorId !== catalogedExecutors[index])) {
+      context.addIssue({ code: 'custom', path: ['executors'], message: 'Catalog executors must exactly match manifest declarations' })
+    }
   } else if (entry.tools.length > 0) {
     context.addIssue({ code: 'custom', path: ['tools'], message: 'Catalog tools require a valid manifest' })
+  } else if ((entry.executors?.length ?? 0) > 0) {
+    context.addIssue({ code: 'custom', path: ['executors'], message: 'Catalog executors require a valid manifest' })
   }
   if (entry.status === 'ready' && (!entry.manifest || !entry.provenance)) {
     context.addIssue({ code: 'custom', path: ['status'], message: 'Ready extensions require a valid manifest and provenance' })
@@ -451,6 +579,48 @@ export const localExtensionSnapshotSchema = z.object({
 })
 
 export type LocalExtensionSnapshot = z.infer<typeof localExtensionSnapshotSchema>
+
+export const localExtensionExecutorSnapshotSchema = z.object({
+  version: z.literal(1),
+  catalogRevision: digestSchema,
+  configurationRevision: z.number().int().nonnegative(),
+  source: z.object({
+    installationId: extensionInstallationIdSchema,
+    extensionId: extensionIdSchema,
+    sourceRevision: z.string().trim().min(1).max(200),
+    entryDigest: digestSchema,
+    executorId: extensionExecutorIdSchema,
+  }).strict(),
+}).strict()
+
+export type LocalExtensionExecutorSnapshot = z.infer<typeof localExtensionExecutorSnapshotSchema>
+
+export function createLocalExtensionExecutorSnapshotFromCatalog(
+  catalog: ExtensionCatalog,
+  configurationRevision: number,
+  selection: { extensionId: string; executorId: string },
+): LocalExtensionExecutorSnapshot {
+  const matches = catalog.entries.filter((entry) => (
+    entry.status === 'ready'
+    && entry.manifest?.id === selection.extensionId
+    && entry.provenance?.entryDigest
+    && (entry.executors ?? []).some((executor) => executor.id === selection.executorId && executor.available)
+  ))
+  if (matches.length !== 1) throw new Error('Selected extension skill executor is unavailable or has conflicting ownership')
+  const entry = matches[0]!
+  return localExtensionExecutorSnapshotSchema.parse({
+    version: 1,
+    catalogRevision: catalog.revision,
+    configurationRevision,
+    source: {
+      installationId: entry.source.installationId,
+      extensionId: selection.extensionId,
+      sourceRevision: entry.provenance!.sourceRevision,
+      entryDigest: entry.provenance!.entryDigest,
+      executorId: selection.executorId,
+    },
+  })
+}
 
 export function createLocalExtensionSnapshotFromCatalog(
   catalog: ExtensionCatalog,
@@ -602,7 +772,7 @@ export const extensionManagementMessageSchema = z.union([
 export type ExtensionManagementRequest = z.infer<typeof extensionManagementRequestSchema>
 export type ExtensionManagementResponse = z.infer<typeof extensionManagementResponseSchema>
 
-const extensionJsonValueSchema: z.ZodType<ExtensionJsonValue> = z.lazy(() => z.union([
+export const extensionJsonValueSchema: z.ZodType<ExtensionJsonValue> = z.lazy(() => z.union([
   z.null(),
   z.boolean(),
   z.number().finite(),
@@ -611,6 +781,101 @@ const extensionJsonValueSchema: z.ZodType<ExtensionJsonValue> = z.lazy(() => z.u
   z.record(z.string().max(100), extensionJsonValueSchema)
     .refine((value) => Object.keys(value).length <= 100, 'JSON object has too many keys'),
 ]))
+
+const SECRET_LIKE_KEY = /(?:^|_)(?:api_?key|access_?token|refresh_?token|password|authorization|secret)(?:$|_)/i
+const DEVICE_AUTHORITY_KEY = /^(?:path|canonicalpath|requestedpath|sourcepath|entrypath|installpath|installationpath|trust|trusted|truststate|truststatus)$/
+
+function isDeviceAuthorityKey(key: string): boolean {
+  return DEVICE_AUTHORITY_KEY.test(key.replace(/[^A-Za-z0-9]/g, '').toLowerCase())
+}
+
+function jsonObjectIsPortable(value: unknown, depth = 0, state = { nodes: 0 }): boolean {
+  state.nodes += 1
+  if (state.nodes > 2_000 || depth > 8) return false
+  if (Array.isArray(value)) return value.every((entry) => jsonObjectIsPortable(entry, depth + 1, state))
+  if (!value || typeof value !== 'object') return true
+  return Object.entries(value as Record<string, unknown>).every(([key, entry]) => (
+    !SECRET_LIKE_KEY.test(key) && !isDeviceAuthorityKey(key) && jsonObjectIsPortable(entry, depth + 1, state)
+  ))
+}
+export const extensionJsonObjectSchema: z.ZodType<ExtensionJsonObject> = z.record(
+  z.string().min(1).max(100),
+  extensionJsonValueSchema,
+).refine((value) => Object.keys(value).length <= 100, 'JSON object has too many keys')
+  .refine(
+    (value) => jsonObjectIsPortable(value),
+    'Portable configuration exceeds JSON depth/count bounds or contains a secret, device path, or trust field',
+  )
+  .refine((value) => serializedJsonIsBounded(value), 'JSON object is too large')
+
+export interface ExtensionSkillConfigurationValidationIssue {
+  path: Array<string | number>
+  message: string
+}
+
+export function validateExtensionSkillConfiguration(
+  formValue: unknown,
+  configurationValue: unknown,
+): { valid: true } | { valid: false; issues: ExtensionSkillConfigurationValidationIssue[] } {
+  const form = extensionSkillConfigurationFormSchema.parse(formValue)
+  const configuration = extensionJsonObjectSchema.parse(configurationValue)
+  const issues: ExtensionSkillConfigurationValidationIssue[] = []
+  const activeFields = [
+    ...form.fields,
+    ...(form.branches ?? []).flatMap((branch) => configuration[branch.when.field] === branch.when.equals ? branch.fields : []),
+  ]
+  const validateFields = (
+    fields: readonly ExtensionSkillConfigurationField[],
+    value: ExtensionJsonObject,
+    path: Array<string | number>,
+    retainedFields: readonly ExtensionSkillConfigurationField[] = [],
+  ): void => {
+    const declared = new Set([...fields, ...retainedFields].map((field) => field.key))
+    Object.keys(value).filter((key) => !declared.has(key)).forEach((key) => issues.push({ path: [...path, key], message: 'Unknown configuration field.' }))
+    fields.forEach((field) => {
+      const fieldValue = value[field.key]
+      const fieldPath = [...path, field.key]
+      if (fieldValue === undefined) {
+        if (field.required) issues.push({ path: fieldPath, message: 'This field is required.' })
+        return
+      }
+      if (field.type === 'text' || field.type === 'multiline') {
+        if (typeof fieldValue !== 'string'
+          || (field.minLength !== undefined && fieldValue.length < field.minLength)
+          || (field.maxLength !== undefined && fieldValue.length > field.maxLength)) {
+          issues.push({ path: fieldPath, message: 'Value does not satisfy the declared text bounds.' })
+        }
+      } else if (field.type === 'number') {
+        if (typeof fieldValue !== 'number' || !Number.isFinite(fieldValue)
+          || (field.minimum !== undefined && fieldValue < field.minimum)
+          || (field.maximum !== undefined && fieldValue > field.maximum)
+          || (field.integer && !Number.isInteger(fieldValue))) {
+          issues.push({ path: fieldPath, message: 'Value does not satisfy the declared numeric bounds.' })
+        }
+      } else if (field.type === 'boolean') {
+        if (typeof fieldValue !== 'boolean') issues.push({ path: fieldPath, message: 'Expected a boolean.' })
+      } else if (field.type === 'choice') {
+        if (typeof fieldValue !== 'string' || !field.options.some((option) => option.value === fieldValue)) {
+          issues.push({ path: fieldPath, message: 'Value is not a declared choice.' })
+        }
+      } else if (field.type === 'object') {
+        if (!fieldValue || typeof fieldValue !== 'object' || Array.isArray(fieldValue)) issues.push({ path: fieldPath, message: 'Expected an object.' })
+        else validateFields(field.fields, fieldValue as ExtensionJsonObject, fieldPath)
+      } else if (field.type === 'repeat') {
+        if (!Array.isArray(fieldValue)
+          || (field.minimumItems !== undefined && fieldValue.length < field.minimumItems)
+          || fieldValue.length > field.maximumItems) {
+          issues.push({ path: fieldPath, message: 'Repeated group does not satisfy its item bounds.' })
+        } else fieldValue.forEach((item, index) => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) issues.push({ path: [...fieldPath, index], message: 'Expected an object.' })
+          else validateFields(field.fields, item as ExtensionJsonObject, [...fieldPath, index])
+        })
+      }
+    })
+  }
+  validateFields(activeFields, configuration, [], (form.branches ?? []).flatMap((branch) => branch.fields))
+  return issues.length ? { valid: false, issues: issues.slice(0, 100) } : { valid: true }
+}
 
 function serializedJsonIsBounded(value: unknown, maximum = MAX_JSON_CHARS): boolean {
   try {
@@ -660,6 +925,55 @@ export interface ExtensionToolAvailability {
   available: boolean
   diagnosticCode?: 'duplicate_extension_id' | 'duplicate_tool_provider' | 'custom_tool_collision' | 'reserved_tool_id'
   conflictingInstallationIds: string[]
+}
+
+export interface ExtensionExecutorAvailability {
+  installationId: string
+  extensionId: string
+  executorId: string
+  available: boolean
+  diagnosticCode?: 'duplicate_extension_id' | 'duplicate_executor_identity'
+  conflictingInstallationIds: string[]
+}
+
+export function resolveExtensionExecutorAvailability(
+  inputs: ReadonlyArray<{ installationId: string; extensionId: string; executorIds: readonly string[] }>,
+): ExtensionExecutorAvailability[] {
+  const parsed = z.array(z.object({
+    installationId: extensionInstallationIdSchema,
+    extensionId: extensionIdSchema,
+    executorIds: z.array(extensionExecutorIdSchema).max(MAX_EXECUTORS)
+      .refine((ids) => new Set(ids).size === ids.length, 'Executor identifiers must be unique'),
+  }).strict()).max(MAX_EXTENSIONS)
+    .refine((entries) => uniqueBy(entries, (entry) => entry.installationId), 'Installation identifiers must be unique')
+    .parse(inputs)
+  const ordered = [...parsed].sort((left, right) => left.installationId.localeCompare(right.installationId))
+  const extensionOwners = new Map<string, string[]>()
+  const executorOwners = new Map<string, string[]>()
+  for (const input of ordered) {
+    extensionOwners.set(input.extensionId, [...(extensionOwners.get(input.extensionId) ?? []), input.installationId])
+    for (const executorId of input.executorIds) {
+      const identity = `${input.extensionId}/${executorId}`
+      executorOwners.set(identity, [...(executorOwners.get(identity) ?? []), input.installationId])
+    }
+  }
+  return ordered.flatMap((input) => [...input.executorIds].sort().map((executorId) => {
+    const duplicateExtensions = extensionOwners.get(input.extensionId) ?? []
+    const executors = executorOwners.get(`${input.extensionId}/${executorId}`) ?? []
+    const conflict = duplicateExtensions.length > 1
+      ? { code: 'duplicate_extension_id' as const, ids: duplicateExtensions }
+      : executors.length > 1
+        ? { code: 'duplicate_executor_identity' as const, ids: executors }
+        : undefined
+    return {
+      installationId: input.installationId,
+      extensionId: input.extensionId,
+      executorId,
+      available: conflict === undefined,
+      ...(conflict ? { diagnosticCode: conflict.code } : {}),
+      conflictingInstallationIds: conflict?.ids.filter((id) => id !== input.installationId).sort() ?? [],
+    }
+  }))
 }
 
 export function resolveExtensionToolAvailability(

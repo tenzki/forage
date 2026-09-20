@@ -6,8 +6,8 @@ import {
   extensionCatalogSchema,
   extensionConfigurationSchema,
   extensionManagementMessageSchema,
-  extensionManifestInspectionSchema,
   extensionManifestSchema,
+  extensionSkillConfigurationFormSchema,
   extensionProgressSchema,
   extensionSourceRequestSchema,
   extensionSourceSchema,
@@ -15,19 +15,19 @@ import {
   extensionToolResultSchema,
   localExtensionSnapshotSchema,
   parseExtensionManifest,
+  createLocalExtensionExecutorSnapshotFromCatalog,
+  resolveExtensionExecutorAvailability,
   resolveExtensionToolAvailability,
+  validateExtensionSkillConfiguration,
   type ForageExtensionSetup,
 } from './extensions'
 
 const manifest = {
-  $schema: 'https://forage.app/schemas/extension-manifest-v1.json',
-  manifestVersion: 1,
   id: 'dev.forage.text-stats',
   name: 'Text Stats',
   version: '0.1.0',
   description: 'Counts words and characters in bounded text.',
   entry: './dist/index.js',
-  apiVersion: '1',
   contributes: {
     tools: [{
       id: 'text_stats',
@@ -51,25 +51,94 @@ const localSource = {
 
 const digest = 'a'.repeat(64)
 
+const executorManifest = {
+  id: 'dev.forage.summary-fixture',
+  name: 'Summary fixture',
+  version: '0.1.0',
+  description: 'Provides deterministic summaries.',
+  entry: './dist/index.js',
+  contributes: {
+    tools: [],
+    hooks: [],
+    settings: [],
+    executors: [{
+      id: 'summarize',
+      name: 'Summarize notes',
+      description: 'Deterministic non-evaluation fixture.',
+      configuration: {
+        fields: [
+          { key: 'heading', label: 'Heading', type: 'text', required: true },
+          { key: 'style', label: 'Style', type: 'choice', options: [{ value: 'brief', label: 'Brief' }, { value: 'full', label: 'Full' }] },
+          { key: 'sections', label: 'Sections', type: 'repeat', maximumItems: 5, fields: [{ key: 'name', label: 'Name', type: 'text' }] },
+        ],
+        branches: [{ when: { field: 'style', equals: 'full' }, fields: [{ key: 'details', label: 'Details', type: 'multiline' }] }],
+      },
+    }],
+  },
+} as const
+
 describe('Forage extension manifest contracts', () => {
-  it('accepts the native v1 manifest and rejects incompatible or Pi-shaped manifests', () => {
+  it('accepts the single current manifest and rejects versioned or Pi-shaped manifests', () => {
     expect(extensionManifestSchema.parse(manifest).id).toBe('dev.forage.text-stats')
-    expect(() => extensionManifestSchema.parse({ ...manifest, manifestVersion: 2 })).toThrow()
-    expect(() => extensionManifestSchema.parse({ ...manifest, apiVersion: '2' })).toThrow()
+    expect(() => extensionManifestSchema.parse({ ...manifest, manifestVersion: 1 })).toThrow()
+    expect(() => extensionManifestSchema.parse({ ...manifest, apiVersion: '1' })).toThrow()
     expect(() => extensionManifestSchema.parse({
       name: 'Pi extension',
       extensions: ['./index.ts'],
     })).toThrow()
   })
 
-  it('keeps well-formed future manifests inspectable without treating them as compatible', () => {
-    const inspection = extensionManifestInspectionSchema.parse({
-      ...manifest,
-      manifestVersion: 2,
-      apiVersion: '7',
+  it('accepts bounded generic executor forms inspectable without code import', () => {
+    expect(extensionManifestSchema.parse(executorManifest)).toEqual(executorManifest)
+    expect(extensionManifestSchema.parse(executorManifest).contributes.executors?.[0]).toMatchObject({
+      id: 'summarize', configuration: { fields: expect.any(Array), branches: expect.any(Array) },
     })
-    expect(inspection).toMatchObject({ manifestVersion: 2, apiVersion: '7' })
-    expect(() => extensionManifestSchema.parse(inspection)).toThrow()
+    expect(() => extensionManifestSchema.parse({
+      ...executorManifest,
+      contributes: { ...executorManifest.contributes, executors: [{ ...executorManifest.contributes.executors[0], configuration: { fields: [{ key: 'markup', label: 'Markup', type: 'html' }] } }] },
+    })).toThrow()
+    expect(() => extensionManifestSchema.parse({
+      ...executorManifest,
+      contributes: {
+        ...executorManifest.contributes,
+        executors: [{ ...executorManifest.contributes.executors[0], configuration: { fields: [], branches: [{ when: { field: 'missing', equals: true }, fields: [{ key: 'detail', label: 'Detail', type: 'text' }] }] } }],
+      },
+    })).toThrow(/top-level/i)
+    expect(() => extensionSkillConfigurationFormSchema.parse({
+      fields: [{ key: 'items', label: 'Items', type: 'repeat', maximumItems: 51, fields: [{ key: 'name', label: 'Name', type: 'text' }] }],
+    })).toThrow()
+  })
+
+  it('has no extension manifest or API version negotiation path', () => {
+    expect(() => extensionManifestSchema.parse({ ...manifest, manifestVersion: 7 })).toThrow()
+    expect(() => extensionManifestSchema.parse({ ...manifest, apiVersion: '7' })).toThrow()
+  })
+
+  it('validates generic values, conditional branches, objects, and repeated-group bounds', () => {
+    const form = {
+      fields: [
+        { key: 'mode', label: 'Mode', type: 'choice' as const, options: [{ value: 'simple', label: 'Simple' }, { value: 'advanced', label: 'Advanced' }] },
+        { key: 'items', label: 'Items', type: 'repeat' as const, minimumItems: 1, maximumItems: 2, fields: [
+          { key: 'label', label: 'Label', type: 'text' as const, required: true, maxLength: 10 },
+        ] },
+      ],
+      branches: [{ when: { field: 'mode', equals: 'advanced' }, fields: [
+        { key: 'details', label: 'Details', type: 'object' as const, fields: [{ key: 'enabled', label: 'Enabled', type: 'boolean' as const, required: true }] },
+      ] }],
+    }
+    expect(validateExtensionSkillConfiguration(form, {
+      mode: 'advanced', items: [{ label: 'One' }], details: { enabled: true },
+    })).toEqual({ valid: true })
+    expect(validateExtensionSkillConfiguration(form, {
+      mode: 'simple', items: [{ label: 'One' }], details: { enabled: 'retained while hidden' },
+    })).toEqual({ valid: true })
+    expect(validateExtensionSkillConfiguration(form, {
+      mode: 'advanced', items: [], details: { enabled: 'yes' }, extra: true,
+    })).toMatchObject({ valid: false, issues: expect.arrayContaining([
+      expect.objectContaining({ path: ['items'] }),
+      expect.objectContaining({ path: ['details', 'enabled'] }),
+      expect.objectContaining({ path: ['extra'] }),
+    ]) })
   })
 
   it('confines entry paths and rejects duplicate or invalid contributions', () => {
@@ -91,7 +160,7 @@ describe('Forage extension manifest contracts', () => {
   })
 
   it('bounds and strictly parses serialized manifests', () => {
-    expect(parseExtensionManifest(JSON.stringify(manifest))).toMatchObject({ manifestVersion: 1, apiVersion: '1' })
+    expect(parseExtensionManifest(JSON.stringify(manifest))).toMatchObject({ id: manifest.id, version: manifest.version })
     expect(() => parseExtensionManifest('{not json')).toThrow()
     expect(() => parseExtensionManifest(JSON.stringify({ ...manifest, extra: true }))).toThrow()
     expect(() => parseExtensionManifest(' '.repeat(64_001))).toThrow(/too large/i)
@@ -176,7 +245,7 @@ describe('Forage extension source, catalog, and configuration contracts', () => 
     }).sources[0].secretReferences).toEqual({ token: 'forage-extension/installation-1/token' })
 
     const portable = {
-      version: 2,
+      version: 3,
       revision: 1,
       agents: [],
       skills: [],
@@ -225,7 +294,7 @@ describe('Forage extension source, catalog, and configuration contracts', () => 
 })
 
 describe('Forage extension identity and collision policy', () => {
-  it('fails duplicate providers closed independent of input order', () => {
+  it('fails duplicate tool providers closed independent of input order', () => {
     const inputs = [
       { installationId: 'installation-b', extensionId: 'dev.example.second', toolIds: ['shared_tool'] },
       { installationId: 'installation-a', extensionId: 'dev.example.first', toolIds: ['shared_tool'] },
@@ -237,6 +306,52 @@ describe('Forage extension identity and collision policy', () => {
       expect.objectContaining({ installationId: 'installation-a', available: false, diagnosticCode: 'duplicate_tool_provider' }),
       expect.objectContaining({ installationId: 'installation-b', available: false, diagnosticCode: 'duplicate_tool_provider' }),
     ])
+  })
+
+  it('qualifies executor identity by extension and fails conflicting active installations closed', () => {
+    expect(resolveExtensionExecutorAvailability([
+      { installationId: 'a', extensionId: 'dev.example.same', executorIds: ['summarize'] },
+      { installationId: 'b', extensionId: 'dev.example.same', executorIds: ['summarize'] },
+      { installationId: 'c', extensionId: 'dev.example.other', executorIds: ['summarize'] },
+    ])).toEqual([
+      expect.objectContaining({ installationId: 'a', executorId: 'summarize', available: false, diagnosticCode: 'duplicate_extension_id' }),
+      expect.objectContaining({ installationId: 'b', executorId: 'summarize', available: false, diagnosticCode: 'duplicate_extension_id' }),
+      expect.objectContaining({ installationId: 'c', executorId: 'summarize', available: true }),
+    ])
+  })
+
+  it('creates executor admission snapshots only from one ready declared owner', () => {
+    const source = { ...localSource, installationId: 'executor-installation' }
+    const catalog = extensionCatalogSchema.parse({
+      version: 1,
+      revision: digest,
+      entries: [{
+        source,
+        manifest: executorManifest,
+        provenance: {
+          installationId: source.installationId,
+          extensionId: executorManifest.id,
+          sourceKind: 'local',
+          sourceRevision: 'b'.repeat(64),
+          entryDigest: 'c'.repeat(64),
+        },
+        status: 'ready',
+        tools: [],
+        executors: [{ ...executorManifest.contributes.executors[0], available: true, diagnostics: [] }],
+        diagnostics: [],
+      }],
+    })
+    const snapshot = createLocalExtensionExecutorSnapshotFromCatalog(catalog, 7, {
+      extensionId: executorManifest.id,
+      executorId: 'summarize',
+    })
+    expect(snapshot).toMatchObject({
+      configurationRevision: 7,
+      source: { installationId: source.installationId, executorId: 'summarize' },
+    })
+    expect(() => createLocalExtensionExecutorSnapshotFromCatalog(catalog, 7, {
+      extensionId: executorManifest.id, executorId: 'undeclared',
+    })).toThrow(/unavailable/i)
   })
 
   it('rejects duplicate extension identities, custom HTTP collisions, and reserved tools', () => {

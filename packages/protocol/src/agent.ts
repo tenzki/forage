@@ -2,7 +2,9 @@ import { z } from 'zod'
 import {
   activityEventSchema,
   agentConfigurationSchema,
+  portableAgentConfigurationV2Schema,
   portableAgentConfigurationSchema,
+  migrateAgentConfiguration,
   computeProfileSchema,
   runStatusSchema,
 } from '@forage/agent-runtime'
@@ -15,7 +17,11 @@ const uniqueIds = (maximum: number) => z.array(boundedId).max(maximum)
 
 export const agentConfigurationPublishRequestSchema = z.object({
   baseRevision: revision,
-  configuration: z.union([portableAgentConfigurationSchema, agentConfigurationSchema]),
+  configuration: z.union([
+    portableAgentConfigurationSchema,
+    portableAgentConfigurationV2Schema,
+    agentConfigurationSchema,
+  ]),
 }).strict().refine(
   ({ baseRevision, configuration }) => configuration.revision === baseRevision + 1,
   { path: ['configuration', 'revision'], message: 'Published configuration revision must advance baseRevision by one' },
@@ -25,6 +31,24 @@ export const agentConfigurationResponseSchema = z.object({
   configuration: portableAgentConfigurationSchema,
   publishedAt: timestamp,
 }).strict()
+
+const supportedAgentConfigurationResponseSchema = z.object({
+  configuration: z.union([
+    portableAgentConfigurationSchema,
+    portableAgentConfigurationV2Schema,
+    agentConfigurationSchema,
+  ]),
+  publishedAt: timestamp,
+}).strict()
+
+/** Read supported historical server responses into the one current portable shape. */
+export function parseAgentConfigurationResponse(value: unknown): z.infer<typeof agentConfigurationResponseSchema> {
+  const response = supportedAgentConfigurationResponseSchema.parse(value)
+  return agentConfigurationResponseSchema.parse({
+    ...response,
+    configuration: migrateAgentConfiguration(response.configuration).configuration,
+  })
+}
 
 export const computeProfilePublishRequestSchema = z.object({
   baseRevision: revision,

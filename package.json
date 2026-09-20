@@ -15,8 +15,8 @@
     "tauri": "pnpm --filter @forage/desktop tauri",
     "build": "turbo run build",
     "test": "pnpm test:extensions && vitest run --reporter=verbose",
-    "test:extensions": "turbo run test --filter=@forage/extension-api --filter=@forage/extension-host --filter=@forage/extensions --filter=forage-sidecar",
-    "test:workspace": "node --test scripts/workspace-layout.test.mjs"
+    "test:extensions": "turbo run test --filter=@forage/extension-api --filter=@forage/extension-host --filter=@forage/extension-system-one --filter=@forage/extensions --filter=forage-sidecar",
+    "test:workspace": "node --test scripts/*.test.mjs"
   },
   "pnpm": {
     "overrides": {

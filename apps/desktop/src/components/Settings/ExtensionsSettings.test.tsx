@@ -5,18 +5,17 @@ import { invoke } from '@tauri-apps/api/core'
 import type { ExtensionCatalog, ExtensionConfiguration, ExtensionManagementResponse } from '@forage/agent-runtime'
 import { ExtensionsSettings } from './ExtensionsSettings'
 import { useExtensionStore } from '../../store/extensionStore'
+import { useSettingsStore } from '../../store/settingsStore'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn(async () => undefined) }))
 
 const manifest = {
-  manifestVersion: 1 as const,
   id: 'dev.example.weather',
   name: 'Weather Tools',
   version: '1.0.0',
   description: 'Reads a configured weather service.',
   entry: './dist/index.js',
-  apiVersion: '1' as const,
   contributes: {
     tools: [{ id: 'weather_lookup', name: 'Weather lookup', description: 'Look up weather.' }],
     hooks: ['run:start' as const],
@@ -24,6 +23,12 @@ const manifest = {
       { key: 'region', label: 'Region', type: 'select' as const, required: true, options: [{ value: 'eu', label: 'Europe' }] },
       { key: 'token', label: 'API token', type: 'secret' as const, required: true },
     ],
+    executors: [{
+      id: 'weather_summary',
+      name: 'Weather summary',
+      description: 'Summarizes weather notes.',
+      configuration: { fields: [{ key: 'region', label: 'Region', type: 'text' as const }] },
+    }],
   },
 }
 
@@ -34,12 +39,16 @@ function catalog(status: 'needs_review' | 'needs_configuration' | 'ready' = 'nee
     entries: [{
       source: { kind: 'local', installationId: 'weather-install', requestedPath: '/extensions/weather', canonicalPath: '/extensions/weather' },
       manifest,
-      inspection: manifest,
       provenance: {
         installationId: 'weather-install', extensionId: manifest.id, sourceKind: 'local', sourceRevision: 'revision-1', entryDigest: 'b'.repeat(64),
       },
       status,
       tools: manifest.contributes.tools.map((tool) => ({ ...tool, available: status === 'ready', globallyAuthorized: false, diagnostics: [] })),
+      executors: manifest.contributes.executors.map((executor) => ({
+        ...executor,
+        available: status === 'ready',
+        diagnostics: [],
+      })),
       diagnostics: status === 'needs_configuration' ? [{ code: 'missing_required_setting', severity: 'warning', message: 'Required settings are missing.' }] : [],
     }],
   }
@@ -52,6 +61,14 @@ const configuration: ExtensionConfiguration = {
     installationId: 'weather-install', source: { kind: 'local', path: '/extensions/weather' }, enabled: true,
     trust: { accepted: true, extensionId: manifest.id }, settings: {}, secretReferences: {},
   }],
+}
+const selectedExecutorSkill = {
+  id: 'weather-filter',
+  label: 'weather-filter',
+  description: 'Keep relevant weather notes.',
+  execution: 'extension' as const,
+  executor: { extensionId: manifest.id, executorId: 'weather_summary' },
+  configuration: { region: 'eu' },
 }
 type InstallPreview = NonNullable<Extract<ExtensionManagementResponse, { ok: true }>['preview']>
 
@@ -74,6 +91,7 @@ beforeEach(() => {
     enable: vi.fn(async () => undefined), disable: vi.fn(async () => undefined), reload: vi.fn(async () => undefined),
     remove: vi.fn(async () => undefined), configure: vi.fn(async () => undefined),
   })
+  useSettingsStore.setState({ skills: [selectedExecutorSkill] })
 })
 
 describe('Extensions settings', () => {
@@ -89,6 +107,8 @@ describe('Extensions settings', () => {
     expect(screen.getByText(/Trusted local code/)).toBeTruthy()
     expect(screen.getByText('revision-1')).toBeTruthy()
     expect(screen.getByText(/Weather lookup/)).toBeTruthy()
+    expect(screen.getByText(/Weather summary/)).toBeTruthy()
+    expect(screen.getByText(/Unavailable/)).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Configure tools' }))
     expect(onConfigureTools).toHaveBeenCalledOnce()
   })
@@ -102,6 +122,34 @@ describe('Extensions settings', () => {
     expect(enable).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Trust and enable' }))
     expect(enable).toHaveBeenCalledWith('weather-install')
+    expect(useSettingsStore.getState().skills).toEqual([selectedExecutorSkill])
+  })
+
+  it('shows ready generic executor declarations', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    expect(screen.getByText(/1 configuration field/)).toBeTruthy()
+    expect(screen.getByText(/Ready for explicit skill selection/)).toBeTruthy()
+  })
+
+  it('preserves an explicit executor selection through reload, disable, and removal', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+
+    for (const [label, confirmation] of [['Reload', 'Confirm reload'], ['Disable', 'Confirm disable'], ['Remove', 'Confirm remove']] as const) {
+      await user.click(screen.getByRole('button', { name: label }))
+      await user.click(screen.getByRole('button', { name: confirmation }))
+    }
+
+    expect(useSettingsStore.getState().skills).toEqual([selectedExecutorSkill])
+    expect(useExtensionStore.getState().reload).toHaveBeenCalledWith('weather-install')
+    expect(useExtensionStore.getState().disable).toHaveBeenCalledWith('weather-install')
+    expect(useExtensionStore.getState().remove).toHaveBeenCalledWith('weather-install')
   })
 
   it('stores secret plaintext only in the native vault and sends references through management', async () => {
@@ -131,7 +179,7 @@ describe('Extensions settings', () => {
     await user.click(screen.getByRole('button', { name: 'Preview source' }))
     expect(previewInstall).toHaveBeenCalledWith({ kind: 'local', path: '/extensions/new-weather' })
     expect(await screen.findByText(/Installing only records this source/i)).toBeTruthy()
-    expect(screen.getByText(/1 tool\(s\), 1 hook\(s\), 2 setting\(s\)/)).toBeTruthy()
+    expect(screen.getByText(/1 tool\(s\), 1 executor\(s\), 1 hook\(s\), 2 setting\(s\)/)).toBeTruthy()
     expect(install).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Register source' }))

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import test from 'node:test'
@@ -19,6 +19,7 @@ test('the repository root is only the workspace orchestrator', () => {
   assert.equal('workspaces' in rootManifest, false)
   assert.match(workspace, /- apps\/\*/)
   assert.match(workspace, /- packages\/\*/)
+  assert.match(workspace, /- extensions\/\*/)
   assert.match(workspace, /- apps\/desktop\/src-tauri\/resources\/pi\/sidecar/)
   assert.equal(existsSync(path.join(repositoryRoot, 'package-lock.json')), false)
   assert.equal(
@@ -64,11 +65,13 @@ test('the portable agent runtime is a dependency-light workspace package', () =>
 test('extensions have isolated workspace projects and Node test environments', () => {
   const apiManifest = readJson('packages/extension-api/package.json')
   const hostManifest = readJson('packages/extension-host/package.json')
-  const extensionsManifest = readJson('packages/extensions/package.json')
+  const extensionsManifest = readJson('extensions/reference/package.json')
+  const systemOneManifest = readJson('extensions/system-one/package.json')
   const rootVitest = readFileSync(path.join(repositoryRoot, 'vitest.config.ts'), 'utf8')
   const apiVitest = readFileSync(path.join(repositoryRoot, 'packages/extension-api/vitest.config.ts'), 'utf8')
   const hostVitest = readFileSync(path.join(repositoryRoot, 'packages/extension-host/vitest.config.ts'), 'utf8')
-  const extensionsVitest = readFileSync(path.join(repositoryRoot, 'packages/extensions/vitest.config.ts'), 'utf8')
+  const extensionsVitest = readFileSync(path.join(repositoryRoot, 'extensions/reference/vitest.config.ts'), 'utf8')
+  const systemOneVitest = readFileSync(path.join(repositoryRoot, 'extensions/system-one/vitest.config.ts'), 'utf8')
   const sidecarManifest = readJson('apps/desktop/src-tauri/resources/pi/sidecar/package.json')
 
   assert.equal(apiManifest.name, '@forage/extension-api')
@@ -80,12 +83,15 @@ test('extensions have isolated workspace projects and Node test environments', (
   assert.equal(extensionsManifest.name, '@forage/extensions')
   assert.equal(extensionsManifest.private, true)
   assert.equal(extensionsManifest.dependencies['@forage/extension-api'], 'workspace:*')
+  assert.equal(systemOneManifest.name, '@forage/extension-system-one')
+  assert.equal(systemOneManifest.private, true)
+  assert.deepEqual(systemOneManifest.dependencies, { '@forage/extension-api': 'workspace:*' })
   assert.equal(sidecarManifest.dependencies['@forage/extension-host'], 'workspace:*')
   assert.equal(sidecarManifest.dependencies['@forage/agent-runtime'], 'workspace:*')
   assert.equal(typeof sidecarManifest.scripts.build, 'string')
   assert.equal(typeof sidecarManifest.scripts.typecheck, 'string')
 
-  for (const manifest of [apiManifest, hostManifest, extensionsManifest]) {
+  for (const manifest of [apiManifest, hostManifest, extensionsManifest, systemOneManifest]) {
     assert.equal(typeof manifest.scripts.build, 'string')
     assert.equal(typeof manifest.scripts.typecheck, 'string')
     assert.equal(typeof manifest.scripts.test, 'string')
@@ -94,11 +100,24 @@ test('extensions have isolated workspace projects and Node test environments', (
   assert.match(apiVitest, /environment: 'node'/)
   assert.match(hostVitest, /environment: 'node'/)
   assert.match(extensionsVitest, /environment: 'node'/)
+  assert.match(systemOneVitest, /environment: 'node'/)
   assert.match(rootVitest, /packages\/extension-api\/\*\*/)
   assert.match(rootVitest, /packages\/extension-host\/\*\*/)
-  assert.match(rootVitest, /packages\/extensions\/\*\*/)
+  assert.match(rootVitest, /extensions\/\*\*/)
   assert.match(rootVitest, /resources\/pi\/sidecar\/\*\*/)
-  assert.equal(existsSync(path.join(repositoryRoot, 'packages/extensions/forage.extension.json')), true)
+  assert.equal(existsSync(path.join(repositoryRoot, 'extensions/reference/forage.extension.json')), true)
+  assert.equal(existsSync(path.join(repositoryRoot, 'extensions/system-one/forage.extension.json')), true)
+})
+
+test('concrete extensions live under extensions, not shared packages', () => {
+  for (const entry of readdirSync(path.join(repositoryRoot, 'packages'), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    assert.equal(
+      existsSync(path.join(repositoryRoot, 'packages', entry.name, 'forage.extension.json')),
+      false,
+      `${entry.name} is an extension and must live under extensions/`,
+    )
+  }
 })
 
 test('Turbo treats development processes as persistent and uncached', () => {

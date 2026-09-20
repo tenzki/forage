@@ -6,6 +6,7 @@ import type {
   ExtensionProgress,
   ExtensionRunContext,
   ExtensionRunEndContext,
+  ExtensionSkillExecutorDefinition,
   ExtensionToolDefinition,
   ExtensionToolExecutionContext,
   ForageExtensionHost,
@@ -17,16 +18,19 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 async function loadReferenceExtension(): Promise<{
   tool: ExtensionToolDefinition
+  executor: ExtensionSkillExecutorDefinition
   start: (context: ExtensionRunContext) => void | Promise<void>
   end: (context: ExtensionRunEndContext) => void | Promise<void>
 }> {
   const tools: ExtensionToolDefinition[] = []
+  const executors: ExtensionSkillExecutorDefinition[] = []
   let start: ((context: ExtensionRunContext) => void | Promise<void>) | undefined
   let end: ((context: ExtensionRunEndContext) => void | Promise<void>) | undefined
   const host: ForageExtensionHost = {
     registerTool(tool) {
       tools.push(tool)
     },
+    registerSkillExecutor(executor) { executors.push(executor) },
     on(event, listener) {
       if (event === 'run:start') start = listener as typeof start
       else end = listener as typeof end
@@ -34,9 +38,10 @@ async function loadReferenceExtension(): Promise<{
   }
   await setup(host)
   expect(tools).toHaveLength(1)
+  expect(executors).toHaveLength(1)
   expect(start).toBeTypeOf('function')
   expect(end).toBeTypeOf('function')
-  return { tool: tools[0]!, start: start!, end: end! }
+  return { tool: tools[0]!, executor: executors[0]!, start: start!, end: end! }
 }
 
 async function loadTextStatsTool(): Promise<ExtensionToolDefinition> {
@@ -68,21 +73,74 @@ function createContext(signal: AbortSignal = new AbortController().signal): {
 }
 
 describe('text_stats reference extension', () => {
-  it('has a native v1 manifest matching its registered tool', async () => {
+  it('has a current native manifest matching its registered tool', async () => {
     const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'forage.extension.json'), 'utf8')) as {
-      manifestVersion: number
-      apiVersion: string
       entry: string
-      contributes: { tools: Array<{ id: string }>; hooks: unknown[]; settings: unknown[] }
+      contributes: { tools: Array<{ id: string }>; hooks: unknown[]; settings: unknown[]; executors: Array<{ id: string }> }
     }
     const { tool } = await loadReferenceExtension()
 
-    expect(manifest).toMatchObject({ manifestVersion: 1, apiVersion: '1', entry: './dist/index.js' })
+    expect(manifest).toMatchObject({ id: 'dev.forage.text-stats', version: '0.1.0', entry: './dist/index.js' })
     expect(manifest.contributes.tools.map(({ id }) => id)).toEqual([tool.id])
     expect(manifest.contributes.hooks).toEqual(['run:start', 'run:end'])
     expect(manifest.contributes.settings).toEqual([
       expect.objectContaining({ key: 'progress_message', type: 'string', default: 'Counting text' }),
     ])
+    expect(manifest.contributes.executors.map(({ id }) => id)).toEqual(['label_notes'])
+  })
+
+  it('proves generic configuration, preparation, and ordinary linked output with a non-evaluation executor', async () => {
+    const { executor } = await loadReferenceExtension()
+    const signal = new AbortController().signal
+    const operation = { signal, settings: {}, log: () => undefined }
+    const configuration = { contains: 'alpha', prefix: 'Found' }
+    await expect(executor.validateConfiguration({ configuration }, operation)).resolves.toEqual({ valid: true })
+    const context = {
+      prompt: '', invocation: { id: 'invocation', text: '/label-notes', documentOrder: 3 },
+      roots: [{ id: 'root', text: 'Notes', documentOrder: 0, children: [
+        { id: 'alpha', text: 'Alpha note', documentOrder: 1 },
+        { id: 'beta', text: 'Beta note', documentOrder: 2 },
+      ] }],
+      provenance: { ancestorPathIds: ['root'], localParentId: 'root', localBranchRootId: 'root', explicitLinkedRootIds: [] },
+    }
+    const plan = await executor.prepare({ runId: 'run', configuration, context }, { ...operation, reportProgress: () => undefined })
+    expect(plan.selectedNodeIds).toEqual(['alpha'])
+    await expect(executor.execute({
+      runId: 'run', configuration, context, plan: { ...plan, admittedReferenceIds: ['alpha'] },
+    }, { ...operation, secrets: {}, reportProgress: () => undefined })).resolves.toEqual({
+      nodes: [{ type: 'text', segments: [
+        { type: 'text', text: 'Found: ' },
+        { type: 'internal-reference', nodeId: 'alpha', label: 'Alpha note' },
+      ] }],
+    })
+  })
+
+  it('uses conditional configuration generically and honors cancellation without a model', async () => {
+    const { executor } = await loadReferenceExtension()
+    const context = {
+      prompt: '', invocation: { id: 'invocation', text: '/label-notes', documentOrder: 2 },
+      roots: [{ id: 'alpha', text: 'Alpha note', documentOrder: 1 }],
+      provenance: { ancestorPathIds: [], explicitLinkedRootIds: [] },
+    }
+    const configuration = { contains: 'alpha', prefix: 'Found', include_ids: true, id_separator: 'colon' }
+    const signal = new AbortController().signal
+    const operation = { signal, settings: {}, log: () => undefined, reportProgress: () => undefined }
+    const prepared = await executor.prepare({ runId: 'run', configuration, context }, operation)
+
+    await expect(executor.execute({
+      runId: 'run', configuration, context, plan: { ...prepared, admittedReferenceIds: ['alpha'] },
+    }, { ...operation, secrets: {} })).resolves.toEqual({
+      nodes: [{ type: 'text', segments: [
+        { type: 'text', text: 'Found: alpha: ' },
+        { type: 'internal-reference', nodeId: 'alpha', label: 'Alpha note' },
+      ] }],
+    })
+
+    const cancelled = new AbortController()
+    cancelled.abort(new Error('cancelled fixture'))
+    await expect(executor.execute({
+      runId: 'cancelled', configuration, context, plan: { ...prepared, admittedReferenceIds: ['alpha'] },
+    }, { ...operation, signal: cancelled.signal, secrets: {} })).rejects.toThrow(/cancelled fixture/i)
   })
 
   it.each([

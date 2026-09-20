@@ -39,7 +39,7 @@ import {
   SYSTEM_NODE_REJECTION_MESSAGE,
 } from './editor/systemNodeGuards'
 import { captureStepBatch, createOutlineSchema, findSystemNode } from '@forage/document'
-import { focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
+import { currentBulletId, focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
@@ -51,6 +51,7 @@ import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
 import { useExtensionStore } from './store/extensionStore'
+import { placeRetainedExtensionSkillResult } from './agent/extensionResultPlacement'
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -101,6 +102,7 @@ export default function App() {
   const agentErrorPresence = useMotionPresence(Boolean(agentError), 250)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
+  const extensionRunCancellations = useRef(new Map<string, () => void>())
   const loadSettings = useSettingsStore((state) => state.load)
   const refreshExtensions = useExtensionStore((state) => state.refresh)
   const [session] = useState(() => new OutlineSession())
@@ -123,8 +125,41 @@ export default function App() {
     selectBullet(editor, nodeId)
   }, [editor])
 
+  const placeRetainedResult = useCallback(async (runId: string) => {
+    if (!editor) return
+    const targetNodeId = currentBulletId(editor)
+    if (!targetNodeId) {
+      setAgentError('Select a live bullet before placing the retained result.')
+      return
+    }
+    try {
+      const run = await session.agentRun(runId)
+      if (!run) throw new Error('The retained extension result is no longer available.')
+      const nodeIds = await placeRetainedExtensionSkillResult(editor, run, targetNodeId, session)
+      setActivityCalls((calls) => calls.map((call) => call.id === runId
+        ? { ...call, placementPending: false, status: 'complete' }
+        : call))
+      const firstNodeId = nodeIds[0]
+      if (firstNodeId) {
+        handleActivity({
+          id: `outline-${runId}`,
+          callId: runId,
+          phase: 'complete',
+          kind: 'output',
+          label: 'Retained result placed',
+          nodeId: firstNodeId,
+        })
+      }
+      setAgentError(null)
+    } catch (error) {
+      setAgentError(errorMessage(error))
+    }
+  }, [editor, handleActivity, session])
+
   const clearActivity = useCallback(() => {
-    setActivityCalls([])
+    // A retained paid result is not disposable activity history. Keep its
+    // recovery affordance until the user places it successfully.
+    setActivityCalls((calls) => calls.filter((call) => call.placementPending))
     void Promise.all([
       session.clearAgentRunHistory(),
       serverRunManager.clearFinishedHistory(),
@@ -601,6 +636,10 @@ export default function App() {
               onActivity={handleActivity}
               onBeforeServerRun={prepareServerAgentRun}
               onAfterServerRun={applyServerAgentResult}
+              onRegisterExtensionCancellation={(runId, cancel) => {
+                if (cancel) extensionRunCancellations.current.set(runId, cancel)
+                else extensionRunCancellations.current.delete(runId)
+              }}
             />
             <TagMenu editor={editor} />
             <InternalLinkMenu editor={editor} />
@@ -627,6 +666,9 @@ export default function App() {
           collapsed={activitySidebarCollapsed}
           onClear={clearActivity}
           onOpenNode={openActivityNode}
+          onPlaceResult={(runId) => void placeRetainedResult(runId)}
+          canCancel={(runId) => extensionRunCancellations.current.has(runId)}
+          onCancel={(runId) => extensionRunCancellations.current.get(runId)?.()}
         />
       </main>
       {shortcutsPresence.mounted && (

@@ -19,18 +19,35 @@ async function temporaryDirectory(prefix = 'forage-extension-inventory-'): Promi
 
 function manifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    $schema: 'https://forage.app/schemas/extension-manifest-v1.json',
-    manifestVersion: 1,
     id: 'dev.example.weather',
     name: 'Weather',
     version: '1.0.0',
     description: 'Reports deterministic fixture weather.',
     entry: './dist/index.js',
-    apiVersion: '1',
     contributes: {
       tools: [{ id: 'weather_lookup', name: 'Weather lookup', description: 'Look up weather.' }],
       hooks: [],
       settings: [],
+    },
+    ...overrides,
+  }
+}
+
+function executorManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'dev.example.summary',
+    name: 'Summary fixture',
+    version: '1.0.0',
+    description: 'Provides deterministic summaries.',
+    entry: './dist/index.js',
+    contributes: {
+      tools: [],
+      hooks: [],
+      settings: [],
+      executors: [{
+        id: 'summarize', name: 'Summarize', description: 'Formats selected notes.',
+        configuration: { fields: [{ key: 'heading', label: 'Heading', type: 'text' }] },
+      }],
     },
     ...overrides,
   }
@@ -84,6 +101,22 @@ describe('manifest-only extension inventory', () => {
     expect(globalThis).not.toHaveProperty('__forageExtensionFixtureLoaded')
   })
 
+  it('shows untrusted executor forms without importing executor code', async () => {
+    const root = await temporaryDirectory()
+    const discovered = path.join(root, 'extensions', 'summary')
+    await writeExtension(discovered, executorManifest(), 'throw new Error("untrusted executor must not import")')
+
+    const [entry] = (await inventoryExtensions({ configurationRoot: root })).entries
+
+    expect(entry).toMatchObject({
+      status: 'needs_review',
+      executors: [{
+        id: 'summarize', available: false,
+        configuration: { fields: [{ key: 'heading', type: 'text' }] },
+      }],
+    })
+  })
+
   it('inventories configured local and managed sources without loading either entry', async () => {
     const root = await temporaryDirectory()
     const local = path.join(root, 'projects', 'local-weather')
@@ -118,21 +151,18 @@ describe('manifest-only extension inventory', () => {
     expect(catalog.entries.every((entry) => entry.status === 'needs_review')).toBe(true)
   })
 
-  it('keeps future manifest and API versions inspectable but unavailable', async () => {
+  it('rejects manifests with removed version discriminators without importing their entry', async () => {
     const root = await temporaryDirectory()
-    const extension = path.join(root, 'extensions', 'future')
-    await writeExtension(extension, manifest({ manifestVersion: 2, apiVersion: '7' }))
+    const extension = path.join(root, 'extensions', 'versioned')
+    await writeExtension(extension, manifest({ manifestVersion: 1, apiVersion: '1' }), 'throw new Error("invalid manifest must not import")')
 
     const [entry] = (await inventoryExtensions({ configurationRoot: root })).entries
 
-    expect(entry.status).toBe('incompatible')
+    expect(entry.status).toBe('error')
     expect(entry.manifest).toBeUndefined()
-    expect(entry.inspection).toMatchObject({ manifestVersion: 2, apiVersion: '7', id: 'dev.example.weather' })
-    expect(entry.tools).toEqual([expect.objectContaining({ id: 'weather_lookup', available: false })])
-    expect(entry.diagnostics.map((item) => item.code)).toEqual([
-      'incompatible_manifest_version',
-      'incompatible_api_version',
-    ])
+    expect(entry.tools).toEqual([])
+    expect(entry.executors).toEqual([])
+    expect(entry.diagnostics).toEqual([expect.objectContaining({ code: 'invalid_manifest' })])
   })
 
   it('confines manifest and entry symlinks to the extension root', async () => {
@@ -185,6 +215,32 @@ describe('manifest-only extension inventory', () => {
       }),
     })
     expect(ready.entries[0]).toMatchObject({ status: 'ready', tools: [{ id: 'weather_lookup', available: true }] })
+  })
+
+  it('marks duplicate qualified executors unavailable independent of source order', async () => {
+    const root = await temporaryDirectory()
+    const first = path.join(root, 'first')
+    const second = path.join(root, 'second')
+    await writeExtension(first, executorManifest())
+    await writeExtension(second, executorManifest())
+    const configured = (installationId: string, sourcePath: string): ExtensionConfiguration['sources'][number] => ({
+      installationId,
+      source: { kind: 'local', path: sourcePath },
+      enabled: true,
+      trust: { accepted: true, extensionId: 'dev.example.summary' },
+      settings: {},
+    })
+    const catalog = await inventoryExtensions({
+      configurationRoot: root,
+      configuration: { version: 1, revision: 1, sources: [configured('executor-b', second), configured('executor-a', first)] },
+    })
+
+    expect(catalog.entries.map((entry) => entry.source.installationId)).toEqual(['executor-a', 'executor-b'])
+    expect(catalog.entries.every((entry) => (
+      entry.status === 'error'
+      && entry.executors?.[0]?.available === false
+      && entry.diagnostics.some((diagnostic) => diagnostic.code === 'duplicate_extension_id')
+    ))).toBe(true)
   })
 
   it('rejects Pi-only configured packages with a bounded diagnostic', async () => {

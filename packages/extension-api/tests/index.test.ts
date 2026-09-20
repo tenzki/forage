@@ -4,10 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   defineExtension,
-  FORAGE_EXTENSION_API_VERSION,
-  FORAGE_EXTENSION_MANIFEST_SCHEMA,
-  FORAGE_EXTENSION_MANIFEST_VERSION,
   type ExtensionManifest,
+  type ExtensionSkillExecutorDefinition,
   type ExtensionToolDefinition,
   type ForageExtensionHost,
   type ForageExtensionSetup,
@@ -16,25 +14,23 @@ import {
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('@forage/extension-api', () => {
-  it('defines the native manifest and API version contract', () => {
+  it('defines one current native manifest contract with ordinary package release metadata', () => {
     const manifest = {
-      $schema: FORAGE_EXTENSION_MANIFEST_SCHEMA,
-      manifestVersion: FORAGE_EXTENSION_MANIFEST_VERSION,
       id: 'dev.example.extension',
       name: 'Example',
       version: '1.0.0',
       description: 'Example extension.',
       entry: './dist/index.js',
-      apiVersion: FORAGE_EXTENSION_API_VERSION,
       contributes: {
         tools: [],
         hooks: ['run:start'],
         settings: [{ key: 'token', label: 'Token', type: 'secret', required: true }],
+        executors: [],
       },
     } as const satisfies ExtensionManifest
 
-    expect(manifest.manifestVersion).toBe(1)
-    expect(manifest.apiVersion).toBe('1')
+    expect(manifest.id).toBe('dev.example.extension')
+    expect(manifest.version).toBe('1.0.0')
   })
 
   it('returns the exact setup function without wrapping or executing it', () => {
@@ -74,6 +70,7 @@ describe('@forage/extension-api', () => {
       registerTool(tool) {
         tools.push(tool)
       },
+      registerSkillExecutor() {},
       on(event) {
         events.push(event)
       },
@@ -81,6 +78,39 @@ describe('@forage/extension-api', () => {
 
     expect(tools.map((tool) => tool.id)).toEqual(['example_tool'])
     expect(events).toEqual(['run:start', 'run:end'])
+  })
+
+  it('supports a deterministic non-evaluation executor without an LLM or editor dependency', async () => {
+    const executors: ExtensionSkillExecutorDefinition[] = []
+    const extension = defineExtension((host) => {
+      host.registerSkillExecutor({
+        id: 'fixture',
+        name: 'Uppercase fixture',
+        description: 'Selects notes and returns their labels.',
+        configuration: { fields: [{ key: 'prefix', label: 'Prefix', type: 'text' }] },
+        async validateConfiguration() { return { valid: true } },
+        async prepare(input) {
+          const selectedNodeIds = input.context.roots.map((node) => node.id)
+          return { selectedNodeIds, requestedReferenceIds: selectedNodeIds, annotations: [], data: {} }
+        },
+        async execute(input, context) {
+          context.signal.throwIfAborted()
+          context.reportProgress({ message: 'Formatted', completed: 1, total: 1 })
+          return {
+            nodes: input.plan.selectedNodeIds.map((nodeId) => ({
+              type: 'text',
+              segments: [{ type: 'internal-reference', nodeId, label: nodeId.toUpperCase() }],
+            })),
+          }
+        },
+      })
+    })
+    await extension({
+      registerTool() {},
+      registerSkillExecutor(executor) { executors.push(executor) },
+      on() {},
+    })
+    expect(executors.map((executor) => executor.id)).toEqual(['fixture'])
   })
 
   it('does not depend on application frameworks or the embedded engine', () => {

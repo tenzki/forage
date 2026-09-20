@@ -1,19 +1,31 @@
 import type { ToolOption } from './tools'
 import type {
+  LegacySkillDefinition,
   PortableAgentDefinition as RuntimeAgentDefinition,
+  ExtensionSkillDefinition,
+  LlmSkillDefinition,
   SkillDefinition as RuntimeSkillDefinition,
 } from '@forage/agent-runtime'
+import { extensionSkillDefinitionSchema } from '@forage/agent-runtime'
 
 export type AgentDefinition = RuntimeAgentDefinition
-export type SkillDefinition = RuntimeSkillDefinition
+export type SkillDefinition = RuntimeSkillDefinition | LegacySkillDefinition
+
+export function isExtensionSkill(skill: SkillDefinition): skill is ExtensionSkillDefinition {
+  return 'execution' in skill && skill.execution === 'extension'
+}
 
 export type AgentDraft = Omit<AgentDefinition, 'id'> & { id?: string }
-export type SkillDraft = Omit<SkillDefinition, 'id' | 'requiredToolIds'> & {
+export type LlmSkillDraft = Omit<LlmSkillDefinition, 'id' | 'requiredToolIds' | 'execution'> & {
   id?: string
+  execution?: 'llm'
   requiredToolIds?: string[]
   /** Accepted only so older persisted skills can be loaded and cleaned safely. */
   contextStrategy?: unknown
 }
+
+export type ExtensionSkillDraft = Omit<ExtensionSkillDefinition, 'id'> & { id?: string }
+export type SkillDraft = LlmSkillDraft | ExtensionSkillDraft
 
 export const DEFAULT_AGENT_ID = 'general-agent'
 
@@ -25,27 +37,31 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [{
   toolIds: ['web_search', 'web_fetch', 'generate_image'],
 }]
 
-export const DEFAULT_SKILLS: SkillDefinition[] = [
+export const DEFAULT_SKILLS: LlmSkillDefinition[] = [
   {
     id: 'research', label: 'research', description: 'Investigate a topic and structure findings as notes',
+    execution: 'llm',
     agentId: DEFAULT_AGENT_ID,
     systemPrompt: 'Investigate the topic using the selected outline context. Use web_search for current or externally verifiable facts and web_fetch to verify useful sources. Include source URLs.',
     requiredToolIds: [],
   },
   {
     id: 'brainstorm', label: 'brainstorm', description: 'Generate ideas and options for the current note',
+    execution: 'llm',
     agentId: DEFAULT_AGENT_ID,
     systemPrompt: 'Generate a varied set of concise ideas or options using the selected outline context.',
     requiredToolIds: [],
   },
   {
     id: 'ask', label: 'ask', description: 'Ask the agent a question about this branch',
+    execution: 'llm',
     agentId: DEFAULT_AGENT_ID,
     systemPrompt: 'Answer the question using the selected outline context. Be concise and direct.',
     requiredToolIds: [],
   },
   {
     id: 'image', label: 'image', description: 'Generate an image under the current note',
+    execution: 'llm',
     agentId: DEFAULT_AGENT_ID,
     systemPrompt: 'Call generate_image once for the requested visual. In emit_outline, return an optional caption as a text node followed by a separate image-only node containing the returned imageId and accessible imageAlt. Never attach an image to a text node.',
     requiredToolIds: ['generate_image'],
@@ -77,10 +93,20 @@ export function validateAgentDraft(draft: AgentDraft, availableTools: ToolOption
   }
 }
 
-export function validateSkillDraft(draft: SkillDraft, agents: AgentDefinition[]): SkillDefinition {
+export function validateSkillDraft(draft: LlmSkillDraft, agents: AgentDefinition[]): LlmSkillDefinition
+export function validateSkillDraft(draft: ExtensionSkillDraft, agents: AgentDefinition[]): ExtensionSkillDefinition
+export function validateSkillDraft(draft: SkillDraft, agents: AgentDefinition[]): RuntimeSkillDefinition
+export function validateSkillDraft(draft: SkillDraft, agents: AgentDefinition[]): RuntimeSkillDefinition {
   const label = draft.label.trim().toLowerCase()
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(label)) {
     throw new Error('Slash commands must use 2–32 lowercase letters, numbers, or hyphens.')
+  }
+  if (draft.execution === 'extension') {
+    return extensionSkillDefinitionSchema.parse({
+      ...draft,
+      id: validId(draft.id),
+      label,
+    })
   }
   const agent = agents.find((candidate) => candidate.id === draft.agentId)
   if (!agent) throw new Error('Choose an agent for this skill.')
@@ -89,6 +115,7 @@ export function validateSkillDraft(draft: SkillDraft, agents: AgentDefinition[])
   if (unavailable) throw new Error(`The required tool ${unavailable} is not allowed by the selected agent.`)
   return {
     id: validId(draft.id),
+    execution: 'llm',
     label,
     description: cleanText(draft.description, 'Skill description', 300),
     systemPrompt: cleanText(draft.systemPrompt, 'Skill instructions', 20_000),
@@ -101,6 +128,6 @@ export function copyDefaultAgents(): AgentDefinition[] {
   return DEFAULT_AGENTS.map((agent) => ({ ...agent, toolIds: [...agent.toolIds] }))
 }
 
-export function copyDefaultSkills(): SkillDefinition[] {
+export function copyDefaultSkills(): LlmSkillDefinition[] {
   return DEFAULT_SKILLS.map((skill) => ({ ...skill }))
 }

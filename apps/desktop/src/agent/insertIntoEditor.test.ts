@@ -20,6 +20,7 @@ import {
 } from '../editor/generatedImage'
 import { generateWithPi } from './piGeneration'
 import {
+  commitExtensionSkillResult,
   commitStructuredAgentResult,
   commitStructuredAgentResultInto,
   currentListItemId,
@@ -389,6 +390,78 @@ describe('agent output insertion', () => {
     expect(bulletTexts(editor)).toEqual(['Compare options', 'Summary', 'Evidence'])
     editor.commands.undo()
     expect(bulletTexts(editor)).toEqual(['/research Compare options'])
+  })
+
+  it('rejects reference-bearing results until the reference-aware formatter is installed', () => {
+    editor.destroy()
+    editor = makeEditor('/research Compare options')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+
+    expect(() => commitStructuredAgentResult(editor, invocationNodeId, 'research', {
+      version: 2,
+      nodes: [{
+        type: 'text',
+        segments: [{ type: 'internal-reference', nodeId: 'idea-1', label: 'Idea one' }],
+      }],
+      sources: [],
+    })).toThrow(/reference-aware materialization/i)
+    expect(bulletTexts(editor)).toEqual(['/research Compare options'])
+  })
+
+  it('materializes generic text and references atomically as ordinary linked bullets', () => {
+    editor.destroy()
+    editor = makeEditor('/label Compare options')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, {
+      type: 'listItem',
+      attrs: { nodeId: 'idea-1' },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Original idea' }] }],
+    })
+
+    const nodeIds = commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-one', {
+      version: 2,
+      nodes: [{
+        type: 'text',
+        segments: [
+          { type: 'text', text: 'Selected: ' },
+          { type: 'internal-reference', nodeId: 'idea-1', label: 'Idea one' },
+        ],
+        children: [{ type: 'text', segments: [{ type: 'text', text: 'Static detail' }] }],
+      }],
+      sources: [],
+    }, ['idea-1'])
+
+    expect(nodeIds).toEqual(['extension-result-run-one-0'])
+    expect(bulletTexts(editor)).toEqual(['Compare options', 'Selected: Idea one', 'Static detail', 'Original idea'])
+    const link = editor.view.dom.querySelector<HTMLAnchorElement>('a[data-internal-node-id="idea-1"]')
+    expect(link?.textContent).toBe('Idea one')
+    expect(link?.getAttribute('href')).toBe('#node=idea-1')
+    expect(JSON.stringify(editor.getJSON())).not.toContain('label_notes')
+
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['/label Compare options', 'Original idea'])
+    editor.commands.redo()
+    expect(bulletTexts(editor)).toEqual(['Compare options', 'Selected: Idea one', 'Static detail', 'Original idea'])
+  })
+
+  it('rejects an unadmitted generic reference without partially changing the outline', () => {
+    editor.destroy()
+    editor = makeEditor('/label Compare options')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    const before = editor.getJSON()
+
+    expect(() => commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-two', {
+      version: 2,
+      nodes: [{
+        type: 'text',
+        segments: [{ type: 'internal-reference', nodeId: 'outside', label: 'Outside' }],
+      }],
+      sources: [],
+    }, ['inside'])).toThrow(/unadmitted reference/i)
+    expect(editor.getJSON()).toEqual(before)
   })
 
   it('replaces live streamed text with the terminal structured result', () => {

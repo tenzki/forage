@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 const MIGRATION_0001: &str = include_str!("../migrations/0001_event_store.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_agent_executor.sql");
 const MIGRATION_0003: &str = include_str!("../migrations/0003_local_credentials.sql");
+const MIGRATION_0004: &str = include_str!("../migrations/0004_completed_unplaced.sql");
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -165,6 +166,14 @@ impl EventStore {
         connection.execute_batch(MIGRATION_0001)?;
         connection.execute_batch(MIGRATION_0002)?;
         connection.execute_batch(MIGRATION_0003)?;
+        let run_table_sql: String = connection.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_agent_runs'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !run_table_sql.contains("'completed_unplaced'") {
+            connection.execute_batch(MIGRATION_0004)?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -1002,7 +1011,8 @@ impl EventStore {
         Ok(history)
     }
 
-    /// Forget every run for an outline. Attempts and activity cascade.
+    /// Forget settled history, but never discard a complete result that still
+    /// needs a user-selected destination. Attempts and activity cascade.
     pub fn clear_agent_runs(&self, outline_id: &str) -> StoreResult<usize> {
         let mut connection = self.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1011,7 +1021,8 @@ impl EventStore {
             [outline_id],
         )?;
         let removed = transaction.execute(
-            "DELETE FROM local_agent_runs WHERE outline_id = ?1",
+            "DELETE FROM local_agent_runs
+             WHERE outline_id = ?1 AND status <> 'completed_unplaced'",
             [outline_id],
         )?;
         transaction.commit()?;
@@ -1029,7 +1040,7 @@ impl EventStore {
             params![run_id, cancelled_at],
         )?;
         let terminal_exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM local_agent_runs WHERE id = ?1 AND status IN ('completed', 'failed', 'cancelled', 'interrupted'))",
+            "SELECT EXISTS(SELECT 1 FROM local_agent_runs WHERE id = ?1 AND status IN ('completed', 'completed_unplaced', 'failed', 'cancelled', 'interrupted'))",
             [run_id],
             |row| row.get(0),
         )?;
@@ -1055,10 +1066,15 @@ impl EventStore {
         error_code: Option<&str>,
         settled_at: &str,
     ) -> StoreResult<()> {
-        if !matches!(status, "completed" | "failed" | "cancelled" | "interrupted") {
+        if !matches!(
+            status,
+            "completed" | "completed_unplaced" | "failed" | "cancelled" | "interrupted"
+        ) {
             return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
         }
-        if (result_identity.is_some() || result.is_some()) && status != "completed" {
+        if (result_identity.is_some() || result.is_some())
+            && !matches!(status, "completed" | "completed_unplaced")
+        {
             return Err(StoreError::InvalidAgentRunState(run_id.to_string()));
         }
         if result_identity.is_some() != result.is_some() {
@@ -1079,7 +1095,7 @@ impl EventStore {
             .ok_or_else(|| StoreError::InvalidAgentRunState(run_id.to_string()))?;
         if matches!(
             existing.0.as_str(),
-            "completed" | "failed" | "cancelled" | "interrupted"
+            "completed" | "completed_unplaced" | "failed" | "cancelled" | "interrupted"
         ) {
             if existing.0 == status && existing.1.as_deref() == result_identity {
                 return Ok(());
@@ -1092,13 +1108,46 @@ impl EventStore {
              WHERE id = ?1",
             params![run_id, status, result_identity, result_json, error_code, settled_at],
         )?;
+        let attempt_status = if status == "completed_unplaced" {
+            "completed"
+        } else {
+            status
+        };
         transaction.execute(
             "UPDATE local_agent_run_attempts SET status = ?2, finished_at = ?3, error_code = ?4
              WHERE run_id = ?1 AND status = 'running'",
-            params![run_id, status, settled_at, error_code],
+            params![run_id, attempt_status, settled_at, error_code],
         )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Mark a durably retained result placed after its ordinary document
+    /// transaction has been accepted. Repeating the transition is harmless;
+    /// any other terminal state fails closed.
+    pub fn place_agent_run_result(&self, run_id: &str, placed_at: &str) -> StoreResult<()> {
+        let connection = self.connection()?;
+        let changed = connection.execute(
+            "UPDATE local_agent_runs SET status = 'completed', updated_at = ?2
+             WHERE id = ?1 AND status = 'completed_unplaced'
+               AND result_identity IS NOT NULL AND result_json IS NOT NULL",
+            params![run_id, placed_at],
+        )?;
+        if changed == 1 {
+            return Ok(());
+        }
+        let completed: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_agent_runs
+             WHERE id = ?1 AND status = 'completed'
+               AND result_identity IS NOT NULL AND result_json IS NOT NULL)",
+            [run_id],
+            |row| row.get(0),
+        )?;
+        if completed {
+            Ok(())
+        } else {
+            Err(StoreError::InvalidAgentRunState(run_id.to_string()))
+        }
     }
 
     pub fn interrupt_unfinished_agent_runs(&self, interrupted_at: &str) -> StoreResult<usize> {

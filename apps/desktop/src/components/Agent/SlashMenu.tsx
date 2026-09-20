@@ -4,9 +4,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
-import type { SkillDefinition } from '../../agent/definitions'
-import { resolveAgentContext } from '../../agent/context'
+import { isExtensionSkill, type SkillDefinition } from '../../agent/definitions'
+import { resolveAgentContext, resolveExtensionSkillContext } from '../../agent/context'
 import {
+  commitExtensionSkillResult,
   commitStructuredAgentResultInto,
   currentListItemId,
   insertAiChildUnder,
@@ -20,7 +21,7 @@ import {
   OUTLINE_COMMANDS,
   type OutlineCommandDefinition,
 } from '../../editor/commandDefinitions'
-import { clearSkillContext, showSkillContext, showSkillContextError } from '../../editor/contextPreview'
+import { clearSkillContext, showExtensionSkillContext, showSkillContext, showSkillContextError } from '../../editor/contextPreview'
 import {
   currentBulletId,
   setBulletKind,
@@ -31,6 +32,7 @@ import type { ActivityReporter } from '../../agent/activity'
 import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
 import {
   nativeLocalCredentialVault,
+  resolveExtensionExecutorSecretValues,
   resolveExtensionSecretValues,
   resolveLocalCredential,
 } from '../../agent/localCredentials'
@@ -42,12 +44,18 @@ import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
 import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
 import { setAgentActivity } from '../../editor/outlinerUi'
 import {
+  assertExtensionExecutionLocation,
+  prepareExtensionSkillInvocation,
+  retainPreparedExtensionSkillResult,
+  selectedExtensionExecutor,
+} from '../../agent/extensionSkillInvocation'
+import {
   createLocalExtensionSnapshotFromCatalog,
   resolveEffectiveToolIds,
   type ActivityEvent as RuntimeActivityEvent,
   type RunInput,
 } from '@forage/agent-runtime'
-import { extensionToolOptions, useExtensionStore } from '../../store/extensionStore'
+import { extensionExecutorOptions, extensionToolOptions, useExtensionStore } from '../../store/extensionStore'
 
 interface CommandChoice {
   id: string
@@ -77,6 +85,19 @@ function commandChoices(skills: SkillDefinition[]): CommandChoice[] {
       skill,
     })),
   ]
+}
+
+export function skillInvocationPrompt(skill: SkillDefinition, prompt: string | undefined): string {
+  return (isExtensionSkill(skill) ? (prompt ?? '') : (prompt || skill.label)).trim()
+}
+
+export function skillAllowsEmptyPrompt(skill: SkillDefinition, catalog = useExtensionStore.getState().catalog): boolean {
+  if (!isExtensionSkill(skill)) return false
+  return extensionExecutorOptions(catalog).some((option) => (
+    option.available && option.allowEmptyPrompt
+    && option.extensionId === skill.executor.extensionId
+    && option.executorId === skill.executor.executorId
+  ))
 }
 
 function runOutlineCommand(editor: Editor, command: OutlineCommandDefinition): void {
@@ -116,12 +137,14 @@ export function SlashMenu({
   onActivity,
   onBeforeServerRun,
   onAfterServerRun,
+  onRegisterExtensionCancellation,
 }: {
   editor: Editor | null
   onError: (message: string | null) => void
   onActivity?: ActivityReporter
   onBeforeServerRun?: () => Promise<void>
   onAfterServerRun?: () => Promise<void>
+  onRegisterExtensionCancellation?: (runId: string, cancel: (() => void) | null) => void
 }) {
   const authMode = useSettingsStore((state) => state.authMode)
   const localCredentials = useSettingsStore((state) => state.localCredentials)
@@ -169,7 +192,13 @@ export function SlashMenu({
 
   useEffect(() => {
     if (!editor) return
+    let previewController: AbortController | null = null
+    let previewTimer: ReturnType<typeof setTimeout> | null = null
     const refresh = () => {
+      previewController?.abort()
+      previewController = null
+      if (previewTimer) clearTimeout(previewTimer)
+      previewTimer = null
       const state = readSlashState(editor)
       const invocationNodeId = currentListItemId(editor)
       if (!editor.isFocused || !state || !invocationNodeId) {
@@ -188,6 +217,38 @@ export function SlashMenu({
         return
       }
       try {
+        if (isExtensionSkill(command.skill)) {
+          const extensionSkill = command.skill
+          const option = selectedExtensionExecutor(extensionSkill, extensionCatalog)
+          const prompt = skillInvocationPrompt(extensionSkill, state.prompt)
+          if (!prompt && !option.allowEmptyPrompt) {
+            showExtensionSkillContext(editor, resolveExtensionSkillContext(editor.state.doc, invocationNodeId, prompt))
+            setContextError(null)
+            return
+          }
+          if (!extensionCatalog || !extensionConfiguration) throw new Error('Local extension inventory is unavailable; open Extensions settings and retry.')
+          const context = resolveExtensionSkillContext(editor.state.doc, invocationNodeId, prompt)
+          showExtensionSkillContext(editor, context)
+          setContextError(null)
+          previewController = new AbortController()
+          const signal = previewController.signal
+          previewTimer = setTimeout(() => {
+            void prepareExtensionSkillInvocation({
+              skill: extensionSkill, prompt, doc: editor.state.doc, invocationNodeId,
+              catalog: extensionCatalog, localConfiguration: extensionConfiguration,
+              portableConfigurationRevision: 0, runId: crypto.randomUUID(), signal,
+            }).then(async (prepared) => {
+              if (!signal.aborted && !editor.isDestroyed) showExtensionSkillContext(editor, prepared.context, prepared.admission.plan)
+              await prepared.admission.release()
+            }).catch((error) => {
+              if (signal.aborted || editor.isDestroyed) return
+              const detail = error instanceof Error ? error.message : String(error)
+              setContextError(detail)
+              showSkillContextError(editor, invocationNodeId, detail)
+            })
+          }, 150)
+          return
+        }
         showSkillContext(editor, resolveAgentContext(editor.state.doc, invocationNodeId))
         setContextError(null)
       } catch (error) {
@@ -206,13 +267,15 @@ export function SlashMenu({
     editor.on('focus', refresh)
     editor.on('blur', blur)
     return () => {
+      previewController?.abort()
+      if (previewTimer) clearTimeout(previewTimer)
       editor.off('selectionUpdate', refresh)
       editor.off('update', refresh)
       editor.off('focus', refresh)
       editor.off('blur', blur)
       clearSkillContext(editor)
     }
-  }, [editor, skills, menu, completedCommand, active])
+  }, [editor, skills, menu, completedCommand, active, extensionCatalog, extensionConfiguration])
 
   useEffect(() => {
     if (!editor || !menu || matches.length === 0) return
@@ -232,7 +295,8 @@ export function SlashMenu({
         if (activeInternalLinkAtSelection(editor.state)) return
         event.preventDefault()
         const hasPrompt = menu.query === command.label && menu.prompt.trim().length > 0
-        if (command.outlineCommand || hasPrompt || event.metaKey || event.ctrlKey) run(command)
+        const allowsEmptyPrompt = command.skill && skillAllowsEmptyPrompt(command.skill) && menu.query === command.label
+        if (command.outlineCommand || hasPrompt || allowsEmptyPrompt || event.metaKey || event.ctrlKey) run(command)
         else complete(command)
       } else if (event.key === 'Escape') {
         event.preventDefault()
@@ -272,7 +336,7 @@ export function SlashMenu({
     if (!editor) return
     const state = readSlashState(editor)
     const context = state?.query === command.label ? state.prompt : menu?.prompt
-    const prompt = (context || (command.skill ? command.label : '')).trim()
+    const prompt = command.skill ? skillInvocationPrompt(command.skill, context) : (context ?? '').trim()
     completedCommandRef.current = null
     setCompletedCommand(null)
     if (command.outlineCommand) {
@@ -290,17 +354,165 @@ export function SlashMenu({
     }
     const skill = command.skill
     if (!skill) return
+    const invocationNodeId = currentListItemId(editor)
+    if (!invocationNodeId) {
+      onError('Could not find the skill invocation bullet.')
+      return
+    }
+    if (isExtensionSkill(skill)) {
+      const runId = crypto.randomUUID()
+      const controller = new AbortController()
+      const callLabel = runActivityLabel(skill.label, prompt)
+      onRegisterExtensionCancellation?.(runId, () => controller.abort(new DOMException('Extension skill cancelled by the user.', 'AbortError')))
+      onError(null)
+      onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, ...(prompt ? { detail: prompt } : {}) })
+      void (async () => {
+        const startedAt = Date.now()
+        const repository = new NativeEventRepository()
+        let prepared: Awaited<ReturnType<typeof prepareExtensionSkillInvocation>> | null = null
+        try {
+          assertExtensionExecutionLocation(await repository.storageMode())
+          if (!extensionCatalog || !extensionConfiguration) await useExtensionStore.getState().refresh()
+          const current = useExtensionStore.getState()
+          prepared = await prepareExtensionSkillInvocation({
+            skill, prompt, doc: editor.state.doc, invocationNodeId,
+            catalog: current.catalog, localConfiguration: current.configuration,
+            portableConfigurationRevision: 0, runId, signal: controller.signal,
+          })
+          showExtensionSkillContext(editor, prepared.context, prepared.admission.plan)
+          const identity = await repository.identity()
+          const activeConfiguration = useExtensionStore.getState().configuration
+          if (!activeConfiguration) throw new Error('Extension configuration is unavailable; refresh Extensions settings and retry.')
+          const secrets = await resolveExtensionExecutorSecretValues(
+            prepared.admission.executorSnapshot,
+            activeConfiguration,
+            nativeLocalCredentialVault,
+          )
+          let logSequence = 0
+          const result = await retainPreparedExtensionSkillResult(prepared, {
+            repository,
+            runId,
+            outlineId: identity.outlineId,
+            invocationNodeId,
+            secrets,
+            signal: controller.signal,
+            onProgress: (progress) => onActivity?.({
+              id: `progress-${runId}`,
+              callId: runId,
+              phase: 'start',
+              kind: 'thinking',
+              label: progress.message,
+              ...(progress.completed === undefined ? {} : {
+                detail: progress.total === undefined
+                  ? `${progress.completed} complete`
+                  : `${progress.completed} of ${progress.total} complete`,
+              }),
+              nodeId: invocationNodeId,
+            }),
+            onLog: (entry) => {
+              if (entry.level === 'debug') return
+              logSequence += 1
+              onActivity?.({
+                id: `extension-log-${runId}-${logSequence}`,
+                callId: runId,
+                phase: entry.level === 'error' ? 'error' : 'complete',
+                kind: entry.level === 'error' ? 'error' : 'thinking',
+                label: entry.message,
+                nodeId: invocationNodeId,
+              })
+            },
+          })
+          let resultNodeIds: string[] = []
+          try {
+            resultNodeIds = commitExtensionSkillResult(
+              editor,
+              invocationNodeId,
+              skill.label,
+              runId,
+              result,
+              prepared.admission.plan.admittedReferenceIds,
+            )
+            await repository.placeAgentRunResult(runId, new Date().toISOString())
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error)
+            onActivity?.({
+              id: runId,
+              phase: 'complete',
+              kind: 'skill',
+              label: callLabel,
+              detail,
+              nodeId: invocationNodeId,
+              placementPending: true,
+              durationMs: Date.now() - startedAt,
+            })
+            onActivity?.({
+              id: `placement-${runId}`,
+              callId: runId,
+              phase: 'complete',
+              kind: 'output',
+              label: 'Result retained — select a bullet and choose Place here',
+              detail,
+            })
+            onError('The extension result was retained because placement could not be finalized.')
+            return
+          }
+          const resultNodeId = resultNodeIds[0]
+          if (resultNodeId) {
+            onActivity?.({
+              id: `outline-${runId}`,
+              callId: runId,
+              phase: 'complete',
+              kind: 'output',
+              label: 'Outline updated',
+              nodeId: resultNodeId,
+            })
+          }
+          onActivity?.({
+            id: runId,
+            phase: 'complete',
+            kind: 'skill',
+            label: callLabel,
+            nodeId: invocationNodeId,
+            placementPending: false,
+            durationMs: Date.now() - startedAt,
+          })
+          clearSkillContext(editor)
+          setContextError(null)
+        } finally {
+          await prepared?.admission.release()
+          onRegisterExtensionCancellation?.(runId, null)
+        }
+      })().catch((error) => {
+        const detail = error instanceof Error ? error.message : String(error)
+        const cancelled = controller.signal.aborted
+          || (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError')
+        onActivity?.({
+          id: runId,
+          phase: cancelled ? 'cancelled' : 'error',
+          kind: 'skill',
+          label: callLabel,
+          ...(cancelled ? {} : { detail }),
+          nodeId: invocationNodeId,
+        })
+        if (cancelled) {
+          onError(null)
+          clearSkillContext(editor)
+          setContextError(null)
+        } else {
+          onError(detail)
+          showSkillContextError(editor, invocationNodeId, detail)
+          setContextError(detail)
+        }
+      })
+      setMenu(null)
+      return
+    }
     const agent = agents.find((candidate) => candidate.id === skill.agentId)
     if (!agent) {
       onError(`The agent assigned to /${skill.label} no longer exists.`)
       return
     }
     onError(null)
-    const invocationNodeId = currentListItemId(editor)
-    if (!invocationNodeId) {
-      onError('Could not find the skill invocation bullet.')
-      return
-    }
     const contextSnapshot = resolveAgentContext(editor.state.doc, invocationNodeId)
     const repository = new NativeEventRepository()
     // One call id per run keeps every event of this invocation in a single sidebar group.

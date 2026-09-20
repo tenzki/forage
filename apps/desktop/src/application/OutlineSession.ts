@@ -13,6 +13,7 @@ import {
   type PersistentHistoryState,
 } from '../editor/persistentHistory'
 import type {
+  LocalAgentRun,
   LocalAgentRunHistory,
   LocalIdentity,
   ReplayInput,
@@ -40,6 +41,8 @@ export interface OutlineSessionRepository extends SyncRepository {
   interruptUnfinishedAgentRuns(interruptedAt: string): Promise<number>
   recentAgentRuns(outlineId: string, limit?: number): Promise<LocalAgentRunHistory[]>
   clearAgentRuns(outlineId: string): Promise<number>
+  agentRun(runId: string): Promise<LocalAgentRun | null>
+  placeAgentRunResult(runId: string, placedAt: string): Promise<void>
 }
 
 export interface OutlineSessionStatus {
@@ -152,6 +155,14 @@ export class OutlineSession {
     const outlineId = this.identityValue?.outlineId
     if (!outlineId) return
     await this.repository.clearAgentRuns(outlineId)
+  }
+
+  async agentRun(runId: string): Promise<LocalAgentRun | null> {
+    return this.repository.agentRun(runId)
+  }
+
+  async placeAgentRunResult(runId: string, placedAt: string): Promise<void> {
+    await this.repository.placeAgentRunResult(runId, placedAt)
   }
 
   async open(): Promise<OpenedOutline> {

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import {
   agentActivityPageSchema,
   agentConfigurationPublishRequestSchema,
-  agentConfigurationResponseSchema,
+  parseAgentConfigurationResponse,
   agentRunAdmissionResponseSchema,
   agentRunDetailSchema,
   agentRunListResponseSchema,
@@ -17,12 +17,14 @@ import {
   computeProfilePublishRequestSchema,
   computeProfileResponseSchema,
   serverReadinessSchema,
+  serverStatusSchema,
   agentInvocationIntentSchema,
   agentRunPlacementResponseSchema,
   outlineSearchQuerySchema,
   outlineSearchResponseSchema,
 } from '@forage/protocol'
 import { runInputSchema, type ActivityEvent, type RunInput, type RunStatus } from '@forage/agent-runtime'
+import { canonicalJson } from '@forage/domain'
 import { agentRunSignals, agentWaitMs, waitForAgentRunSignal, type AgentRunSignals } from './agentRunSignals'
 import { streamLiveness, type StreamLivenessTracker } from '../sync/streamLiveness'
 
@@ -44,11 +46,33 @@ export class TauriServerAgentTransport implements ServerAgentTransport {
   constructor(private readonly invokeNative: InvokeFunction = (command, arguments_) => tauriInvoke(command, arguments_)) {}
 
   async configuration() {
-    return agentConfigurationResponseSchema.parse(await this.invokeNative('server_agent_configuration'))
+    return parseAgentConfigurationResponse(await this.invokeNative('server_agent_configuration'))
   }
   async publishConfiguration(request: unknown) {
     const parsed = agentConfigurationPublishRequestSchema.parse(request)
-    return agentConfigurationResponseSchema.parse(await this.invokeNative('server_agent_publish_configuration', { request: parsed }))
+    const extensionSkills = parsed.configuration.version === 3
+      ? parsed.configuration.skills.filter((skill) => skill.execution === 'extension')
+      : []
+    if (extensionSkills.length) {
+      const status = serverStatusSchema.parse(await this.invokeNative('server_test_connection'))
+      if (!status.agentConfigurationVersions?.includes(3)) {
+        throw new Error(
+          'upgrade_required: This server cannot preserve extension-backed skill configuration. Upgrade the server before publishing agent settings.',
+        )
+      }
+    }
+    const response = parseAgentConfigurationResponse(
+      await this.invokeNative('server_agent_publish_configuration', { request: parsed }),
+    )
+    for (const skill of extensionSkills) {
+      const returned = response.configuration.skills.find((candidate) => candidate.id === skill.id)
+      if (!returned || returned.execution !== 'extension' || canonicalJson(returned) !== canonicalJson(skill)) {
+        throw new Error(
+          'upgrade_required: The server did not preserve extension-backed skill configuration. Agent settings require a compatible server.',
+        )
+      }
+    }
+    return response
   }
   async computeProfile() {
     return computeProfileResponseSchema.parse(await this.invokeNative('server_agent_compute_profile'))

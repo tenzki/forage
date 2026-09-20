@@ -15,7 +15,7 @@ import { adaptExtensionTools } from './extension-tools'
 
 const referenceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../../../../../../packages/extensions',
+  '../../../../../../extensions/reference',
 )
 
 interface FakeActivity {
@@ -48,7 +48,7 @@ describe('reference extension through the packaged sidecar adapter', () => {
       },
     })
     expect(await validateForageExtensionEntry(entry, source)).toEqual({
-      tools: ['text_stats'], hooks: ['run:end', 'run:start'], diagnostics: [],
+      tools: ['text_stats'], executors: ['label_notes'], hooks: ['run:end', 'run:start'], diagnostics: [],
     })
 
     const snapshot = createLocalExtensionSnapshot(catalog, configuration, ['text_stats'])

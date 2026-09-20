@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CodexOAuthCredential } from './codexAuth'
+import type { ExtensionConfiguration } from '@forage/agent-runtime'
 import {
   LOCAL_CODEX_CREDENTIAL_ID,
   LOCAL_OPENAI_CREDENTIAL_ID,
   migrateLegacyCredentials,
   resolveLocalCredential,
   resolveExtensionSecretValues,
+  resolveExtensionExecutorSecretValues,
 } from './localCredentials'
 
 describe('local executor credentials', () => {
@@ -75,5 +77,29 @@ describe('local executor credentials', () => {
     expect(load).toHaveBeenCalledWith('forage-extension/installation-1/token')
     expect(() => JSON.stringify(configuration)).not.toThrow()
     expect(JSON.stringify(configuration)).not.toContain('secret-value')
+  })
+
+  it('resolves only the selected executor source secrets against the device-local extension revision', async () => {
+    const load = vi.fn(async () => 'executor-secret')
+    const snapshot = {
+      version: 1 as const, catalogRevision: 'a'.repeat(64), configurationRevision: 8,
+      source: { installationId: 'executor-1', extensionId: 'dev.example.executor', sourceRevision: 'source-1',
+        entryDigest: 'b'.repeat(64), executorId: 'summarize' },
+    }
+    const configuration: ExtensionConfiguration = { version: 1, revision: 8, sources: [{
+      installationId: 'executor-1', source: { kind: 'local' as const, path: '/tmp/executor' }, enabled: true,
+      trust: { accepted: true as const, extensionId: 'dev.example.executor' }, settings: {},
+      secretReferences: { token: 'forage-extension/executor-1/token' },
+    }, {
+      installationId: 'unrelated', source: { kind: 'local' as const, path: '/tmp/unrelated' }, enabled: true,
+      trust: { accepted: true as const, extensionId: 'dev.example.unrelated' }, settings: {},
+      secretReferences: { other: 'forage-extension/unrelated/other' },
+    }] }
+
+    await expect(resolveExtensionExecutorSecretValues(snapshot, configuration, { load })).resolves.toEqual({ token: 'executor-secret' })
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(load).toHaveBeenCalledWith('forage-extension/executor-1/token')
+    await expect(resolveExtensionExecutorSecretValues({ ...snapshot, configurationRevision: 7 }, configuration, { load }))
+      .rejects.toThrow(/configuration changed/i)
   })
 })

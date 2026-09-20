@@ -20,12 +20,12 @@ const settings = {
 describe('server agent configuration', () => {
   it('copies portable settings without environment compute bindings', () => {
     expect(buildServerAgentConfiguration(settings, 1)).toEqual({
-      version: 2,
+      version: 3,
       revision: 1,
       agents: [{
         id: 'general', name: 'General', description: 'General agent', systemPrompt: 'Help.', toolIds: ['web_search'],
       }],
-      skills: settings.skills,
+      skills: settings.skills.map((skill) => ({ ...skill, execution: 'llm' })),
       customTools: settings.customTools,
       globallyEnabledToolIds: settings.enabledToolIds,
     })
@@ -34,6 +34,21 @@ describe('server agent configuration', () => {
   it('never embeds an explicitly enrolled credential', () => {
     expect(buildServerAgentConfiguration(settings, 2, 'server-credential').agents[0])
       .not.toHaveProperty('credentialRef')
+  })
+
+  it('publishes unavailable executor references and bounded unknown config without local authority', () => {
+    const extensionSkill = {
+      id: 'local-label', label: 'local-label', description: 'Label notes.', execution: 'extension' as const,
+      executor: { extensionId: 'dev.example.notes', executorId: 'label' },
+      configuration: { unfamiliar: { retained: true }, values: [1, 2, 3] },
+    }
+    const configuration = buildServerAgentConfiguration({
+      ...settings, agents: [], skills: [extensionSkill],
+    }, 9)
+
+    expect(configuration.skills).toEqual([extensionSkill])
+    expect(configuration.revision).toBe(9)
+    expect(JSON.stringify(configuration)).not.toMatch(/installationId|catalogRevision|configurationRevision|canonicalPath|trustStatus/)
   })
 
   it('migrates legacy UUID custom-tool references to their valid tool names', () => {
@@ -49,7 +64,10 @@ describe('server agent configuration', () => {
     expect(configuration.customTools[0]?.id).toBe('weather')
     expect(configuration.globallyEnabledToolIds).toEqual(['web_search', 'weather'])
     expect(configuration.agents[0]?.toolIds).toEqual(['web_search', 'weather'])
-    expect(configuration.skills[0]?.requiredToolIds).toEqual(['weather'])
+    expect(configuration.skills[0]?.execution).toBe('llm')
+    if (configuration.skills[0]?.execution === 'llm') {
+      expect(configuration.skills[0].requiredToolIds).toEqual(['weather'])
+    }
   })
 
   it('repairs a legacy server connection with no published configuration', async () => {

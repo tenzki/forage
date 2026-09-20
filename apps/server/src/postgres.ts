@@ -27,7 +27,17 @@ import {
   type BoundPrincipal,
 } from './repository.js'
 import { PostgresAgentStore } from './postgresAgentStore.js'
-import { portableAgentConfigurationSchema, parseStructuredResult, resolveEffectiveToolIds, runInputSchema, type RunInput, type StructuredResult } from '@forage/agent-runtime'
+import {
+  parseStructuredResult,
+  migrateAgentConfiguration,
+  requireStructuredResultV1,
+  resolveEffectiveToolIds,
+  runInputSchema,
+  type RunInput,
+  type StructuredResult,
+  type StructuredResultV1,
+  supportedAgentConfigurationSchema,
+} from '@forage/agent-runtime'
 import { automationPolicySetSchema } from '@forage/protocol'
 import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
@@ -284,7 +294,9 @@ export class PostgresServerRepository implements ServerRepository {
         'SELECT provider,model_id,credential_reference FROM agent_compute_profiles WHERE outline_id=$1', [principal.outlineId],
       )
     if (!configurationResult.rows[0] || !automationResult.rows[0] || !computeResult.rows[0]) return
-    const configuration = portableAgentConfigurationSchema.parse(configurationResult.rows[0].configuration)
+    const configuration = migrateAgentConfiguration(
+      supportedAgentConfigurationSchema.parse(configurationResult.rows[0].configuration),
+    ).configuration
     const policies = automationPolicySetSchema.parse(automationResult.rows[0].policies)
     const compute = computeResult.rows[0]
     const matches = await resolveAutomationMatches(
@@ -307,6 +319,7 @@ export class PostgresServerRepository implements ServerRepository {
     )
     for (const match of matches) {
       const skill = configuration.skills.find((candidate) => candidate.id === match.skillId)
+      if (skill?.execution === 'extension') continue
       const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
       const credentialRef = compute.credential_reference
       if (!skill || !agent) continue
@@ -545,7 +558,7 @@ export class PostgresServerRepository implements ServerRepository {
   }
 
   async commitAgentResult(runId: string, workerId: string, rawResult: StructuredResult) {
-    const result = parseStructuredResult(rawResult)
+    const result = requireStructuredResultV1(parseStructuredResult(rawResult))
     await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, result)
     const committed = await this.transaction(async (client) => {
       const selected = await client.query<{
@@ -642,7 +655,7 @@ export class PostgresServerRepository implements ServerRepository {
         'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1 FOR UPDATE', [runId],
       )
       if (!output.rows[0]) throw new RepositoryError('conflict', 'Persisted run output is unavailable.')
-      const result = parseStructuredResult(output.rows[0].structured_output)
+      const result = requireStructuredResultV1(parseStructuredResult(output.rows[0].structured_output))
       const projection = await this.canonicalProjection(client, run.outline_id, true)
       requireLiveCanonicalNode(queryCanonicalOutline(projection.state), targetNodeId, 'target')
       const imageIds = collectImageIds(result)
@@ -855,7 +868,7 @@ function collectImageIds(result: StructuredResult): string[] {
   return [...found]
 }
 
-function assignResultNodeIds(nodes: StructuredResult['nodes'], runId: string, prefix = ''): Array<
+function assignResultNodeIds(nodes: StructuredResultV1['nodes'], runId: string, prefix = ''): Array<
   | { type: 'text'; nodeId: string; text: string; children?: ReturnType<typeof assignResultNodeIds> }
   | { type: 'image'; assetId: string; alt: string }
 > {

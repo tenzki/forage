@@ -522,6 +522,18 @@ pub fn agent_run_settle(
 }
 
 #[tauri::command]
+pub fn agent_run_place_result(
+    state: State<'_, NativeState>,
+    run_id: String,
+    placed_at: String,
+) -> Result<(), String> {
+    state
+        .event_store
+        .place_agent_run_result(&run_id, &placed_at)
+        .map_err(command_error)
+}
+
+#[tauri::command]
 pub fn agent_run_retry(
     state: State<'_, NativeState>,
     original_run_id: String,

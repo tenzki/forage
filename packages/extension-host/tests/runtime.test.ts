@@ -25,13 +25,11 @@ async function fixture(entrySource: string, overrides: Record<string, unknown> =
   const source = path.join(root, 'source')
   await mkdir(path.join(source, 'dist'), { recursive: true })
   const manifest = {
-    manifestVersion: 1,
     id: 'dev.example.runtime',
     name: 'Runtime fixture',
     version: '1.0.0',
     description: 'Exercises the native runtime host.',
     entry: './dist/index.mjs',
-    apiVersion: '1',
     contributes: {
       tools: [{ id: 'fixture_tool', name: 'Fixture tool', description: 'Runs a fixture.' }],
       hooks: ['run:start', 'run:end'],
@@ -114,6 +112,27 @@ describe('Forage extension runtime host', () => {
     })`)
     const result = await validateForageExtensionEntry(fixtureValue.entry, fixtureValue.sourceConfiguration)
     expect(result.diagnostics[0]).toMatchObject({ code: 'manifest_runtime_tool_mismatch' })
+  })
+
+  it.each([
+    ['executor id', "id: 'undeclared'", "name: 'Summarize'", "configuration: { fields: [] }"],
+    ['metadata', "id: 'summarize'", "name: 'Other'", "configuration: { fields: [] }"],
+    ['configuration', "id: 'summarize'", "name: 'Summarize'", "configuration: { fields: [{ key: 'other', label: 'Other', type: 'text' }] }"],
+  ])('fails closed when runtime %s differs from its executor declaration', async (_case, id, name, configuration) => {
+    const value = await fixture(`export default (host) => host.registerSkillExecutor({
+      ${id}, ${name}, description: 'Formats notes.', ${configuration},
+      async validateConfiguration() { return { valid: true } },
+      async prepare() { return { selectedNodeIds: [], requestedReferenceIds: [], annotations: [], data: {} } },
+      async execute() { return { nodes: [{ type: 'text', segments: [{ type: 'text', text: 'Done' }] }] } }
+    })`, {
+      contributes: {
+        tools: [], hooks: [], settings: [], executors: [{
+          id: 'summarize', name: 'Summarize', description: 'Formats notes.', configuration: { fields: [] },
+        }],
+      },
+    })
+    const result = await validateForageExtensionEntry(value.entry, value.sourceConfiguration)
+    expect(result.diagnostics[0]).toMatchObject({ code: 'manifest_runtime_executor_mismatch' })
   })
 
   it('rejects unsupported schemas and invalid or oversized results', async () => {

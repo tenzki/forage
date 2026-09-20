@@ -39,8 +39,8 @@ import {
 } from '@forage/protocol'
 import { canonicalJson, sha256Hex, type OutlineState } from '@forage/domain'
 import {
-  AgentRuntimeError, migrateLegacyAgentConfiguration, resolveEffectiveToolIds,
-  type PortableAgentConfiguration, type RunInput,
+  AgentRuntimeError, migrateAgentConfiguration, resolveEffectiveToolIds,
+  type LlmSkillDefinition, type PortableAgentConfiguration, type RunInput,
 } from '@forage/agent-runtime'
 import type { BoundPrincipal, ServerRepository, TokenScope } from './repository.js'
 import { RepositoryError, requireBoundOutline } from './repository.js'
@@ -116,6 +116,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     documentSchemaVersion: 1,
     minimumClientVersion: '0.1.0',
     agentAdmissionVersions: [1, 2],
+    agentConfigurationVersions: [1, 2, 3],
     ...(options.outlineChangeNotifier ? { streamVersions: [1] } : {}),
   }))
 
@@ -169,7 +170,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = agentConfigurationPublishRequestSchema.parse(request.body)
-      const migrated = body.configuration.version === 1 ? migrateLegacyAgentConfiguration(body.configuration) : null
+      const migrated = body.configuration.version < 3 ? migrateAgentConfiguration(body.configuration) : null
       const published = await repository.agentStore.publishConfiguration(
         principal.outlineId, body.baseRevision, migrated?.configuration ?? body.configuration, principal.tokenId,
       )
@@ -391,6 +392,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const previous = await repository.agentStore.getRun(principal.outlineId, runId)
       if (!previous) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
       const configuration = await requireConfiguration(repository, principal.outlineId)
+      serverExecutableSkill(configuration, previous.skillId)
       const compute = await repository.agentStore.currentComputeProfile(principal.outlineId)
       if (!compute) throw new RepositoryError('compute_unavailable', 'No server compute profile is configured.', 'configure_compute')
       const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
@@ -589,7 +591,7 @@ async function makeRunInput(
   legacyInvocationId: string,
 ): Promise<{ input: RunInput; invocationId: string; intentHash: string }> {
   const configuration = await requireConfiguration(repository, principal.outlineId)
-  const skill = configuration.skills.find((candidate) => candidate.id === body.skillId)
+  const skill = serverExecutableSkill(configuration, body.skillId)
   const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
   if (!skill || !agent) throw new RepositoryError('configuration_unavailable', 'The selected skill is unavailable.', 'open_agent_settings')
   const compute = await repository.agentStore.currentComputeProfile(principal.outlineId)
@@ -630,7 +632,7 @@ function buildInputFromConfiguration(
   credentialRef: string,
   modelId?: string,
 ): RunInput {
-  const skill = configuration.skills.find((candidate) => candidate.id === skillId)
+  const skill = serverExecutableSkill(configuration, skillId)
   const agent = skill ? configuration.agents.find((candidate) => candidate.id === skill.agentId) : undefined
   if (!skill || !agent) throw new RepositoryError('conflict', 'The selected skill is unavailable in the current configuration.')
   let effectiveToolIds: string[]
@@ -650,6 +652,21 @@ function buildInputFromConfiguration(
     agent: { ...agent, modelId: modelId ?? '', credentialRef }, skill, effectiveToolIds,
     customTools: configuration.customTools,
   }
+}
+
+function serverExecutableSkill(
+  configuration: PortableAgentConfiguration,
+  skillId: string,
+): LlmSkillDefinition | undefined {
+  const skill = configuration.skills.find((candidate) => candidate.id === skillId)
+  if (skill?.execution === 'extension') {
+    throw new RepositoryError(
+      'capability_unavailable',
+      'Extension-backed skills are local-only and cannot be executed by the server. No desktop fallback was attempted.',
+      'run_locally',
+    )
+  }
+  return skill
 }
 
 function runSummary(run: AgentRunRecord) {

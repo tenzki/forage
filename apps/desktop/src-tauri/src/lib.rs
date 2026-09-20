@@ -67,6 +67,7 @@ pub fn run() {
             commands::agent_runs_clear,
             commands::agent_run_cancel,
             commands::agent_run_settle,
+            commands::agent_run_place_result,
             commands::agent_run_retry,
             commands::agent_run_interrupt_unfinished,
             commands::local_credential_store,

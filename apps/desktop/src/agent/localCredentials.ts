@@ -1,7 +1,7 @@
 import type { CodexAuthConfig } from './client'
 import type { CodexOAuthCredential } from './codexAuth'
 import { invoke } from '@tauri-apps/api/core'
-import type { ExtensionConfiguration, LocalExtensionSnapshot } from '@forage/agent-runtime'
+import type { ExtensionConfiguration, LocalExtensionExecutorSnapshot, LocalExtensionSnapshot } from '@forage/agent-runtime'
 
 export const LOCAL_OPENAI_CREDENTIAL_ID = 'local-openai'
 export const LOCAL_CODEX_CREDENTIAL_ID = 'local-openai-codex'
@@ -85,6 +85,25 @@ export async function resolveExtensionSecretValues(
     output[admitted.installationId] = values
   }
   return output
+}
+
+export async function resolveExtensionExecutorSecretValues(
+  snapshot: LocalExtensionExecutorSnapshot,
+  configuration: ExtensionConfiguration,
+  vault: { load: (reference: string) => Promise<string> },
+): Promise<Record<string, string>> {
+  if (snapshot.configurationRevision !== configuration.revision) {
+    throw new Error('Extension configuration changed before executor secret resolution; retry the run.')
+  }
+  const source = configuration.sources.find((candidate) => candidate.installationId === snapshot.source.installationId)
+  if (!source || !source.enabled || !source.trust.accepted || source.trust.extensionId !== snapshot.source.extensionId) {
+    throw new Error('The admitted extension executor source is no longer trusted and enabled.')
+  }
+  const values: Record<string, string> = {}
+  for (const [key, reference] of Object.entries(source.secretReferences ?? {})) {
+    values[key] = await vault.load(reference)
+  }
+  return values
 }
 
 function assertOAuthCredential(value: unknown): asserts value is CodexOAuthCredential {

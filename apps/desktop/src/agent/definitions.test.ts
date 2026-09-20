@@ -67,6 +67,7 @@ describe('agent and skill definitions', () => {
 
     expect(skill).toEqual({
       id: expect.any(String),
+      execution: 'llm',
       label: 'summarize',
       description: 'Summarize a branch',
       systemPrompt: 'Summarize.',
@@ -99,5 +100,14 @@ describe('agent and skill definitions', () => {
       agentId: agent.id,
       requiredToolIds: ['youtube_transcript'],
     }, [agent])).toThrow(/required tool/i)
+  })
+
+  it('validates generic extension executor references and preserves unknown configuration', () => {
+    const skill = validateSkillDraft({
+      id: 'extension-skill', execution: 'extension', label: 'label-notes', description: 'Label notes',
+      executor: { extensionId: 'dev.example.notes', executorId: 'label_notes' },
+      configuration: { prefix: 'Match', nested: { enabled: true } },
+    }, [])
+    expect(skill).toMatchObject({ execution: 'extension', configuration: { prefix: 'Match', nested: { enabled: true } } })
   })
 })

@@ -1,13 +1,13 @@
 import {
   activityEventSchema,
-  agentConfigurationSchema,
   portableAgentConfigurationSchema,
+  supportedAgentConfigurationSchema,
   computeProfileSchema,
-  migrateLegacyAgentConfiguration,
+  migrateAgentConfiguration,
   runInputSchema,
   type ActivityEvent,
-  type AgentConfiguration,
   type PortableAgentConfiguration,
+  type SupportedAgentConfiguration,
   type ComputeProfile,
   type RunInput,
   type RunStatus,
@@ -68,7 +68,7 @@ export interface AdmitRunInput {
 
 export interface AgentStore {
   currentConfiguration(outlineId: string): Promise<PublishedConfiguration | null>
-  publishConfiguration(outlineId: string, baseRevision: number, configuration: AgentConfiguration | PortableAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration>
+  publishConfiguration(outlineId: string, baseRevision: number, configuration: SupportedAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration>
   currentComputeProfile(outlineId: string): Promise<PublishedComputeProfile | null>
   publishComputeProfile(outlineId: string, baseRevision: number, profile: ComputeProfile, publishedBy?: string): Promise<PublishedComputeProfile>
   currentAutomation(outlineId: string): Promise<PublishedAutomation | null>
@@ -106,7 +106,7 @@ export class InMemoryAgentStore implements AgentStore {
     return cloneOrNull(this.configurations.get(outlineId))
   }
 
-  async publishConfiguration(outlineId: string, baseRevision: number, raw: AgentConfiguration | PortableAgentConfiguration): Promise<PublishedConfiguration> {
+  async publishConfiguration(outlineId: string, baseRevision: number, raw: SupportedAgentConfiguration): Promise<PublishedConfiguration> {
     const configuration = normalizeConfiguration(raw)
     const current = this.configurations.get(outlineId)
     if ((current?.configuration.revision ?? 0) !== baseRevision || configuration.revision !== baseRevision + 1) {
@@ -360,11 +360,11 @@ export class InMemoryAgentStore implements AgentStore {
   }
 }
 
-function normalizeConfiguration(raw: AgentConfiguration | PortableAgentConfiguration): PortableAgentConfiguration {
+function normalizeConfiguration(raw: SupportedAgentConfiguration): PortableAgentConfiguration {
   const cloned = structuredClone(raw)
   const portable = portableAgentConfigurationSchema.safeParse(cloned)
   if (portable.success) return portable.data
-  return migrateLegacyAgentConfiguration(agentConfigurationSchema.parse(cloned)).configuration
+  return migrateAgentConfiguration(supportedAgentConfigurationSchema.parse(cloned)).configuration
 }
 
 function isTerminal(status: RunStatus): boolean {

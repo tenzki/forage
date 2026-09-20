@@ -118,4 +118,46 @@ describe('activity calls', () => {
 
     expect(call.status).toBe('cancelled')
   })
+
+  it('rehydrates a retained generic result as complete but awaiting placement', () => {
+    const extensionSnapshot = {
+      version: 2 as const,
+      execution: 'extension' as const,
+      runId: 'extension-run', executionMode: 'local' as const, outlineId: 'outline-1',
+      source: { nodeId: 'removed-invocation', text: '' }, target: { parentId: 'removed-invocation' },
+      baseRevision: 0, configurationRevision: 3,
+      authority: { type: 'local-extension-executor' as const, executor: { extensionId: 'dev.example.notes', executorId: 'label' } },
+      localExecutorSnapshot: {
+        version: 1 as const, catalogRevision: 'a'.repeat(64), configurationRevision: 11,
+        source: { installationId: 'removed', extensionId: 'dev.example.notes', sourceRevision: 'one', entryDigest: 'b'.repeat(64), executorId: 'label' },
+      },
+      skill: {
+        id: 'label', execution: 'extension' as const, label: 'label', description: 'Label',
+        executor: { extensionId: 'dev.example.notes', executorId: 'label' }, configuration: {},
+      },
+      context: {
+        prompt: '', invocation: { id: 'removed-invocation', text: '/label', documentOrder: 1 },
+        roots: [{ id: 'candidate', text: 'Candidate', documentOrder: 0 }],
+        provenance: { ancestorPathIds: [], explicitLinkedRootIds: [] },
+      },
+      plan: {
+        selectedNodeIds: ['candidate'], requestedReferenceIds: ['candidate'], admittedReferenceIds: ['candidate'],
+        annotations: [], data: {},
+      },
+    }
+    const [call] = callsFromHistory([{
+      run: {
+        id: 'extension-run', outlineId: 'outline-1', snapshot: extensionSnapshot,
+        status: 'completed_unplaced', attemptCount: 1, resultIdentity: 'result:extension-run',
+        result: { version: 2, nodes: [{ type: 'text', segments: [{ type: 'text', text: 'Saved' }] }], sources: [] },
+        retryOfRunId: null, cancelRequestedAt: null, errorCode: null,
+        createdAt: '2026-09-20T10:00:00.000Z', updatedAt: '2026-09-20T10:00:01.000Z',
+      },
+      activity: [],
+    }])
+
+    expect(call).toMatchObject({
+      id: 'extension-run', label: 'Run /label', status: 'complete', placementPending: true,
+    })
+  })
 })

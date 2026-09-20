@@ -14,8 +14,8 @@ async function setup() {
   const source = path.join(root, 'source')
   await mkdir(path.join(source, 'dist'), { recursive: true })
   await writeFile(path.join(source, 'forage.extension.json'), JSON.stringify({
-    manifestVersion: 1, id: 'dev.example.management', name: 'Management', version: '1.0.0',
-    description: 'Management fixture.', entry: './dist/index.mjs', apiVersion: '1',
+    id: 'dev.example.management', name: 'Management', version: '1.0.0',
+    description: 'Management fixture.', entry: './dist/index.mjs',
     contributes: { tools: [], hooks: [], settings: [] },
   }))
   await writeFile(path.join(source, 'dist/index.mjs'), 'export default () => undefined')

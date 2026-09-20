@@ -16,6 +16,26 @@ function input(): RunInput {
 }
 
 describe('server agent executor', () => {
+  const status = (configurationVersions?: number[]) => ({
+    instanceId: 'server-1', apiVersions: [1], eventVersions: { 'agent.result_committed': [1] },
+    agentOriginVersions: [1], minimumAgentClientVersion: '0.1.0', documentSchemaVersion: 1,
+    minimumClientVersion: '0.1.0', ...(configurationVersions ? { agentConfigurationVersions: configurationVersions } : {}),
+  })
+
+  const extensionConfiguration = {
+    version: 3 as const,
+    revision: 2,
+    agents: [],
+    skills: [{
+      id: 'extension-skill', label: 'extension-skill', description: 'Generic extension skill.',
+      execution: 'extension' as const,
+      executor: { extensionId: 'dev.example.notes', executorId: 'summarize' },
+      configuration: { unknownFeatureSetting: { retained: true } },
+    }],
+    customTools: [],
+    globallyEnabledToolIds: [],
+  }
+
   it('uses narrow native commands and resolves only after a terminal server result', async () => {
     const invoke = vi.fn(async (command: string) => {
       if (command === 'server_agent_invoke') return { runId: 'run-server', status: 'queued', admittedAt: '2026-08-31T10:00:00.000Z' }
@@ -73,5 +93,61 @@ describe('server agent executor', () => {
     await expect(executor.invoke({ ...input(), executionMode: 'local' })).rejects.toThrow(/server/i)
     await expect(executor.invoke(input())).rejects.toThrow('server unavailable')
     expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads historical LLM configuration responses into the current shape', async () => {
+    const invoke = vi.fn(async () => ({
+      configuration: {
+        version: 2, revision: 1,
+        agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', toolIds: [] }],
+        skills: [{ id: 'skill', label: 'skill', description: 'Skill', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] }],
+        customTools: [], globallyEnabledToolIds: [],
+      },
+      publishedAt: '2026-08-31T10:00:00.000Z',
+    }))
+
+    await expect(new TauriServerAgentTransport(invoke).configuration()).resolves.toMatchObject({
+      configuration: { version: 3, skills: [{ execution: 'llm' }] },
+    })
+  })
+
+  it('blocks extension configuration before publishing to an unsupported peer', async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'server_test_connection') return status()
+      throw new Error(`unexpected ${command}`)
+    })
+
+    await expect(new TauriServerAgentTransport(invoke).publishConfiguration({
+      baseRevision: 1, configuration: extensionConfiguration,
+    })).rejects.toThrow(/upgrade.*server/i)
+    expect(invoke).not.toHaveBeenCalledWith('server_agent_publish_configuration', expect.anything())
+  })
+
+  it('verifies that a compatible peer preserves unknown extension configuration', async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'server_test_connection') return status([1, 2, 3])
+      if (command === 'server_agent_publish_configuration') return {
+        configuration: extensionConfiguration,
+        publishedAt: '2026-08-31T10:00:00.000Z',
+      }
+      throw new Error(`unexpected ${command}`)
+    })
+    const transport = new TauriServerAgentTransport(invoke)
+
+    await expect(transport.publishConfiguration({
+      baseRevision: 1, configuration: extensionConfiguration,
+    })).resolves.toMatchObject({ configuration: extensionConfiguration })
+
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'server_test_connection') return status([3])
+      if (command === 'server_agent_publish_configuration') return {
+        configuration: { ...extensionConfiguration, skills: [] },
+        publishedAt: '2026-08-31T10:00:00.000Z',
+      }
+      throw new Error(`unexpected ${command}`)
+    })
+    await expect(transport.publishConfiguration({
+      baseRevision: 1, configuration: extensionConfiguration,
+    })).rejects.toThrow(/did not preserve/i)
   })
 })

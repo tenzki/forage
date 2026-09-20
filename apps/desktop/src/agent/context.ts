@@ -1,4 +1,9 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import {
+  extensionSkillContextSnapshotSchema,
+  type ExtensionSkillContextNode,
+  type ExtensionSkillContextSnapshot,
+} from '@forage/agent-runtime'
 import { collectInternalLinkReferences } from '../editor/internalLinks'
 
 export const AGENT_CONTEXT_MAX_NODES = 100
@@ -11,6 +16,13 @@ interface OutlineEntry {
   parent: OutlineEntry | null
   children: OutlineEntry[]
   node: ProseMirrorNode
+}
+
+export interface ResolvedExtensionSkillContext {
+  snapshot: ExtensionSkillContextSnapshot
+  localNodeIds: string[]
+  referencedNodeIds: string[]
+  admittedReferenceIds: string[]
 }
 
 export interface ReferencedContextGroup {
@@ -31,6 +43,7 @@ export interface ResolvedAgentContext {
   nodeCount: number
   characterCount: number
 }
+
 
 function outlineEntries(doc: ProseMirrorNode): { ordered: OutlineEntry[]; byId: Map<string, OutlineEntry> } {
   const ordered: OutlineEntry[] = []
@@ -167,5 +180,83 @@ export function resolveAgentContext(
     lines: serialized ? [serialized] : [],
     nodeCount,
     characterCount,
+  }
+}
+
+function snapshotNode(
+  entry: OutlineEntry,
+  included: ReadonlySet<string>,
+  documentOrder: ReadonlyMap<OutlineEntry, number>,
+): ExtensionSkillContextNode {
+  const children = entry.children
+    .filter((child) => included.has(child.id))
+    .map((child) => snapshotNode(child, included, documentOrder))
+  return {
+    id: entry.id,
+    text: entry.text,
+    documentOrder: documentOrder.get(entry) ?? 0,
+    ...(children.length ? { children } : {}),
+  }
+}
+
+/**
+ * Build the single immutable tree supplied to a generic extension executor.
+ * The application, rather than extension code, owns outline scope and link resolution.
+ */
+export function resolveExtensionSkillContext(
+  doc: ProseMirrorNode,
+  invocationNodeId: string,
+  prompt: string,
+): ResolvedExtensionSkillContext {
+  const { ordered, byId } = outlineEntries(doc)
+  const invocation = byId.get(invocationNodeId)
+  if (!invocation) throw new Error('Could not locate the skill invocation bullet.')
+  const documentOrder = new Map(ordered.map((entry, index) => [entry, index]))
+
+  const local = localEntries(invocation)
+  const groups = referencedGroups(invocation, byId, local.entries)
+  const localIds = new Set(local.entries.map((entry) => entry.id))
+  const referencedIds = new Set(groups.flatMap((group) => group.nodeIds))
+  const included = new Set([...localIds, ...referencedIds])
+  const roots: ExtensionSkillContextNode[] = []
+  if (local.root) roots.push(snapshotNode(local.root, included, documentOrder))
+  for (const group of groups) {
+    const root = byId.get(group.targetId)
+    if (root && included.has(root.id)) roots.push(snapshotNode(root, included, documentOrder))
+  }
+
+  const snapshot = extensionSkillContextSnapshotSchema.parse({
+    prompt,
+    invocation: {
+      id: invocation.id,
+      text: invocation.node.firstChild?.textContent ?? '',
+      ...(invocation.parent ? { parentId: invocation.parent.id } : {}),
+      documentOrder: documentOrder.get(invocation) ?? 0,
+    },
+    roots,
+    provenance: {
+      ancestorPathIds: local.entries.filter((entry) => {
+        let current = invocation.parent
+        while (current) {
+          if (current === entry) return true
+          current = current.parent
+        }
+        return false
+      }).map((entry) => entry.id),
+      ...(invocation.parent ? { localParentId: invocation.parent.id } : {}),
+      ...(local.root ? { localBranchRootId: local.root.id } : {}),
+      explicitLinkedRootIds: groups.map((group) => group.targetId),
+    },
+  })
+  const admittedReferenceIds = [...local.entries, ...groups.flatMap((group) => (
+    group.nodeIds.map((id) => byId.get(id)).filter((entry): entry is OutlineEntry => Boolean(entry))
+  ))]
+    .sort((left, right) => (documentOrder.get(left) ?? 0) - (documentOrder.get(right) ?? 0))
+    .map((entry) => entry.id)
+  return {
+    snapshot,
+    localNodeIds: [...localIds],
+    referencedNodeIds: [...referencedIds],
+    admittedReferenceIds,
   }
 }
