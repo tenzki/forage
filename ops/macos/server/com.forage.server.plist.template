@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.forage.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>__FORAGE_SERVER_ROOT__/ops/macos/server/run-server.zsh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__FORAGE_SERVER_ROOT__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__FORAGE_HOME__</string>
+    <key>PATH</key>
+    <string>__FORAGE_SERVICE_PATH__</string>
+    <key>FORAGE_SERVER_ROOT</key>
+    <string>__FORAGE_SERVER_ROOT__</string>
+    <key>FORAGE_SERVER_ENV_FILE</key>
+    <string>__FORAGE_SERVER_ENV_FILE__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>__FORAGE_LOG_DIR__/stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__FORAGE_LOG_DIR__/stderr.log</string>
+</dict>
+</plist>

@@ -30,6 +30,75 @@ pnpm dev:down    # stop compose infrastructure
 
 The development API listens at `http://127.0.0.1:3210`. Production invocations of `@forage/server` still require explicit `DATABASE_URL`, `FORAGE_INSTANCE_ID`, and `FORAGE_ASSET_DIR`; development defaults exist only in the root orchestration scripts.
 
+## Run an isolated self-hosted server
+
+Use [`compose.server.yaml`](../compose.server.yaml) for a long-running personal server whose database and port are independent from the development stack. It creates the `forage-server` Compose project, listens for PostgreSQL only on loopback port `55438`, and stores its data in a dedicated named volume. The existing `compose.yaml`, `pnpm dev`, and `pnpm dev:down` commands continue to manage only development infrastructure.
+
+Run the server from a dedicated checkout so dependency installation and source updates do not disturb active development. The repository does not yet produce a standalone server artifact, so the Node process currently runs from that checkout with `tsx`. Install it with the locked dependency graph:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+Copy the tracked environment template outside the checkout, generate its two secrets using the commands in its comments, and restrict access to it. The template uses the reserved, non-deliverable `owner@forage.invalid` address because owner email is currently internal metadata rather than authentication or a delivery address.
+
+```bash
+mkdir -p "$HOME/.config/forage-server" "$HOME/.local/share/forage-server/assets"
+cp .env.server.example "$HOME/.config/forage-server/server.env"
+chmod 600 "$HOME/.config/forage-server/server.env"
+```
+
+Start the dedicated PostgreSQL instance from the server checkout:
+
+```bash
+podman compose \
+  --env-file "$HOME/.config/forage-server/server.env" \
+  --file compose.server.yaml \
+  up -d --wait
+```
+
+Load the same environment into the shell, apply migrations, and bootstrap the one owner. Bootstrapping prints the initial API and device tokens exactly once, so store them before closing the terminal.
+
+```bash
+set -a
+. "$HOME/.config/forage-server/server.env"
+set +a
+
+pnpm --filter @forage/server db:migrate
+pnpm --filter @forage/server bootstrap
+pnpm --filter @forage/server start
+```
+
+The API listens at `http://127.0.0.1:3220` with the template defaults. Confirm both process and database health before connecting the desktop:
+
+```bash
+curl --fail http://127.0.0.1:3220/health/live
+curl --fail http://127.0.0.1:3220/health/ready
+```
+
+Use `http://127.0.0.1:3220` and the bootstrap device token in Settings → Connection. For unattended use on macOS, run `./ops/macos/server/install.zsh` or follow the repository's [`launchd` service template guide](../ops/macos/server/README.md). They belong to the optional server deployment and are not part of the desktop application bundle. Leave the API bound to loopback; access from another machine requires an HTTPS reverse proxy because the desktop accepts plain HTTP only for loopback origins.
+
+Stop both the API service and its dedicated PostgreSQL container without stopping the shared Podman machine or deleting server data:
+
+```bash
+./ops/macos/server/stop-server.zsh
+```
+
+Stop or start only this database with the explicit server Compose file:
+
+```bash
+podman compose \
+  --env-file "$HOME/.config/forage-server/server.env" \
+  --file compose.server.yaml \
+  stop
+podman compose \
+  --env-file "$HOME/.config/forage-server/server.env" \
+  --file compose.server.yaml \
+  start
+```
+
+Before upgrading the checkout, back up PostgreSQL and `FORAGE_ASSET_DIR`, stop the API process, install the new locked dependencies, apply migrations, and restart it. Preserve `FORAGE_INSTANCE_ID` and every encryption key version still needed to decrypt enrolled provider credentials.
+
 Use Settings → Connection to supply the server origin and device token. There is no outline ID to enter: the desktop supplies its own. HTTPS is required except for an HTTP loopback origin. The native client records the server instance identity, stores the token in the SQLite credential store (ADR-0014), rejects redirects, and will not send it to another origin.
 
 The wizard's **Copy** step performs the seed. It replays this device's local events to a document state, uploads every referenced image, sends the result as the server's revision-0 checkpoint, and publishes portable agent configuration: agents, skills, custom tools, and enabled tools. Model and credential choices are not portable configuration; each environment keeps its own compute profile. Provisioning steps and the last confirmed configuration mirror are persisted locally, so an interrupted setup resumes instead of relying on an agent run to repair it.

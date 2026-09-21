@@ -1,0 +1,23 @@
+name: forage-server
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forage_server}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the server environment file}
+      POSTGRES_DB: ${POSTGRES_DB:-forage_server}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55438}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - forage-server-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  forage-server-postgres-data:
