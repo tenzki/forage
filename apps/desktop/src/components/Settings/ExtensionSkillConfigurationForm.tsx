@@ -4,6 +4,7 @@ import type {
   ExtensionSkillConfigurationField,
   ExtensionSkillConfigurationForm as ExtensionSkillConfigurationFormDefinition,
 } from '@forage/agent-runtime'
+import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 
 export interface ConfigurationIssue {
   path: Array<string | number>
@@ -97,6 +98,20 @@ function issueFor(issues: readonly ConfigurationIssue[], path: readonly (string 
     && issue.path.every((segment, index) => segment === path[index]))?.message
 }
 
+function FieldLabel({ field }: { field: ExtensionSkillConfigurationField }) {
+  return <span className="extension-skill-label">
+    {field.label}
+    {!field.required && <>{' '}<span className="extension-skill-optional">Optional</span></>}
+  </span>
+}
+
+function FieldHints({ description, error }: { description?: string; error?: string }) {
+  return <>
+    {description && <small className="extension-skill-hint">{description}</small>}
+    {error && <small className="extension-skill-hint is-error">{error}</small>}
+  </>
+}
+
 function Fields({ fields, path, configuration, issues, onChange }: {
   fields: readonly ExtensionSkillConfigurationField[]
   path: Array<string | number>
@@ -108,50 +123,69 @@ function Fields({ fields, path, configuration, issues, onChange }: {
     const fieldPath = [...path, field.key]
     const value = valueAt(configuration, fieldPath)
     const error = issueFor(issues, fieldPath)
-    const hint = [field.description, error].filter(Boolean).join(' ')
-    if (field.type === 'boolean') return <label key={field.key} className="extension-skill-field extension-skill-checkbox">
-      <input type="checkbox" aria-label={field.label} checked={value === true} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.checked))} />
-      <span>{field.label}{field.required ? ' (required)' : ''}</span>
-      {hint && <small className={error ? 'settings-error' : undefined}>{hint}</small>}
-    </label>
-    if (field.type === 'choice') return <label key={field.key} className="extension-skill-field">{field.label}{field.required ? ' (required)' : ''}
+    if (field.type === 'boolean') return <div key={field.key} className="extension-skill-field is-wide">
+      <SwitchFieldInput
+        checked={value === true}
+        onCheckedChange={(checked) => onChange(updateAt(configuration, fieldPath, checked))}
+        label={field.label}
+        switchAriaLabel={field.label}
+        hint={field.description}
+      />
+      <FieldHints error={error} />
+    </div>
+    if (field.type === 'choice') return <label key={field.key} className="extension-skill-field">
+      <FieldLabel field={field} />
       <select aria-label={field.label} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value || undefined))}>
         {!field.required && <option value="">Not set</option>}
         {field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
-      {hint && <small className={error ? 'settings-error' : undefined}>{hint}</small>}
+      <FieldHints description={field.description} error={error} />
     </label>
     if (field.type === 'text' || field.type === 'multiline') {
       const control = field.type === 'multiline'
-        ? <textarea aria-label={field.label} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
+        ? <textarea aria-label={field.label} rows={3} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
         : <input aria-label={field.label} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
-      return <label key={field.key} className="extension-skill-field">{field.label}{field.required ? ' (required)' : ''}{control}
-        {hint && <small className={error ? 'settings-error' : undefined}>{hint}</small>}
+      return <label key={field.key} className={field.type === 'multiline' ? 'extension-skill-field is-wide' : 'extension-skill-field'}>
+        <FieldLabel field={field} />
+        {control}
+        <FieldHints description={field.description} error={error} />
       </label>
     }
-    if (field.type === 'number') return <label key={field.key} className="extension-skill-field">{field.label}{field.required ? ' (required)' : ''}
+    if (field.type === 'number') return <label key={field.key} className="extension-skill-field">
+      <FieldLabel field={field} />
       <input aria-label={field.label} type="number" value={typeof value === 'number' ? value : ''} min={field.minimum} max={field.maximum} step={field.integer ? 1 : 'any'} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value === '' ? undefined : event.target.valueAsNumber))} />
-      {hint && <small className={error ? 'settings-error' : undefined}>{hint}</small>}
+      <FieldHints description={field.description} error={error} />
     </label>
-    if (field.type === 'object') return <fieldset key={field.key} className="agent-tool-list"><legend>{field.label}{field.required ? ' (required)' : ''}</legend>
-      {field.description && <small>{field.description}</small>}
-      <Fields fields={field.fields} path={fieldPath} configuration={configuration} issues={issues} onChange={onChange} />
-      {error && <small className="settings-error">{error}</small>}
+    if (field.type === 'object') return <fieldset key={field.key} className="extension-skill-group is-wide">
+      <legend><FieldLabel field={field} /></legend>
+      <FieldHints description={field.description} />
+      <div className="extension-skill-fields">
+        <Fields fields={field.fields} path={fieldPath} configuration={configuration} issues={issues} onChange={onChange} />
+      </div>
+      <FieldHints error={error} />
     </fieldset>
     if (field.type !== 'repeat') return null
     const items = Array.isArray(value) ? value : []
-    return <fieldset key={field.key} className="agent-tool-list"><legend>{field.label}{field.required ? ' (required)' : ''}</legend>
-      {field.description && <small>{field.description}</small>}
-      {items.map((_, index) => <div className="extension-skill-repeat" key={index}>
-        <Fields fields={field.fields} path={[...fieldPath, index]} configuration={configuration} issues={issues} onChange={onChange} />
-        <button type="button" className="settings-secondary" disabled={items.length <= (field.minimumItems ?? 0)} onClick={() => onChange(updateAt(configuration, [...fieldPath, index], undefined))}>Remove {field.label}</button>
-      </div>)}
-      <button type="button" className="settings-secondary" disabled={items.length >= field.maximumItems} onClick={() => {
+    return <fieldset key={field.key} className="extension-skill-group is-wide">
+      <legend><FieldLabel field={field} /></legend>
+      <FieldHints description={field.description} />
+      <ol className="extension-skill-items">
+        {items.map((_, index) => <li className="extension-skill-item" key={index}>
+          <div className="extension-skill-item-header">
+            <span>#{index + 1}</span>
+            <button type="button" className="extension-skill-remove" aria-label={`Remove ${field.label}`} disabled={items.length <= (field.minimumItems ?? 0)} onClick={() => onChange(updateAt(configuration, [...fieldPath, index], undefined))}>Remove</button>
+          </div>
+          <div className="extension-skill-fields">
+            <Fields fields={field.fields} path={[...fieldPath, index]} configuration={configuration} issues={issues} onChange={onChange} />
+          </div>
+        </li>)}
+      </ol>
+      <button type="button" className="settings-secondary extension-skill-add" aria-label={`Add ${field.label}`} disabled={items.length >= field.maximumItems} onClick={() => {
         const item: ExtensionJsonObject = {}
         applyDefaults(field.fields, item)
         onChange(updateAt(configuration, fieldPath, [...items, item]))
-      }}>Add {field.label}</button>
-      {error && <small className="settings-error">{error}</small>}
+      }}>+ Add another</button>
+      <FieldHints error={error} />
     </fieldset>
   })}</>
 }
@@ -164,7 +198,7 @@ export function ExtensionSkillConfigurationForm({ form, configuration, issues = 
 }) {
   const activeBranches = (form.branches ?? []).filter((branch) => configuration[branch.when.field] === branch.when.equals)
   const emit = (next: ExtensionJsonObject) => onChange(configurationWithDefaults(form, next))
-  return <div className="extension-skill-configuration" role="group" aria-label="Extension skill configuration">
+  return <div className="extension-skill-configuration extension-skill-fields" role="group" aria-label="Extension skill configuration">
     <Fields fields={form.fields} path={[]} configuration={configuration} issues={issues} onChange={emit} />
     {activeBranches.map((branch, index) => <Fields key={`${branch.when.field}:${String(branch.when.equals)}:${index}`} fields={branch.fields} path={[]} configuration={configuration} issues={issues} onChange={emit} />)}
   </div>

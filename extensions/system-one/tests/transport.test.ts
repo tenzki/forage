@@ -188,6 +188,30 @@ describe('TypeSafe Jev transport', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
+  it('accepts Score answers rounded to two decimals and still rejects real mismatches', () => {
+    const configuration = scoreConfiguration({
+      levels: [
+        { label: 'Weak', description: 'Unclear value.' },
+        { label: 'Plausible', description: 'Clear value with unknowns.' },
+        { label: 'Strong', description: 'Clear value and achievable.' },
+      ],
+    })
+    const request = buildTypeSafeRequest(configuration, preparedData, '')
+    const answer = (probabilities: Record<string, number>, score: number) => {
+      const criteria = (request.questions.candidate_0 as { criteria: string[] }).criteria
+      return { type: 'score', score, legend: { 0: criteria[0], 1: criteria[1], 2: criteria[2] }, probabilities, confidence: 0.8 }
+    }
+    // Observed from TypeSafe: the weighted index of the rounded distribution is 1.25.
+    expect(() => validateTypeSafeResponse(response({
+      candidate_0: answer({ 0: 0.14, 1: 0.47, 2: 0.39 }, 1.26),
+      candidate_1: answer({ 0: 0.34, 1: 0.33, 2: 0.34 }, 1),
+    }), request)).not.toThrow()
+    expect(() => validateTypeSafeResponse(response({
+      candidate_0: answer({ 0: 0.14, 1: 0.47, 2: 0.39 }, 1.4),
+      candidate_1: answer({ 0: 0.34, 1: 0.33, 2: 0.34 }, 1),
+    }), request)).toThrow(/does not match its probability distribution/i)
+  })
+
   it('documents a narrow distribution tolerance', () => {
     expect(PROBABILITY_SUM_TOLERANCE).toBe(0.001)
   })

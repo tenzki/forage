@@ -218,6 +218,13 @@ export function OutlinerSidebar({
     focusFirstChildOrCreate(editor, inbox.id, newNodeId)
   }
 
+  function openSearch() {
+    onOpenOutline()
+    window.dispatchEvent(new CustomEvent(OUTLINER_OPEN_SEARCH_EVENT, {
+      detail: { query: '', scopeId: null },
+    }))
+  }
+
   function openDailyNotes() {
     onOpenDailyNotes()
   }
@@ -280,6 +287,17 @@ export function OutlinerSidebar({
 
   return (
     <aside ref={sidebarRef} className={`outline-sidebar${collapsed ? ' is-collapsed' : ''}${dragOver ? ' is-drop-target' : ''}`} aria-label="Outline sidebar">
+      <button
+        className="sidebar-search"
+        onClick={openSearch}
+        title="Search (⌘K / Ctrl+K)"
+        aria-label="Search"
+        aria-keyshortcuts="Meta+K Control+K"
+      >
+        <SearchIcon className="sidebar-primary-icon" aria-hidden="true" />
+        <span className="sidebar-primary-label">Search</span>
+        <kbd className="sidebar-search-kbd">⌘K</kbd>
+      </button>
       <div className="sidebar-top-row">
         <button
           className={`sidebar-home${homeActive ? ' is-active' : ''}`}

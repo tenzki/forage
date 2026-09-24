@@ -4,6 +4,8 @@ import type { PreparedCandidate, PreparedSystemOneData } from './preparation.js'
 
 export const TYPESAFE_SYSTEM_ONE_URL = 'https://api.typesafe.ai/v1/systemone'
 export const PROBABILITY_SUM_TOLERANCE = 0.001
+/** TypeSafe reports probabilities and scores rounded to two decimal places. */
+export const REPORTED_ROUNDING_ERROR = 0.005
 export const TYPESAFE_REQUEST_TIMEOUT_MS = 60_000
 const MAX_REQUEST_BYTES = 256_000
 const MAX_RESPONSE_BYTES = 1_000_000
@@ -289,8 +291,12 @@ function validateScoreAnswer(value: unknown, question: ScoreQuestion): ScoreAnsw
     throw malformed('TypeSafe Score value is outside its rubric.')
   }
   const weighted = expected.reduce((sum, key, index) => sum + index * probabilities[key]!, 0)
-  if (Math.abs(weighted - value.score) > PROBABILITY_SUM_TOLERANCE) {
-    throw malformed('TypeSafe Score value does not match its probability distribution.')
+  // Each rounded probability can shift the weighted index by up to its level times the
+  // rounding error, and the reported score is rounded as well.
+  const scoreTolerance = PROBABILITY_SUM_TOLERANCE + REPORTED_ROUNDING_ERROR * expected.reduce((sum, _, index) => sum + index, 1)
+  if (Math.abs(weighted - value.score) > scoreTolerance) {
+    const distribution = expected.map((key) => `${key}: ${probabilities[key]}`).join(', ')
+    throw malformed(`TypeSafe Score value does not match its probability distribution (score ${value.score}, weighted level index ${weighted.toFixed(4)}, probabilities {${distribution}}).`)
   }
   return { type: 'score', score: value.score, legend: legend as Record<string, string>, probabilities, confidence }
 }
@@ -305,8 +311,9 @@ function validateNoulAnswer(value: unknown): NoulAnswer {
 function probabilityDistribution(value: Record<string, unknown>, label: string): Record<string, number> {
   const output = Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, probability(entry, `${label} probability`)]))
   const sum = Object.values(output).reduce((total, entry) => total + entry, 0)
-  if (Math.abs(sum - 1) > PROBABILITY_SUM_TOLERANCE) {
-    throw malformed(`${label} probabilities do not sum to one within ${PROBABILITY_SUM_TOLERANCE}.`)
+  const sumTolerance = PROBABILITY_SUM_TOLERANCE + REPORTED_ROUNDING_ERROR * Object.keys(output).length
+  if (Math.abs(sum - 1) > sumTolerance) {
+    throw malformed(`${label} probabilities do not sum to one within ${Number(sumTolerance.toFixed(4))}.`)
   }
   return output
 }

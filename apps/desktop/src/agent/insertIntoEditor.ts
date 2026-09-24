@@ -11,7 +11,8 @@
 
 import type { Editor } from '@tiptap/react'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { TextSelection } from '@tiptap/pm/state'
+import { TextSelection, type Transaction } from '@tiptap/pm/state'
+import { closeHistory } from '@tiptap/pm/history'
 import { setAgentActivity } from '../editor/outlinerUi'
 import { newNodeId } from '../types/tree'
 import type { CodexAuthConfig } from './client'
@@ -519,8 +520,15 @@ function findListItem(
   editor: Editor,
   nodeId: string,
 ): { pos: number; node: ProseMirrorNode } | null {
+  return findListItemIn(editor.state.doc, nodeId)
+}
+
+function findListItemIn(
+  doc: ProseMirrorNode,
+  nodeId: string,
+): { pos: number; node: ProseMirrorNode } | null {
   let found: { pos: number; node: ProseMirrorNode } | null = null
-  editor.state.doc.descendants((node, pos) => {
+  doc.descendants((node, pos) => {
     if (found || node.type.name !== 'listItem' || node.attrs.nodeId !== nodeId) return
     found = { pos, node }
     return false
@@ -538,10 +546,53 @@ function validatedExtensionResult(
 }
 
 /**
+ * Permute sibling bullets among the slots they already occupy. Other siblings
+ * keep their places, and an already ordered list is left untouched.
+ */
+function applyExtensionReorder(transaction: Transaction, nodeIds: readonly string[]): void {
+  const items = nodeIds.map((nodeId) => {
+    const item = findListItemIn(transaction.doc, nodeId)
+    if (!item) throw new Error('A bullet the extension reordered is no longer available.')
+    return item
+  })
+  const $first = transaction.doc.resolve(items[0]!.pos)
+  const list = $first.parent
+  const listPos = $first.before()
+  if (items.some((item) => transaction.doc.resolve(item.pos).before() !== listPos)) {
+    throw new Error('The bullets the extension reordered no longer share one parent.')
+  }
+  const moved = new Set(nodeIds)
+  let next = 0
+  const children: ProseMirrorNode[] = []
+  let changed = false
+  list.forEach((child) => {
+    if (!moved.has(String(child.attrs.nodeId))) {
+      children.push(child)
+      return
+    }
+    const replacement = items[next++]!.node
+    if (replacement !== child) changed = true
+    children.push(replacement)
+  })
+  if (!changed) return
+  transaction.replaceWith(listPos + 1, listPos + list.nodeSize - 1, children)
+}
+
+/** Remove a list item, or its whole list when it is the only item. */
+function deleteListItem(transaction: Transaction, pos: number, node: ProseMirrorNode): void {
+  const $pos = transaction.doc.resolve(pos)
+  if ($pos.parent.childCount === 1 && $pos.depth > 0) {
+    transaction.delete($pos.before(), $pos.after())
+    return
+  }
+  transaction.delete(pos, pos + node.nodeSize)
+}
+
+/**
  * Materialize a complete generic extension result as ordinary list items in one
  * transaction. Deterministic run-scoped ids make recovery idempotent if the app
  * closes after the document event is persisted but before the retained run is
- * marked placed.
+ * marked placed. A reorder is idempotent by construction.
  */
 export function insertExtensionSkillResult(
   editor: Editor,
@@ -552,25 +603,42 @@ export function insertExtensionSkillResult(
 ): string[] {
   const materializable = validatedExtensionResult(result, admittedReferenceIds)
   const rootNodeIds = materializable.nodes.map((_, index) => extensionResultNodeId(runId, [index]))
-  const existing = rootNodeIds.filter((nodeId) => findListItem(editor, nodeId))
-  if (existing.length === rootNodeIds.length) return rootNodeIds
-  if (existing.length) throw new Error('The retained extension result is only partially present in the outline.')
-  const target = findListItem(editor, targetNodeId)
-  if (!target) throw new Error('The extension skill output target is no longer available.')
-  const items = materializable.nodes.map((node, index) => createExtensionResultItem(editor, node, runId, [index]))
+  // A root hoisted into its invocation bullet is present through its first child.
+  const existing = rootNodeIds.filter((nodeId, index) => findListItem(editor, nodeId)
+    || (materializable.nodes[index]?.children?.length && findListItem(editor, extensionResultNodeId(runId, [index, 0]))))
+  if (existing.length && existing.length !== rootNodeIds.length) {
+    throw new Error('The retained extension result is only partially present in the outline.')
+  }
+  const insertNodes = rootNodeIds.length > 0 && existing.length === 0
   const transaction = editor.state.tr
-  transaction.insert(
-    target.pos + target.node.nodeSize - 1,
-    editor.schema.nodes.bulletList.create(null, items),
-  )
+  if (materializable.reorder) applyExtensionReorder(transaction, materializable.reorder.nodeIds)
+  if (insertNodes) {
+    const target = findListItemIn(transaction.doc, targetNodeId)
+    if (!target) throw new Error('The extension skill output target is no longer available.')
+    const items = materializable.nodes.map((node, index) => createExtensionResultItem(editor, node, runId, [index]))
+    transaction.insert(
+      target.pos + target.node.nodeSize - 1,
+      editor.schema.nodes.bulletList.create(null, items),
+    )
+  }
+  const revealed = rootNodeIds.length ? rootNodeIds : [...materializable.reorder?.nodeIds ?? []]
+  if (!transaction.docChanged) return revealed
+  closeHistory(transaction)
   transaction.setMeta('forageOrigin', 'agent')
   transaction.setMeta('forageChangeGroup', runId)
   editor.view.dispatch(transaction)
-  revealAgentResult(editor, rootNodeIds)
-  return rootNodeIds
+  revealAgentResult(editor, revealed)
+  return revealed
 }
 
-/** Place under the original invocation and remove only its slash-command prefix. */
+/**
+ * Place under the original invocation and remove only its slash-command prefix.
+ * When the invocation carries no prompt and the result is a single root with
+ * children, that root's text replaces the invocation text and its children are
+ * placed directly under it, so the command bullet becomes the result heading.
+ * A reorder-only result moves the admitted siblings and removes an invocation
+ * that carries no prompt, so no new bullets remain.
+ */
 export function commitExtensionSkillResult(
   editor: Editor,
   invocationNodeId: string,
@@ -580,7 +648,10 @@ export function commitExtensionSkillResult(
   admittedReferenceIds: Iterable<string>,
 ): string[] {
   const materializable = validatedExtensionResult(result, admittedReferenceIds)
-  const target = findListItem(editor, invocationNodeId)
+  if (!findListItem(editor, invocationNodeId)) throw new Error('The extension skill invocation target is no longer available.')
+  const transaction = editor.state.tr
+  if (materializable.reorder) applyExtensionReorder(transaction, materializable.reorder.nodeIds)
+  const target = findListItemIn(transaction.doc, invocationNodeId)
   if (!target) throw new Error('The extension skill invocation target is no longer available.')
   const rootNodeIds = materializable.nodes.map((_, index) => extensionResultNodeId(runId, [index]))
   const items = materializable.nodes.map((node, index) => createExtensionResultItem(editor, node, runId, [index]))
@@ -589,15 +660,31 @@ export function commitExtensionSkillResult(
   const prefix = `/${skillLabel}`
   let prefixLength = text.startsWith(prefix) ? prefix.length : 0
   while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
-  const transaction = editor.state.tr
-  if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
-  const insertPosition = transaction.mapping.map(target.pos + target.node.nodeSize - 1, -1)
-  transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
+  const promptless = !text.slice(prefixLength).trim()
+  const [onlyRoot] = materializable.nodes
+  let revealed = rootNodeIds
+  if (!items.length) {
+    revealed = [...materializable.reorder?.nodeIds ?? []]
+    if (promptless && target.node.childCount === 1) deleteListItem(transaction, target.pos, target.node)
+    else if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
+  } else if (paragraph && items.length === 1 && onlyRoot?.children?.length && promptless) {
+    const rootItem = items[0]!
+    transaction.replaceWith(target.pos + 2, target.pos + 2 + paragraph.content.size, rootItem.child(0).content)
+    const insertPosition = transaction.mapping.map(target.pos + target.node.nodeSize - 1, -1)
+    transaction.insert(insertPosition, rootItem.child(1))
+    revealed = [invocationNodeId]
+  } else {
+    if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
+    const insertPosition = transaction.mapping.map(target.pos + target.node.nodeSize - 1, -1)
+    transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
+  }
+  // The result is always its own undo step, never merged with nearby typing.
+  closeHistory(transaction)
   transaction.setMeta('forageOrigin', 'agent')
   transaction.setMeta('forageChangeGroup', runId)
   editor.view.dispatch(transaction)
-  revealAgentResult(editor, rootNodeIds)
-  return rootNodeIds
+  revealAgentResult(editor, revealed)
+  return revealed
 }
 
 export function commitStructuredAgentResultInto(

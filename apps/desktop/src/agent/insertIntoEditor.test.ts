@@ -26,6 +26,7 @@ import {
   currentListItemId,
   insertAiChild,
   insertAiChildUnder,
+  insertExtensionSkillResult,
   removeCurrentSlashCommand,
   runSkillIntoEditor,
   skillActivityLabel,
@@ -444,6 +445,99 @@ describe('agent output insertion', () => {
     expect(bulletTexts(editor)).toEqual(['/label Compare options', 'Original idea'])
     editor.commands.redo()
     expect(bulletTexts(editor)).toEqual(['Compare options', 'Selected: Idea one', 'Static detail', 'Original idea'])
+  })
+
+  it('replaces an empty invocation with a single result root and places its children under it', () => {
+    editor.destroy()
+    editor = makeEditor('/label')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, {
+      type: 'listItem',
+      attrs: { nodeId: 'idea-1' },
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Original idea' }] }],
+    })
+    const result = {
+      version: 2 as const,
+      nodes: [{
+        type: 'text' as const,
+        segments: [{ type: 'text' as const, text: 'How promising is this?' }],
+        children: [{
+          type: 'text' as const,
+          segments: [
+            { type: 'internal-reference' as const, nodeId: 'idea-1', label: 'Idea one' },
+            { type: 'text' as const, text: ' - Strong (1.62); confidence: 90.00%' },
+          ],
+        }],
+      }],
+      sources: [],
+    }
+
+    expect(commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-hoist', result, ['idea-1']))
+      .toEqual([invocationNodeId])
+    expect(bulletTexts(editor)).toEqual(['How promising is this?', 'Idea one - Strong (1.62); confidence: 90.00%', 'Original idea'])
+    expect(editor.state.doc.firstChild?.firstChild?.attrs.nodeId).toBe(invocationNodeId)
+    expect(insertExtensionSkillResult(editor, 'idea-1', 'run-hoist', result, ['idea-1']))
+      .toEqual(['extension-result-run-hoist-0'])
+    expect(bulletTexts(editor)).toHaveLength(3)
+
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['/label', 'Original idea'])
+    editor.commands.redo()
+    expect(bulletTexts(editor)).toEqual(['How promising is this?', 'Idea one - Strong (1.62); confidence: 90.00%', 'Original idea'])
+  })
+
+  it('reorders admitted siblings in place and removes an empty invocation in one undoable step', () => {
+    editor.destroy()
+    editor = makeEditor('/label')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    ;['idea-1', 'idea-2', 'idea-3'].forEach((nodeId, index) => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, {
+        type: 'listItem',
+        attrs: { nodeId },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: `Idea ${index + 1}` }] }],
+      })
+    })
+    const result = { version: 2 as const, nodes: [], sources: [], reorder: { nodeIds: ['idea-3', 'idea-1'] } }
+
+    expect(commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-reorder', result, ['idea-1', 'idea-3']))
+      .toEqual(['idea-3', 'idea-1'])
+    // Idea 2 was not reordered, so it keeps its slot between the moved bullets.
+    expect(bulletTexts(editor)).toEqual(['Idea 3', 'Idea 2', 'Idea 1'])
+    expect(insertExtensionSkillResult(editor, 'idea-2', 'run-reorder', result, ['idea-1', 'idea-3']))
+      .toEqual(['idea-3', 'idea-1'])
+    expect(bulletTexts(editor)).toEqual(['Idea 3', 'Idea 2', 'Idea 1'])
+
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['/label', 'Idea 1', 'Idea 2', 'Idea 3'])
+    editor.commands.redo()
+    expect(bulletTexts(editor)).toEqual(['Idea 3', 'Idea 2', 'Idea 1'])
+  })
+
+  it('keeps a prompted invocation and rejects reorders of unadmitted or separated bullets', () => {
+    editor.destroy()
+    editor = makeEditor('/label focus on cost')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    ;['idea-1', 'idea-2'].forEach((nodeId, index) => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, {
+        type: 'listItem',
+        attrs: { nodeId },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: `Idea ${index + 1}` }] }],
+      })
+    })
+    const result = { version: 2 as const, nodes: [], sources: [], reorder: { nodeIds: ['idea-2', 'idea-1'] } }
+    const before = editor.getJSON()
+    expect(() => commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-bad', result, ['idea-1']))
+      .toThrow(/unadmitted node/i)
+    expect(() => commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-bad', {
+      ...result, reorder: { nodeIds: ['idea-2', 'missing'] },
+    }, ['idea-2', 'missing'])).toThrow(/no longer available/i)
+    expect(editor.getJSON()).toEqual(before)
+
+    commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-prompted', result, ['idea-1', 'idea-2'])
+    expect(bulletTexts(editor)).toEqual(['focus on cost', 'Idea 2', 'Idea 1'])
   })
 
   it('rejects an unadmitted generic reference without partially changing the outline', () => {

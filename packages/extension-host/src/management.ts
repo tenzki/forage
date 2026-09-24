@@ -70,6 +70,7 @@ export class ExtensionManagementService {
 
   private async dispatch(request: ExtensionManagementRequest): Promise<ExtensionManagementResponse> {
     if (request.operation === 'inventory') {
+      await this.store.ensureExtensionsDirectory()
       const configuration = await this.store.read()
       return success(request, {
         catalog: await this.refresh(configuration),

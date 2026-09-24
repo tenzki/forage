@@ -83,6 +83,18 @@
               "required": true
             },
             {
+              "key": "output",
+              "label": "Output",
+              "description": "Reordering moves the sibling bullets into the result order without writing new bullets.",
+              "type": "choice",
+              "options": [
+                { "value": "list", "label": "List results under the question" },
+                { "value": "reorder", "label": "Reorder the bullets in place" }
+              ],
+              "default": "list",
+              "required": false
+            },
+            {
               "key": "decimal_places",
               "label": "Displayed decimal places",
               "type": "number",

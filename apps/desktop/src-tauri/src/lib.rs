@@ -11,6 +11,7 @@ pub mod sync_commands;
 //   - plugin-http:   stream OpenAI requests without webview CORS restrictions
 //   - plugin-opener: open the ChatGPT subscription login page
 //   - plugin-shell:  run the embedded Pi SDK in an isolated Node.js sidecar
+//   - plugin-dialog: pick local extension directories with the native folder picker
 
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -114,7 +115,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init());
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(target_os = "macos")]
     let builder = builder

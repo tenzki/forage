@@ -84,6 +84,7 @@ export function OutlinerEditor({
         autocapitalize: 'off',
         autocorrect: 'off',
         spellcheck: 'false',
+        writingsuggestions: 'false',
       },
       handleKeyDown: (_view, event) => {
         const modifier = event.metaKey || event.ctrlKey

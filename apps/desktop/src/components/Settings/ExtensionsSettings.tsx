@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 import type {
   ExtensionCatalogEntry,
   ExtensionManagementResponse,
@@ -13,9 +14,16 @@ import {
   useExtensionStore,
 } from '../../store/extensionStore'
 import { ConfirmButton } from './ConfirmButton'
+import { SegmentedControl } from '../ui/SegmentedControl'
+import { Switch } from '../ui/Switch'
 import { useSettingsStore } from '../../store/settingsStore'
 
 const DIAGNOSTIC_COPY_LIMIT = 16_000
+const SOURCE_KIND_OPTIONS = [
+  { value: 'local', label: 'Local folder' },
+  { value: 'npm', label: 'npm package' },
+  { value: 'git', label: 'Git repository' },
+] as const satisfies readonly { value: ExtensionSourceRequest['kind']; label: string }[]
 type InstallPreview = NonNullable<Extract<ExtensionManagementResponse, { ok: true }>['preview']>
 
 function errorMessage(error: unknown): string {
@@ -134,7 +142,7 @@ function SettingField({ declaration, value, secretConfigured, secretDraft, onCha
     <div className="extension-setting-field">
       <label htmlFor={id}>{label}</label>
       {declaration.type === 'boolean' ? (
-        <input id={id} type="checkbox" checked={typeof value === 'boolean' ? value : declaration.default ?? false} onChange={(event) => onChange(event.target.checked)} />
+        <Switch id={id} checked={typeof value === 'boolean' ? value : declaration.default ?? false} onCheckedChange={onChange} />
       ) : declaration.type === 'multiline' ? (
         <textarea id={id} value={typeof value === 'string' ? value : declaration.default ?? ''} onChange={(event) => onChange(event.target.value)} />
       ) : declaration.type === 'number' ? (
@@ -288,17 +296,33 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
 
   if (selected) return <ExtensionDetail entry={selected} onBack={() => setSelectedId(null)} onConfigureTools={onConfigureTools} />
 
-  const requestedSource = (): ExtensionSourceRequest => sourceKind === 'local'
-    ? { kind: 'local', path: sourceValue.trim() }
-    : sourceKind === 'npm'
-      ? { kind: 'npm', spec: sourceValue.trim() }
-      : { kind: 'git', url: sourceValue.trim(), ...(gitRef.trim() ? { ref: gitRef.trim() } : {}) }
-  const inspect = async () => {
+  const requestedSource = (): ExtensionSourceRequest => sourceKind === 'npm'
+    ? { kind: 'npm', spec: sourceValue.trim() }
+    : { kind: 'git', url: sourceValue.trim(), ...(gitRef.trim() ? { ref: gitRef.trim() } : {}) }
+  const inspect = async (source: ExtensionSourceRequest) => {
     setActionError(null)
     setInstallWorking(true)
     try {
-      setPreview(await previewInstall(requestedSource()))
+      setPreview(await previewInstall(source))
     } catch (installError) { setActionError(errorMessage(installError)) } finally { setInstallWorking(false) }
+  }
+  const chooseLocalFolder = async () => {
+    setActionError(null)
+    let selection: string | string[] | null
+    try {
+      selection = await openDialog({ directory: true, multiple: false, title: 'Choose an extension folder' })
+    } catch (dialogError) {
+      setActionError(errorMessage(dialogError))
+      return
+    }
+    if (typeof selection !== 'string') return
+    setSourceValue(selection)
+    await inspect({ kind: 'local', path: selection })
+  }
+  const openExtensionsFolder = async () => {
+    if (!extensionsDirectory) return
+    setActionError(null)
+    try { await openPath(extensionsDirectory) } catch (openError) { setActionError(errorMessage(openError)) }
   }
   const install = async () => {
     if (!preview) return
@@ -315,21 +339,29 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
 
   return (
     <section className="settings-section extensions-settings" aria-labelledby="extensions-heading">
-      <div className="extensions-toolbar"><div><h2 id="extensions-heading">Extensions</h2><p className="settings-hint">Inventory reads Forage manifests only. It does not execute code or contact package registries.</p></div><div className="settings-actions"><button type="button" className="settings-secondary" onClick={() => setShowInstall((shown) => !shown)}>Install</button><button type="button" className="settings-secondary" disabled={!extensionsDirectory} onClick={() => extensionsDirectory && void revealItemInDir(extensionsDirectory)}>Open folder</button><button type="button" className="settings-secondary" disabled={isLoading} onClick={() => void refresh().catch(() => undefined)}>{isLoading ? 'Refreshing…' : 'Refresh'}</button></div></div>
+      <div className="extensions-toolbar"><div><h2 id="extensions-heading">Extensions</h2><p className="settings-hint">Inventory reads Forage manifests only. It does not execute code or contact package registries.</p></div><div className="settings-actions"><button type="button" className="settings-secondary" onClick={() => setShowInstall((shown) => !shown)}>Install</button><button type="button" className="settings-secondary" disabled={!extensionsDirectory} onClick={() => void openExtensionsFolder()}>Open folder</button><button type="button" className="settings-secondary" disabled={isLoading} onClick={() => void refresh().catch(() => undefined)}>{isLoading ? 'Refreshing…' : 'Refresh'}</button></div></div>
       <div className="extension-warning"><strong>Extensions are trusted local code</strong><p>Review the manifest and source before enabling. Installation, enablement, configuration, and model tool authorization are separate decisions.</p></div>
       <div className="extension-local-only"><strong>Local execution only.</strong> When server execution is authoritative, local extension tools and skill executors are unavailable and Forage will not fall back to this device.</div>
       {showInstall && <div className="custom-tool-form extension-install-flow">
         <strong>Install or register an extension</strong>
         {!preview ? <>
-          <label htmlFor="extension-source-kind">Source type</label>
-          <select id="extension-source-kind" value={sourceKind} onChange={(event) => { setSourceKind(event.target.value as ExtensionSourceRequest['kind']); setActionError(null) }}>
-            <option value="local">Local directory</option><option value="npm">npm package</option><option value="git">Git repository</option>
-          </select>
-          <label htmlFor="extension-source-value">{sourceKind === 'local' ? 'Directory path' : sourceKind === 'npm' ? 'npm specification' : 'Git HTTPS or SSH URL'}</label>
-          <input id="extension-source-value" className="settings-monospace" value={sourceValue} onChange={(event) => setSourceValue(event.target.value)} placeholder={sourceKind === 'local' ? '/path/to/extension' : sourceKind === 'npm' ? 'npm:example-forage-tools@1.2.3' : 'https://github.com/example/forage-tools.git'} />
-          {sourceKind === 'git' && <><label htmlFor="extension-git-ref">Ref (optional; pins updates)</label><input id="extension-git-ref" className="settings-monospace" value={gitRef} onChange={(event) => setGitRef(event.target.value)} placeholder="v1.2.3 or commit" /></>}
-          <p className="settings-hint">Preview is explicit: npm/Git sources may contact their registry or remote and are staged with lifecycle scripts disabled. Local directories are only inspected.</p>
-          <div className="settings-actions"><button type="button" className="settings-save" disabled={!sourceValue.trim() || installWorking || installBusy} onClick={() => void inspect()}>{installWorking || installBusy ? 'Inspecting…' : 'Preview source'}</button><button type="button" className="settings-secondary" onClick={() => setShowInstall(false)}>Cancel</button></div>
+          <SegmentedControl
+            ariaLabel="Source type"
+            value={sourceKind}
+            options={SOURCE_KIND_OPTIONS}
+            onValueChange={(kind) => { setSourceKind(kind); setSourceValue(''); setGitRef(''); setActionError(null) }}
+          />
+          {sourceKind === 'local' ? <>
+            {sourceValue && <p className="settings-hint">Last chosen: <code>{sourceValue}</code></p>}
+            <p className="settings-hint">Choosing a folder only inspects its Forage manifest. Nothing runs until you enable it.</p>
+            <div className="settings-actions"><button type="button" className="settings-save" disabled={installWorking || installBusy} onClick={() => void chooseLocalFolder()}>{installWorking || installBusy ? 'Inspecting…' : 'Choose folder…'}</button><button type="button" className="settings-secondary" onClick={() => setShowInstall(false)}>Cancel</button></div>
+          </> : <>
+            <label htmlFor="extension-source-value">{sourceKind === 'npm' ? 'npm specification' : 'Git HTTPS or SSH URL'}</label>
+            <input id="extension-source-value" className="settings-monospace" value={sourceValue} onChange={(event) => setSourceValue(event.target.value)} placeholder={sourceKind === 'npm' ? 'npm:example-forage-tools@1.2.3' : 'https://github.com/example/forage-tools.git'} />
+            {sourceKind === 'git' && <><label htmlFor="extension-git-ref">Ref (optional; pins updates)</label><input id="extension-git-ref" className="settings-monospace" value={gitRef} onChange={(event) => setGitRef(event.target.value)} placeholder="v1.2.3 or commit" /></>}
+            <p className="settings-hint">Preview is explicit: npm/Git sources may contact their registry or remote and are staged with lifecycle scripts disabled.</p>
+            <div className="settings-actions"><button type="button" className="settings-save" disabled={!sourceValue.trim() || installWorking || installBusy} onClick={() => void inspect(requestedSource())}>{installWorking || installBusy ? 'Inspecting…' : 'Preview source'}</button><button type="button" className="settings-secondary" onClick={() => setShowInstall(false)}>Cancel</button></div>
+          </>}
         </> : <InstallPreviewCard preview={preview} busy={installWorking} onBack={() => setPreview(null)} onInstall={() => void install()} />}
       </div>}
       {(actionError || error) && <p className="settings-error" role="alert">{actionError || error}</p>}

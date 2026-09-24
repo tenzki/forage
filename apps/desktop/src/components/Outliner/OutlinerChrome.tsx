@@ -5,8 +5,6 @@ import {
   ArrowRight,
   BookmarkPlus,
   CalendarDays,
-  Eye,
-  EyeOff,
   Home,
   Inbox,
   ListTodo,
@@ -14,7 +12,6 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  Search,
   Settings,
   Trash2,
 } from 'lucide-react'
@@ -36,7 +33,6 @@ import {
   OUTLINER_DAILY_DATE_EVENT,
   OUTLINER_NODE_MENU_EVENT,
   OUTLINER_OPEN_SEARCH_EVENT,
-  setHideCompleted,
   setSearchQuery,
   setZoom,
   type NodeMenuRequest,
@@ -91,28 +87,22 @@ function Toolbar({
   editor,
   zoomId,
   sidebarCollapsed,
-  hideCompleted,
   canNavigateBack,
   canNavigateForward,
   onToggleSidebar,
   onNavigateBack,
   onNavigateForward,
-  onToggleCompleted,
-  onOpenSearch,
   activitySidebarCollapsed,
   onToggleActivitySidebar,
 }: {
   editor: Editor
   zoomId: string | null
   sidebarCollapsed: boolean
-  hideCompleted: boolean
   canNavigateBack: boolean
   canNavigateForward: boolean
   onToggleSidebar: () => void
   onNavigateBack: () => void
   onNavigateForward: () => void
-  onToggleCompleted: () => void
-  onOpenSearch: () => void
   activitySidebarCollapsed: boolean
   onToggleActivitySidebar: () => void
 }) {
@@ -153,17 +143,6 @@ function Toolbar({
         <Breadcrumbs editor={editor} zoomId={zoomId} />
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <button className="flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-neutral-500 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:bg-neutral-100 focus-visible:text-neutral-900" onClick={onToggleCompleted}>
-          <span className="t-icon-swap" data-state={hideCompleted ? 'a' : 'b'}>
-            <span className="t-icon" data-icon="a"><Eye size={15} aria-hidden="true" /></span>
-            <span className="t-icon" data-icon="b"><EyeOff size={15} aria-hidden="true" /></span>
-          </span>
-          {hideCompleted ? 'Show completed' : 'Hide completed'}
-        </button>
-        <button className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-600 shadow-xs outline-none transition-[border-color,color,box-shadow] hover:border-neutral-300 hover:text-neutral-900 focus-visible:border-neutral-400 focus-visible:shadow-sm" onClick={onOpenSearch} aria-keyshortcuts="Meta+K Control+K">
-          <Search size={15} aria-hidden="true" /> Search
-          <kbd className="ml-1 font-mono text-[9px] text-neutral-400">⌘K</kbd>
-        </button>
         <IconButton
           label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
           title={`${activitySidebarCollapsed ? 'Expand' : 'Collapse'} activity sidebar (\u2318/ / Ctrl+/)`}
@@ -523,7 +502,6 @@ export function OutlinerChrome({
 }) {
   const editorUi = useEditorUi(editor)
   const zoomId = editorUi?.zoomId ?? null
-  const hideCompleted = editorUi?.hideCompleted ?? false
   const canNavigateBack = Boolean(editorUi?.backStack.length)
   const canNavigateForward = Boolean(editorUi?.forwardStack.length)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -660,7 +638,6 @@ export function OutlinerChrome({
         editor={editor}
         zoomId={zoomId}
         sidebarCollapsed={sidebarCollapsed}
-        hideCompleted={hideCompleted}
         canNavigateBack={canNavigateBack}
         canNavigateForward={canNavigateForward}
         onToggleSidebar={onToggleSidebar}
@@ -668,8 +645,6 @@ export function OutlinerChrome({
         onToggleActivitySidebar={onToggleActivitySidebar}
         onNavigateBack={() => navigateBack(editor)}
         onNavigateForward={() => navigateForward(editor)}
-        onToggleCompleted={() => setHideCompleted(editor, !hideCompleted)}
-        onOpenSearch={() => openSearch()}
       />
       {actionError && <div className="action-error" role="alert">{actionError}<button onClick={() => setActionError(null)}>Dismiss</button></div>}
       {searchPresence.mounted && createPortal(

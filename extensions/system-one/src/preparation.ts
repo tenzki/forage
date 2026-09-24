@@ -45,7 +45,11 @@ export function prepareSystemOneInput(
   if (configuration.kind === 'choice-comparison' && candidateNodes.length < 2) {
     throw new Error('Choice comparison requires at least two candidates in the selected scope.')
   }
+  if (configuration.output === 'reorder' && candidateNodes.length < 2) {
+    throw new Error('Reordering bullets in place requires at least two sibling bullets.')
+  }
 
+  const parents = parentMap(parent)
   const candidates = candidateNodes.map((node): PreparedCandidate => ({
     id: node.id,
     label: node.text.trim() || 'Untitled note',
@@ -57,7 +61,7 @@ export function prepareSystemOneInput(
         text: entry.text,
         documentOrder: entry.documentOrder,
       }))
-      : [],
+      : placementEvidence(node, parent, parents),
   }))
   const candidateIds = new Set(candidates.map((candidate) => candidate.id))
   const candidateEvidenceIds = new Set(candidates.flatMap((candidate) => candidate.evidence.map((entry) => entry.id)))
@@ -66,9 +70,11 @@ export function prepareSystemOneInput(
     ...candidates.map((candidate) => ({
       nodeId: candidate.id,
       kind: 'selected' as const,
-      label: configuration.candidateScope === 'siblings' ? 'System One candidate (subtree evidence)' : 'System One candidate',
+      label: configuration.candidateScope === 'siblings'
+        ? 'System One candidate (subtree evidence)'
+        : 'System One candidate (parent and child evidence)',
     })),
-    ...candidates.flatMap((candidate) => candidate.evidence.map((entry) => ({
+    ...candidates.flatMap((candidate) => candidate.evidence.filter((entry) => !candidateIds.has(entry.id)).map((entry) => ({
       nodeId: entry.id,
       kind: 'information' as const,
       label: `Evidence for ${candidate.label}`.slice(0, 300),
@@ -150,6 +156,44 @@ function collectSharedEvidence(
     descendants(root).forEach((node) => add(node, 'explicit-link'))
   }
   return [...values.values()].sort(byDocumentOrder)
+}
+
+function parentMap(root: ExtensionSkillContextNode): Map<string, ExtensionSkillContextNode> {
+  const parents = new Map<string, ExtensionSkillContextNode>()
+  const visit = (node: ExtensionSkillContextNode) => (node.children ?? []).forEach((child) => {
+    parents.set(child.id, node)
+    visit(child)
+  })
+  visit(root)
+  return parents
+}
+
+/**
+ * A nested descendant is judged where it sits: its parent bullets inside the
+ * scope and its direct children, labelled so a detail line such as a URL reads
+ * as part of its parent item rather than as a standalone item.
+ */
+function placementEvidence(
+  node: ExtensionSkillContextNode,
+  scopeRoot: ExtensionSkillContextNode,
+  parents: ReadonlyMap<string, ExtensionSkillContextNode>,
+): PreparedCandidate['evidence'] {
+  const ancestors: ExtensionSkillContextNode[] = []
+  for (let current = parents.get(node.id); current && current.id !== scopeRoot.id; current = parents.get(current.id)) {
+    ancestors.unshift(current)
+  }
+  return [
+    ...ancestors.filter(isTextNode).map((entry) => ({
+      id: entry.id,
+      text: `Parent bullet: ${entry.text}`,
+      documentOrder: entry.documentOrder,
+    })),
+    ...(node.children ?? []).filter(isTextNode).sort(byDocumentOrder).map((entry) => ({
+      id: entry.id,
+      text: `Child bullet: ${entry.text}`,
+      documentOrder: entry.documentOrder,
+    })),
+  ]
 }
 
 function descendants(node: ExtensionSkillContextNode): ExtensionSkillContextNode[] {

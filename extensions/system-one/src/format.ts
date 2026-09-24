@@ -10,10 +10,26 @@ import {
   type SystemOneEvaluation,
 } from './transport.js'
 
-interface CandidateRow {
+export interface CandidateRow {
   candidate: PreparedCandidate
   metric: number
   detail: string
+}
+
+/** Rows in result order. Reordering keeps every Noul candidate, so nothing is left out of place. */
+export function systemOneResultRows(
+  configuration: SystemOneConfiguration,
+  prepared: PreparedSystemOneData,
+  evaluation: SystemOneEvaluation,
+): CandidateRow[] {
+  const rows = configuration.kind === 'choice-comparison'
+    ? comparisonRows(configuration, prepared, evaluation)
+    : configuration.kind === 'choice-classification'
+      ? classificationRows(configuration, prepared, evaluation)
+      : configuration.kind === 'score'
+        ? scoreRows(configuration, prepared, evaluation)
+        : noulRows(configuration, prepared, evaluation, configuration.output !== 'reorder')
+  return sortRows(rows, configuration.ordering)
 }
 
 export function formatSystemOneResult(
@@ -21,45 +37,22 @@ export function formatSystemOneResult(
   prepared: PreparedSystemOneData,
   evaluation: SystemOneEvaluation,
 ): ExtensionSkillResult {
-  const metadata = metadataNodes(configuration, evaluation)
-  const rows = configuration.kind === 'choice-comparison'
-    ? comparisonRows(configuration, prepared, evaluation)
-    : configuration.kind === 'choice-classification'
-      ? classificationRows(configuration, prepared, evaluation)
-      : configuration.kind === 'score'
-        ? scoreRows(configuration, prepared, evaluation)
-        : noulRows(configuration, prepared, evaluation)
-  const ordered = sortRows(rows, configuration.ordering)
+  const ordered = systemOneResultRows(configuration, prepared, evaluation)
+  if (configuration.output === 'reorder') {
+    return { nodes: [], reorder: { nodeIds: ordered.map((row) => row.candidate.id) } }
+  }
   const resultRows = ordered.map(linkedRow)
   const children = configuration.kind === 'noul' && resultRows.length === 0
-    ? [...metadata, textNode(`No matches met the inclusive yes-probability threshold of ${formatProbability(configuration.threshold, configuration.decimalPlaces)}.`)]
-    : [...metadata, ...resultRows]
+    ? [textNode(`No matches met the inclusive yes-probability threshold of ${formatProbability(configuration.threshold, configuration.decimalPlaces)}.`)]
+    : resultRows
+  // A single question root lets Forage replace an empty invocation bullet with it.
   return {
     nodes: [{
       type: 'text',
-      segments: [{ type: 'text', text: `System One — ${configuration.question}` }],
+      segments: [{ type: 'text', text: configuration.question }],
       children,
     }],
   }
-}
-
-function metadataNodes(
-  configuration: SystemOneConfiguration,
-  evaluation: SystemOneEvaluation,
-): ExtensionSkillResultNode[] {
-  const nodes = [textNode(`Model: ${evaluation.actualModel}${evaluation.actualModel === evaluation.requestedModel ? '' : ` (requested ${evaluation.requestedModel})`}`)]
-  if (configuration.kind === 'choice-classification') {
-    nodes.push(textNode(`Categories: ${configuration.categories.map((category) => `${category.label} — ${category.description}`).join('; ')}`))
-  } else if (configuration.kind === 'score') {
-    nodes.push(textNode(`Rubric: ${configuration.levels.map((level, index) => `${index} ${level.label} — ${level.description}`).join('; ')}`))
-  } else if (configuration.kind === 'noul') {
-    const definitions = [
-      configuration.yesDefinition ? `yes — ${configuration.yesDefinition}` : undefined,
-      configuration.noDefinition ? `no — ${configuration.noDefinition}` : undefined,
-    ].filter((entry): entry is string => Boolean(entry))
-    nodes.push(textNode(`Inclusive threshold: ${formatProbability(configuration.threshold, configuration.decimalPlaces)}${definitions.length ? `; ${definitions.join('; ')}` : ''}`))
-  }
-  return nodes
 }
 
 function comparisonRows(
@@ -106,10 +99,11 @@ function scoreRows(
 ): CandidateRow[] {
   return prepared.candidates.map((candidate, index) => {
     const answer = requireScore(evaluation.answers.get(questionKey(index)), questionKey(index))
+    const level = configuration.levels[Math.min(configuration.levels.length - 1, Math.max(0, Math.round(answer.score)))]
     return {
       candidate,
       metric: answer.score,
-      detail: `Score: ${answer.score.toFixed(configuration.decimalPlaces)}; confidence: ${formatProbability(answer.confidence, configuration.decimalPlaces)}`,
+      detail: `${level?.label ?? 'Unknown level'} (${answer.score.toFixed(configuration.decimalPlaces)}); confidence: ${formatProbability(answer.confidence, configuration.decimalPlaces)}`,
     }
   })
 }
@@ -118,10 +112,11 @@ function noulRows(
   configuration: Extract<SystemOneConfiguration, { kind: 'noul' }>,
   prepared: PreparedSystemOneData,
   evaluation: SystemOneEvaluation,
+  applyThreshold: boolean,
 ): CandidateRow[] {
   return prepared.candidates.flatMap((candidate, index): CandidateRow[] => {
     const answer = requireNoul(evaluation.answers.get(questionKey(index)), questionKey(index))
-    if (answer.noul < configuration.threshold) return []
+    if (applyThreshold && answer.noul < configuration.threshold) return []
     return [{
       candidate,
       metric: answer.noul,
@@ -143,7 +138,7 @@ function linkedRow(row: CandidateRow): ExtensionSkillResultNode {
     type: 'text',
     segments: [
       { type: 'internal-reference', nodeId: row.candidate.id, label: boundedReferenceLabel(row.candidate.label) },
-      { type: 'text', text: ` — ${row.detail}` },
+      { type: 'text', text: ` - ${row.detail}` },
     ],
   }
 }

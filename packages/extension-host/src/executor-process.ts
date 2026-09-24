@@ -195,13 +195,19 @@ export class NodeExtensionExecutorProcess {
         if (operation === 'prepare') {
           result = extensionSkillPreparedPlanSchema.parse(event.value)
         } else if (operation === 'execute') {
+          const value = event.value as ExtensionSkillResult
           const parsed = parseStructuredResult({
             version: 2,
-            nodes: (event.value as ExtensionSkillResult).nodes,
-            sources: (event.value as ExtensionSkillResult).sources ?? [],
+            nodes: value.nodes,
+            sources: value.sources ?? [],
+            ...(value.reorder ? { reorder: value.reorder } : {}),
           }, { allowedReferenceIds: (input as ExtensionSkillExecutionInput).plan.admittedReferenceIds })
           if (parsed.version !== 2) throw new Error('Executor result must use generic structured text nodes.')
-          result = { nodes: parsed.nodes, ...((event.value as ExtensionSkillResult).sources ? { sources: parsed.sources } : {}) }
+          result = {
+            nodes: parsed.nodes,
+            ...(value.sources ? { sources: parsed.sources } : {}),
+            ...(parsed.reorder ? { reorder: parsed.reorder } : {}),
+          }
         } else {
           result = parseValidationResult(event.value)
         }

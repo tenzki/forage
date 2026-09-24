@@ -1,6 +1,9 @@
 import { createRoot } from 'react-dom/client'
 import { PeekHeaderWindow, peekHeaderHref } from './components/Outliner/PeekHeaderWindow'
+import { disableNativeTextAssistance } from './nativeTextAssistance'
 import './style.css'
+
+disableNativeTextAssistance()
 
 // The peek header window runs this same bundle under a hash route. It is a title
 // bar with two buttons, and it holds none of the app's capabilities, so the app

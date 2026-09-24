@@ -158,6 +158,14 @@ describe('agent runtime contracts', () => {
     })).toThrow(/authority/i)
   })
 
+  it('accepts a sibling reorder of admitted nodes in place of new bullets', () => {
+    const result = { version: 2 as const, nodes: [], sources: [], reorder: { nodeIds: ['two', 'one'] } }
+    expect(parseStructuredResult(result, { allowedReferenceIds: ['one', 'two'] })).toEqual(result)
+    expect(() => parseStructuredResult(result, { allowedReferenceIds: ['one'] })).toThrow(/unadmitted node/i)
+    expect(() => parseStructuredResult({ ...result, reorder: undefined })).toThrow(/nodes or a reorder/i)
+    expect(() => parseStructuredResult({ ...result, reorder: { nodeIds: ['one', 'one'] } })).toThrow(/unique/i)
+  })
+
   it('validates generic linked results against host authority and aggregate text limits', () => {
     const result = {
       version: 2 as const,

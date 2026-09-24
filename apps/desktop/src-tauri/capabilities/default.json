@@ -18,6 +18,11 @@
       ]
     },
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$HOME/.forage/extensions" }]
+    },
+    "dialog:allow-open",
     "core:webview:allow-create-webview-window",
     "core:webview:allow-webview-close",
     "core:window:allow-close",

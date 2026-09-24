@@ -90,6 +90,12 @@ export class ExtensionConfigurationStore {
     this.createInstallationId = options.createInstallationId ?? (() => `local-${randomUUID()}`)
   }
 
+  /** Creates the drop-in directory so it can be opened before any configuration is written. */
+  async ensureExtensionsDirectory(): Promise<void> {
+    await mkdir(this.root, { recursive: true, mode: 0o700 })
+    await mkdir(this.extensionsPath, { recursive: true, mode: 0o700 })
+  }
+
   async read(): Promise<ExtensionConfiguration> {
     let serialized: string
     try {

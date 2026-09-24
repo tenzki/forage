@@ -1554,6 +1554,7 @@ body.is-dragging-outline .bullet-collapse {
   gap: 4px;
 }
 
+.sidebar-search,
 .sidebar-home,
 .sidebar-inbox,
 .sidebar-daily-notes,
@@ -1571,6 +1572,7 @@ body.is-dragging-outline .bullet-collapse {
   font: inherit;
 }
 
+.sidebar-search,
 .sidebar-home,
 .sidebar-inbox,
 .sidebar-daily-notes,
@@ -1590,6 +1592,21 @@ body.is-dragging-outline .bullet-collapse {
 
 .sidebar-home {
   flex: 1;
+}
+
+.sidebar-search {
+  margin-bottom: 2px;
+}
+
+.sidebar-search-kbd {
+  margin-left: auto;
+  color: #a3a3a3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.outline-sidebar.is-collapsed .sidebar-search-kbd {
+  display: none;
 }
 
 .sidebar-system {
@@ -1649,6 +1666,7 @@ svg.sidebar-primary-icon {
   text-align: center;
 }
 
+.outline-sidebar.is-collapsed .sidebar-search,
 .outline-sidebar.is-collapsed .sidebar-home,
 .outline-sidebar.is-collapsed .sidebar-inbox,
 .outline-sidebar.is-collapsed .sidebar-daily-notes,
@@ -1675,6 +1693,7 @@ svg.sidebar-primary-icon {
   justify-content: center;
 }
 
+.sidebar-search:hover,
 .sidebar-home:hover,
 .sidebar-inbox:hover,
 .sidebar-daily-notes:hover,
@@ -3172,6 +3191,114 @@ kbd {
   margin-top: 6px;
   font-size: 12px;
 }
+.extension-skill-configuration {
+  margin-top: 6px;
+}
+.extension-skill-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+.extension-skill-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+.extension-skill-field.is-wide,
+.extension-skill-group.is-wide {
+  grid-column: 1 / -1;
+}
+.extension-skill-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--osui-ink, #171717);
+  font-weight: 600;
+}
+.extension-skill-optional {
+  color: var(--osui-faint, #a3a3a3);
+  font-size: 11px;
+  font-weight: 400;
+}
+.extension-skill-hint {
+  color: var(--osui-muted, #737373);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.extension-skill-hint.is-error {
+  color: var(--osui-danger, #dc2626);
+}
+.extension-skill-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--osui-border, #e5e5e5);
+  border-radius: 10px;
+  background: var(--osui-canvas, #fafafa);
+}
+.extension-skill-group > legend {
+  padding: 0 5px;
+  font-size: 12px;
+}
+.extension-skill-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.extension-skill-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--osui-border, #e5e5e5);
+  border-radius: 8px;
+  background: var(--osui-surface, #fff);
+}
+.extension-skill-item > .extension-skill-fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.extension-skill-item textarea {
+  min-height: 64px;
+}
+.extension-skill-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--osui-muted, #737373);
+  font-size: 11px;
+  font-weight: 600;
+}
+.extension-skill-remove {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--osui-muted, #737373);
+  font-size: 12px;
+  cursor: pointer;
+}
+.extension-skill-remove:hover:not(:disabled) {
+  background: var(--osui-hover, #f5f5f5);
+  color: var(--osui-danger, #dc2626);
+}
+.extension-skill-remove:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.extension-skill-add {
+  align-self: flex-start;
+  margin-top: 0;
+}
 .settings-secondary.add-tool {
   align-self: flex-start;
 }
@@ -3600,6 +3727,9 @@ body.is-dragging-rule * {
   .settings-panel {
     padding: 18px 16px 36px;
   }
+  .extension-skill-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .settings-navigation {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -3952,6 +4082,7 @@ body.is-dragging-rule * {
     gap: 3px;
   }
 
+  .sidebar-search,
   .sidebar-home,
   .sidebar-inbox,
   .sidebar-daily-notes,
@@ -3973,6 +4104,7 @@ body.is-dragging-rule * {
     color: #a3a3a3;
   }
 
+  .sidebar-search:hover,
   .sidebar-home:hover,
   .sidebar-inbox:hover,
   .sidebar-daily-notes:hover,

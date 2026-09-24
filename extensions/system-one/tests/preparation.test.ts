@@ -37,6 +37,32 @@ describe('System One candidate preparation', () => {
     expect(JSON.stringify(plan)).not.toContain('invoke')
   })
 
+  it('judges nested descendants with their parent and child bullets', () => {
+    const plan = prepareSystemOneInput(requireSystemOneConfiguration({
+      ...baseConfiguration,
+      candidate_scope: 'descendants',
+    }), contextSnapshot)
+    const data = requirePreparedSystemOneData(plan.data)
+    const evidence = Object.fromEntries(data.candidates.map((candidate) => [candidate.id, candidate.evidence.map((entry) => entry.text)]))
+    expect(evidence).toEqual({
+      'idea-a': ['Child bullet: Users travel frequently'],
+      'evidence-a': ['Parent bullet: Offline capture'],
+      'idea-b': [],
+    })
+    expect(plan.annotations.filter((entry) => entry.nodeId === 'evidence-a').map((entry) => entry.kind)).toEqual(['selected'])
+  })
+
+  it('needs at least two siblings before reordering in place', () => {
+    const one = {
+      ...contextSnapshot,
+      roots: [{ id: 'parent', text: 'Parent', documentOrder: 0, children: [{ id: 'only', text: 'Only', documentOrder: 1 }] }],
+      provenance: { ancestorPathIds: ['parent'], localParentId: 'parent', localBranchRootId: 'parent', explicitLinkedRootIds: [] },
+    }
+    expect(() => prepareSystemOneInput(requireSystemOneConfiguration({
+      ...baseConfiguration, output: 'reorder', ordering: 'descending',
+    }), one)).toThrow(/at least two sibling bullets/i)
+  })
+
   it('fails before evaluation for no candidates or too few comparison choices', () => {
     const empty = {
       ...contextSnapshot,

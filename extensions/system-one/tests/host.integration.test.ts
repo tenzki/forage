@@ -122,12 +122,29 @@ describe('System One through the generic executor host', () => {
       onLog: (entry) => logs.push(entry),
     })
     expect(result.nodes[0]).toMatchObject({ type: 'text' })
-    expect(JSON.stringify(result)).toContain('typesafe/jev-1.13-20260917')
+    expect(JSON.stringify(result)).not.toContain('typesafe/jev-1.13-20260917')
     expect(JSON.stringify(result)).toContain('idea-a')
     expect(logs).toEqual(expect.arrayContaining([expect.objectContaining({
       message: 'System One evaluation completed with typesafe/jev-1.13-20260917.',
       data: expect.objectContaining({ requestedModel: 'jev-latest', actualModel: 'typesafe/jev-1.13-20260917' }),
     })]))
+    await value.admission.release()
+  })
+
+  it('carries an in-place reorder through the executor host and reports each answer in activity', async () => {
+    const value = await admit({ ...baseConfiguration, output: 'reorder', ordering: 'descending' })
+    const logs: Array<{ message: string }> = []
+    const result = await value.admission.execute({
+      signal: new AbortController().signal,
+      secrets: { typesafe_api_key: 'synthetic-key' },
+      onLog: (entry) => logs.push(entry),
+    })
+    expect(result.nodes).toEqual([])
+    expect([...result.reorder?.nodeIds ?? []].sort()).toEqual(['idea-a', 'idea-b'])
+    expect(logs.map((entry) => entry.message)).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^Offline capture - /),
+      expect.stringMatching(/^Keyboard navigation - /),
+    ]))
     await value.admission.release()
   })
 

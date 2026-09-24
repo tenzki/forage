@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { openPath } from '@tauri-apps/plugin-opener'
 import type { ExtensionCatalog, ExtensionConfiguration, ExtensionManagementResponse } from '@forage/agent-runtime'
 import { ExtensionsSettings } from './ExtensionsSettings'
 import { useExtensionStore } from '../../store/extensionStore'
 import { useSettingsStore } from '../../store/settingsStore'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
-vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn(async () => undefined) }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn(async () => undefined), revealItemInDir: vi.fn(async () => undefined) }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }))
 
 const manifest = {
   id: 'dev.example.weather',
@@ -172,11 +175,12 @@ describe('Extensions settings', () => {
     const user = userEvent.setup()
     const previewInstall = vi.mocked(useExtensionStore.getState().previewInstall)
     const install = vi.mocked(useExtensionStore.getState().install)
+    vi.mocked(openDialog).mockResolvedValueOnce('/extensions/new-weather')
     render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: 'Install' }))
-    await user.type(screen.getByLabelText('Directory path'), '/extensions/new-weather')
-    await user.click(screen.getByRole('button', { name: 'Preview source' }))
+    await user.click(screen.getByRole('button', { name: 'Choose folder…' }))
+    expect(openDialog).toHaveBeenCalledWith(expect.objectContaining({ directory: true, multiple: false }))
     expect(previewInstall).toHaveBeenCalledWith({ kind: 'local', path: '/extensions/new-weather' })
     expect(await screen.findByText(/Installing only records this source/i)).toBeTruthy()
     expect(screen.getByText(/1 tool\(s\), 1 executor\(s\), 1 hook\(s\), 2 setting\(s\)/)).toBeTruthy()
@@ -187,5 +191,28 @@ describe('Extensions settings', () => {
       { kind: 'local', path: '/extensions/new-weather' },
       'preview-weather',
     )
+  })
+
+  it('does not preview when the folder picker is cancelled', async () => {
+    const user = userEvent.setup()
+    const previewInstall = vi.mocked(useExtensionStore.getState().previewInstall)
+    vi.mocked(openDialog).mockResolvedValueOnce(null)
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Install' }))
+    await user.click(screen.getByRole('button', { name: 'Choose folder…' }))
+    expect(previewInstall).not.toHaveBeenCalled()
+  })
+
+  it('opens the extensions folder and reports failures', async () => {
+    const user = userEvent.setup()
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open folder' }))
+    expect(openPath).toHaveBeenCalledWith('/extensions')
+
+    vi.mocked(openPath).mockRejectedValueOnce(new Error('Not allowed to open path /extensions'))
+    await user.click(screen.getByRole('button', { name: 'Open folder' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Not allowed to open path')
   })
 })

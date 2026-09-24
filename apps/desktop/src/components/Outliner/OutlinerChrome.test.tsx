@@ -85,7 +85,7 @@ describe('outliner chrome', () => {
   it('opens a matching bullet instead of editing it in the search popup', async () => {
     const user = userEvent.setup()
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Alpha')
 
     expect(screen.queryByRole('textbox', { name: /Edit Alpha/ })).toBeNull()
@@ -100,7 +100,7 @@ describe('outliner chrome', () => {
     setZoom(editor, 'alpha')
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Bravo')
 
     expect(screen.getByRole('button', { name: 'Open Bravo note' })).toBeTruthy()
@@ -111,7 +111,7 @@ describe('outliner chrome', () => {
     updateBulletText(editor, 'alpha', 'Bojan Babić')
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Bojan Babic')
 
     expect(screen.getByRole('button', { name: 'Open Bojan Babić' })).toBeTruthy()
@@ -143,7 +143,7 @@ describe('outliner chrome', () => {
     setZoom(editor, 'alpha')
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'home')
     await user.keyboard('{Enter}')
 
@@ -164,12 +164,12 @@ describe('outliner chrome', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'settings')
     await user.keyboard('{Enter}')
     expect(onOpenSettings).toHaveBeenCalledOnce()
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'trash')
     await user.keyboard('{Enter}')
     expect(onOpenTrash).toHaveBeenCalledOnce()
@@ -191,17 +191,17 @@ describe('outliner chrome', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'inbox')
     await user.keyboard('{Enter}')
     expect(onOpenInbox).toHaveBeenCalledOnce()
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'daily notes')
     await user.keyboard('{Enter}')
     expect(onOpenDailyNotes).toHaveBeenCalledOnce()
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'tasks')
     await user.keyboard('{Enter}')
     expect(onOpenTasks).toHaveBeenCalledOnce()
@@ -432,21 +432,19 @@ describe('outliner chrome', () => {
     expect(document.activeElement).toBe(editor.view.dom)
     expect(editor.state.selection.$from.parent.type.name).toBe('bulletNote')
     act(() => { editor.commands.insertContent('Supporting context') })
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Supporting')
 
     expect(screen.getByText(/Note: Supporting context/)).toBeTruthy()
   })
 
-  it('searches completion status and hides completed todos', async () => {
+  it('searches completion status', async () => {
     const user = userEvent.setup()
     setBulletKind(editor, 'alpha', 'todo')
     toggleBulletCompleted(editor, 'alpha')
     render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: 'Hide completed' }))
-    expect(editor.view.dom.querySelector('[data-node-id="alpha"]')?.classList.contains('is-completed-hidden')).toBe(true)
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'is:complete')
 
     expect(screen.getByRole('button', { name: 'Open Alpha note' })).toBeTruthy()
@@ -464,7 +462,7 @@ describe('outliner chrome', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: /Search/ }))
+    await user.keyboard('{Meta>}k{/Meta}')
     await user.type(screen.getByLabelText('Search commands and bullets'), 'Alpha')
     await user.click(screen.getByRole('button', { name: 'Save search' }))
     await user.type(screen.getByLabelText('Saved search name'), 'Alpha items')
@@ -495,7 +493,7 @@ describe('outliner chrome', () => {
     expect(onToggleSidebar).toHaveBeenCalledOnce()
   })
 
-  it('places the activity sidebar toggle immediately after Search', async () => {
+  it('toggles the activity sidebar from the toolbar', async () => {
     const user = userEvent.setup()
     const onToggleActivitySidebar = vi.fn()
     render(
@@ -508,8 +506,7 @@ describe('outliner chrome', () => {
     )
 
     const activityToggle = screen.getByRole('button', { name: 'Collapse activity sidebar' })
-    const searchButton = screen.getByRole('button', { name: /Search/ })
-    expect(searchButton.nextElementSibling).toBe(activityToggle)
+    expect(screen.queryByRole('button', { name: /Search/ })).toBeNull()
     await user.click(activityToggle)
     expect(onToggleActivitySidebar).toHaveBeenCalledOnce()
   })

@@ -8,10 +8,12 @@ export const SYSTEM_ONE_MODELS = ['jev-latest', 'jev-preview', 'jev-1.13.0'] as 
 export const SYSTEM_ONE_KINDS = ['choice-comparison', 'choice-classification', 'score', 'noul'] as const
 export const CANDIDATE_SCOPES = ['siblings', 'descendants'] as const
 export const RESULT_ORDERINGS = ['document', 'ascending', 'descending'] as const
+export const RESULT_OUTPUTS = ['list', 'reorder'] as const
 
 export type SystemOneKind = typeof SYSTEM_ONE_KINDS[number]
 export type CandidateScope = typeof CANDIDATE_SCOPES[number]
 export type ResultOrdering = typeof RESULT_ORDERINGS[number]
+export type ResultOutput = typeof RESULT_OUTPUTS[number]
 
 export interface ChoiceCategory {
   id: string
@@ -30,6 +32,8 @@ interface SystemOneConfigurationBase {
   question: string
   candidateScope: CandidateScope
   ordering: ResultOrdering
+  /** `reorder` moves the candidate bullets instead of writing a result list. */
+  output: ResultOutput
   decimalPlaces: number
 }
 
@@ -41,7 +45,7 @@ export type SystemOneConfiguration = SystemOneConfigurationBase & (
 )
 
 const ALLOWED_KEYS = new Set([
-  'model', 'kind', 'question', 'candidate_scope', 'ordering', 'decimal_places',
+  'model', 'kind', 'question', 'candidate_scope', 'ordering', 'output', 'decimal_places',
   'categories', 'levels', 'yes_definition', 'no_definition', 'threshold',
 ])
 const ID_PATTERN = /^[a-z][a-z0-9_-]*$/
@@ -87,10 +91,20 @@ function parseSystemOneConfiguration(configuration: ExtensionJsonObject): ParseR
     configuration.ordering, RESULT_ORDERINGS, ['ordering'], issues,
     'Select document, ascending, or descending order.',
   )
+  // Skills saved before the output setting existed keep writing result lists.
+  const output = configuration.output === undefined
+    ? 'list'
+    : enumValue(configuration.output, RESULT_OUTPUTS, ['output'], issues, 'Select list or reorder output.')
   const decimalPlaces = boundedNumber(configuration.decimal_places, ['decimal_places'], issues, 0, 6, true)
 
-  if (!model || !kind || !question || !candidateScope || !ordering || decimalPlaces === undefined) {
+  if (!model || !kind || !question || !candidateScope || !ordering || !output || decimalPlaces === undefined) {
     return { ok: false, issues }
+  }
+  if (output === 'reorder' && candidateScope !== 'siblings') {
+    issue(issues, ['candidate_scope'], 'Reordering bullets in place requires direct siblings.')
+  }
+  if (output === 'reorder' && ordering === 'document') {
+    issue(issues, ['ordering'], 'Reordering bullets in place requires numeric ascending or descending order.')
   }
 
   const base: SystemOneConfigurationBase = {
@@ -99,6 +113,7 @@ function parseSystemOneConfiguration(configuration: ExtensionJsonObject): ParseR
     question,
     candidateScope,
     ordering,
+    output,
     decimalPlaces,
   }
   if (kind === 'choice-comparison') return finish(issues, { ...base, kind })

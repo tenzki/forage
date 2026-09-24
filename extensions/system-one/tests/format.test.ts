@@ -51,7 +51,7 @@ describe('System One ordinary linked output', () => {
     ])
     const result = formatSystemOneResult(configuration, preparedData, evaluation(answers))
     expect(rowIds(result)).toEqual(['idea-a', 'idea-b'])
-    expect(visible(result)).toContain('Categories: Build — Build now.; Defer — Defer it.')
+    expect(visible(result)).not.toContain('Categories:')
     expect(visible(result)).toContain('Category: Build; probability: 70.00%; confidence: 40.00%')
   })
 
@@ -63,7 +63,12 @@ describe('System One ordinary linked output', () => {
     ])
     const result = formatSystemOneResult(configuration, preparedData, evaluation(answers))
     expect(rowIds(result)).toEqual(['idea-b', 'idea-a'])
-    expect(visible(result)).toContain('Score: 0.333; confidence: 60.000%')
+    expect(result.nodes[0]?.segments).toEqual([{ type: 'text', text: configuration.question }])
+    expect(result.nodes[0]?.children).toHaveLength(2)
+    expect(result.nodes[0]?.children?.[0]?.segments).toEqual([
+      { type: 'internal-reference', nodeId: 'idea-b', label: expect.any(String) },
+      { type: 'text', text: ' - Weak (0.333); confidence: 60.000%' },
+    ])
 
     const tied = new Map<string, ScoreAnswer>([
       ['candidate_0', { ...answers.get('candidate_0')!, score: 0.5 }],
@@ -71,6 +76,26 @@ describe('System One ordinary linked output', () => {
     ])
     expect(rowIds(formatSystemOneResult({ ...configuration, ordering: 'descending' }, preparedData, evaluation(tied))))
       .toEqual(['idea-a', 'idea-b'])
+  })
+
+  it('names the closest rubric level for each Score', () => {
+    const configuration = scoreConfiguration({
+      ordering: 'descending', decimalPlaces: 2,
+      levels: [
+        { label: 'Weak', description: 'Unclear value.' },
+        { label: 'Plausible', description: 'Clear value with unknowns.' },
+        { label: 'Strong', description: 'Clear value and achievable.' },
+      ],
+    })
+    const answers = new Map<string, ScoreAnswer>([
+      ['candidate_0', { type: 'score', score: 1.26, legend: { 0: 'Weak', 1: 'Plausible', 2: 'Strong' }, probabilities: { 0: 0.14, 1: 0.47, 2: 0.39 }, confidence: 0.82 }],
+      ['candidate_1', { type: 'score', score: 1.62, legend: { 0: 'Weak', 1: 'Plausible', 2: 'Strong' }, probabilities: { 0: 0.05, 1: 0.28, 2: 0.67 }, confidence: 0.9 }],
+    ])
+    const lines = visible(formatSystemOneResult(configuration, preparedData, evaluation(answers))).split('\n')
+    expect(lines[0]).toBe(configuration.question)
+    expect(lines[1]).toMatch(/ - Strong \(1\.62\); confidence: 90\.00%$/)
+    expect(lines[2]).toMatch(/ - Plausible \(1\.26\); confidence: 82\.00%$/)
+    expect(lines).toHaveLength(3)
   })
 
   it('uses inclusive raw Noul thresholds before display rounding and never invents confidence', () => {
@@ -99,5 +124,30 @@ describe('System One ordinary linked output', () => {
     const result = formatSystemOneResult(configuration, preparedData, evaluation(answers))
     expect(rowIds(result)).toEqual([])
     expect(visible(result)).toContain('No matches met the inclusive yes-probability threshold of 90.00%.')
+  })
+
+  it('returns only a sibling reorder when reordering in place', () => {
+    const answers = new Map<string, ScoreAnswer>([
+      ['candidate_0', { type: 'score', score: 0.2, legend: { 0: 'Weak', 1: 'Strong' }, probabilities: { 0: 0.8, 1: 0.2 }, confidence: 0.7 }],
+      ['candidate_1', { type: 'score', score: 0.9, legend: { 0: 'Weak', 1: 'Strong' }, probabilities: { 0: 0.1, 1: 0.9 }, confidence: 0.9 }],
+    ])
+    const result = formatSystemOneResult(
+      scoreConfiguration({ ordering: 'descending', output: 'reorder' }),
+      preparedData,
+      evaluation(answers),
+    )
+    expect(result).toEqual({ nodes: [], reorder: { nodeIds: ['idea-b', 'idea-a'] } })
+  })
+
+  it('keeps every Noul candidate when reordering so none is left out of place', () => {
+    const configuration: SystemOneConfiguration = {
+      ...scoreConfiguration(), kind: 'noul', ordering: 'descending', output: 'reorder', decimalPlaces: 2, threshold: 0.9,
+    }
+    const answers = new Map<string, NoulAnswer>([
+      ['candidate_0', { type: 'noul', noul: 0.2 }],
+      ['candidate_1', { type: 'noul', noul: 0.4 }],
+    ])
+    expect(formatSystemOneResult(configuration, preparedData, evaluation(answers)).reorder)
+      .toEqual({ nodeIds: ['idea-b', 'idea-a'] })
   })
 })

@@ -114,6 +114,19 @@ describe('outliner sidebar', () => {
     })
   })
 
+  it('opens outline search from the sidebar', async () => {
+    const user = userEvent.setup()
+    const onSearch = vi.fn()
+    const onOpenOutline = vi.fn()
+    window.addEventListener(OUTLINER_OPEN_SEARCH_EVENT, onSearch, { once: true })
+    render(<OutlinerSidebar editor={editor} shortcuts={[]} onChange={vi.fn()} onOpenOutline={onOpenOutline} />)
+
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+
+    expect(onOpenOutline).toHaveBeenCalledOnce()
+    expect((onSearch.mock.calls[0][0] as CustomEvent).detail).toEqual({ query: '', scopeId: null })
+  })
+
   it('searches both tags and nodes from the add menu', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

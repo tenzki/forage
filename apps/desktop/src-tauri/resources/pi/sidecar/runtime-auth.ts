@@ -1,5 +1,8 @@
 import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { InMemoryCredentialStore, type ModelsStore, type ModelsStoreEntry } from '@earendil-works/pi-ai'
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth'
+
+registerBunOAuthFlows()
 
 export type SidecarAuth =
   | { providerId: 'openai'; accessToken: string }

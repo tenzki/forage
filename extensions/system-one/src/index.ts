@@ -4,7 +4,7 @@ import {
   type ExtensionSkillExecutorDefinition,
 } from '@forage/extension-api'
 import { requireSystemOneConfiguration, validateSystemOneConfiguration } from './domain.js'
-import { formatSystemOneResult } from './format.js'
+import { formatSystemOneResult, systemOneResultRows } from './format.js'
 import { prepareSystemOneInput, requirePreparedSystemOneData } from './preparation.js'
 import { evaluateWithTypeSafe } from './transport.js'
 
@@ -57,6 +57,16 @@ export const systemOneConfigurationForm = {
         { value: 'descending', label: 'Numeric descending' },
       ],
       default: 'document', required: true,
+    },
+    {
+      key: 'output', label: 'Output',
+      description: 'Reordering moves the sibling bullets into the result order without writing new bullets.',
+      type: 'choice',
+      options: [
+        { value: 'list', label: 'List results under the question' },
+        { value: 'reorder', label: 'Reorder the bullets in place' },
+      ],
+      default: 'list', required: false,
     },
     {
       key: 'decimal_places', label: 'Displayed decimal places', type: 'number', integer: true,
@@ -156,6 +166,12 @@ export function createSystemOneExecutor(
         },
       })
       operation.signal.throwIfAborted()
+      // Reordering writes no bullets, so each candidate's answer is reported in run activity instead.
+      if (configuration.output === 'reorder') {
+        for (const row of systemOneResultRows(configuration, prepared, evaluation)) {
+          operation.log({ level: 'info', message: `${row.candidate.label.slice(0, 200)} - ${row.detail}` })
+        }
+      }
       return formatSystemOneResult(configuration, prepared, evaluation)
     },
   }

@@ -539,11 +539,21 @@ const structuredResultV2NodeSchema: z.ZodType<StructuredResultV2Node> = z.lazy((
   }
 }))
 
+/** Sibling bullets to permute among the positions they already occupy. */
+export const structuredResultReorderSchema = z.object({
+  nodeIds: z.array(runtimeIdSchema).min(2).max(MAX_NODE_COUNT)
+    .refine((nodeIds) => new Set(nodeIds).size === nodeIds.length, 'Reordered node IDs must be unique'),
+}).strict()
+
 export const structuredResultV2Schema = z.object({
   version: z.literal(2),
-  nodes: z.array(structuredResultV2NodeSchema).min(1).max(MAX_NODE_COUNT, 'Structured result exceeds maximum node count'),
+  nodes: z.array(structuredResultV2NodeSchema).max(MAX_NODE_COUNT, 'Structured result exceeds maximum node count'),
   sources: z.array(sourceReferenceSchema).max(100),
-}).strict()
+  reorder: structuredResultReorderSchema.optional(),
+}).strict().refine((result) => result.nodes.length > 0 || Boolean(result.reorder), {
+  path: ['nodes'],
+  message: 'Structured result must contain nodes or a reorder',
+})
 
 export const structuredResultSchema = z.union([structuredResultV1Schema, structuredResultV2Schema])
 
@@ -602,6 +612,8 @@ export function parseStructuredResult(
       if (node.children) visit(node.children)
     })
     visit(result.nodes)
+    const unadmitted = result.reorder?.nodeIds.find((nodeId) => !allowed.has(nodeId))
+    if (unadmitted) throw new Error(`Structured result reorders an unadmitted node: ${unadmitted}`)
   }
   const measurement = measureNodes(result.nodes, 1)
   if (measurement.depth > MAX_NODE_DEPTH) throw new Error(`Structured result exceeds maximum depth of ${MAX_NODE_DEPTH}`)

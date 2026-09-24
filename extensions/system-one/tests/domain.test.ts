@@ -10,7 +10,7 @@ import { baseConfiguration } from './fixtures.js'
 describe('System One extension configuration', () => {
   it('declares bounded generic fields for every extension-owned mode', () => {
     expect(systemOneConfigurationForm.fields.map((field) => field.key)).toEqual([
-      'model', 'kind', 'question', 'candidate_scope', 'ordering', 'decimal_places',
+      'model', 'kind', 'question', 'candidate_scope', 'ordering', 'output', 'decimal_places',
     ])
     expect(systemOneConfigurationForm.branches.map((branch) => branch.when.equals)).toEqual([
       'choice-classification', 'score', 'noul',
@@ -37,6 +37,17 @@ describe('System One extension configuration', () => {
   ])('accepts a complete %s configuration', (_label, configuration) => {
     const clean = Object.fromEntries(Object.entries(configuration).filter(([, value]) => value !== undefined)) as ExtensionJsonObject
     expect(validateSystemOneConfiguration(clean)).toEqual({ valid: true })
+  })
+
+  it('defaults to list output and limits in-place reordering to numerically ordered siblings', () => {
+    expect(requireSystemOneConfiguration(baseConfiguration).output).toBe('list')
+    expect(requireSystemOneConfiguration({ ...baseConfiguration, output: 'reorder', ordering: 'descending' }).output)
+      .toBe('reorder')
+    const invalid = validateSystemOneConfiguration({
+      ...baseConfiguration, output: 'reorder', candidate_scope: 'descendants', ordering: 'document',
+    })
+    expect(invalid.valid ? [] : invalid.issues.map((entry) => entry.path)).toEqual([['candidate_scope'], ['ordering']])
+    expect(validateSystemOneConfiguration({ ...baseConfiguration, output: 'replace' }).valid).toBe(false)
   })
 
   it('preserves explicit ordered score levels', () => {

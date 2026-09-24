@@ -76,7 +76,7 @@ export const admittedPlan: ExtensionSkillAdmittedPlan = {
 export function scoreConfiguration(overrides: Partial<SystemOneConfiguration> = {}): SystemOneConfiguration {
   return {
     model: 'jev-latest', kind: 'score', question: 'How promising is this idea?', candidateScope: 'siblings',
-    ordering: 'document', decimalPlaces: 2,
+    ordering: 'document', output: 'list', decimalPlaces: 2,
     levels: [
       { label: 'Weak', description: 'Unclear value or feasibility.' },
       { label: 'Strong', description: 'Clear value and credible feasibility.' },

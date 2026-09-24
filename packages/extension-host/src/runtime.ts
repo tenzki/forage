@@ -278,14 +278,23 @@ export async function loadForageExtension(
       execution.signal.throwIfAborted()
       let parsed: ReturnType<typeof parseStructuredResult>
       try {
-        parsed = parseStructuredResult({ version: 2, nodes: result.nodes, sources: result.sources ?? [] }, {
+        parsed = parseStructuredResult({
+          version: 2,
+          nodes: result.nodes,
+          sources: result.sources ?? [],
+          ...(result.reorder ? { reorder: result.reorder } : {}),
+        }, {
           allowedReferenceIds: admittedReferenceIds,
         })
       } catch (error) {
         throw new ExtensionRuntimeError('invalid_executor_result', sanitizeExtensionText(boundedError(error), secretValues))
       }
       if (parsed.version !== 2) throw new ExtensionRuntimeError('invalid_executor_result', 'Extension executor returned an invalid structured result.')
-      return { nodes: parsed.nodes, ...(result.sources ? { sources: parsed.sources } : {}) }
+      return {
+        nodes: parsed.nodes,
+        ...(result.sources ? { sources: parsed.sources } : {}),
+        ...(parsed.reorder ? { reorder: parsed.reorder } : {}),
+      }
     },
     async runStart(runId, execution) {
       const common = executionContext(execution)
