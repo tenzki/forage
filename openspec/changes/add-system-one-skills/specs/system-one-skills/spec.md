@@ -31,7 +31,7 @@ The extension SHALL declare a System One execution choice for the existing skill
 - **THEN** its definition survives and invocation is blocked without automatic installation or fallback
 
 ### Requirement: Extension-owned typed question configuration
-The extension SHALL declare and validate Choice comparison/classification, Score with at least two ordered nonempty levels, and Noul with a complete question and optional yes/no definitions. Invalid, duplicate, empty or excessive fields SHALL prevent execution. Questions SHALL be explicit, not inferred from IDs. Fixed instructions SHALL be sufficient without additional invocation text.
+The extension SHALL declare and validate the reusable rubric: Choice comparison, Choice classification with at least two uniquely labelled categories, Score with at least two ordered nonempty levels, and Noul with optional yes/no definitions and a threshold. Category keys SHALL be derived from position, not authored. The question SHALL come from the text typed after the command; the configured question is an optional default used only when no text is typed. Invalid, duplicate or excessive fields SHALL prevent execution, and an invocation with neither typed text nor a default question SHALL fail before any provider request. Questions SHALL be explicit, not inferred from IDs.
 
 #### Scenario: Configure idea scoring
 - **WHEN** Score is configured with ordered descriptions
@@ -42,9 +42,17 @@ The extension SHALL declare and validate Choice comparison/classification, Score
 - **THEN** category definitions are required
 - **AND** comparison instead uses the complete prepared candidate set
 
+#### Scenario: Typed question
+- **WHEN** the user types text after the command
+- **THEN** that text is the question sent to the provider and the configured default is not used
+
 #### Scenario: Empty invocation prompt
-- **WHEN** a valid fixed-question skill has no additional prompt
-- **THEN** extension preparation/execution succeeds if context and candidates are valid
+- **WHEN** a skill with a default question is invoked without typed text
+- **THEN** extension preparation/execution uses the default question if context and candidates are valid
+
+#### Scenario: No question available
+- **WHEN** a skill without a default question is invoked without typed text
+- **THEN** preparation fails before any provider request
 
 ### Requirement: Extension-owned candidate preparation
 Within the host-supplied bounded context, the extension SHALL select direct sibling text candidates with subtree evidence or descendant text notes in document order, excluding the invocation subtree. Ancestors and linked branches SHALL be shared evidence, not additional candidates. It SHALL return a generic bounded plan and preview annotations for host validation without requesting broader outline access. No candidates or fewer than two comparative choices SHALL fail before evaluation.
@@ -74,15 +82,25 @@ The extension SHALL execute its admitted context/configuration/plan directly wit
 - **THEN** the extension uses the admitted snapshot rather than changing the running request
 
 ### Requirement: Extension-formatted plain linked output
-The extension SHALL format valid results as ordinary text/reference nodes with a question summary, relevant rubric/categories/threshold and stable candidate links. Choice SHALL label probabilities and selected options/categories; Score SHALL label rubric values; Noul SHALL label yes probabilities. Confidence SHALL be separately labelled when supplied. It SHALL not fabricate explanations or mutate source nodes. Core SHALL only validate/materialize generic output through existing document paths.
+The extension SHALL format valid results as ordinary text/reference nodes with one stable candidate link and at most one short value per row. Comparison SHALL mark the selected candidate; Score SHALL show the nearest rubric level label; classification SHALL group rows under category bullets in configured order, omitting empty categories, with rows below an optional minimum probability grouped last under Unclassified and showing their best-guess category; Noul SHALL list only matching links. Probabilities, scores and confidence SHALL appear in each row's plain bullet note, not in the row text. When the question was typed, rows SHALL be placed directly under the invocation; otherwise a single default-question root SHALL head them. It SHALL not fabricate explanations or mutate source nodes except through opt-in in-place output. Core SHALL only validate/materialize generic output through existing document paths.
 
 #### Scenario: Produce scored rows
 - **WHEN** evaluation completes
 - **THEN** extension-formatted rows contain links and values and the application commits them atomically as ordinary child bullets
+- **AND** numeric detail is written to each row's bullet note
 - **AND** original candidates are unchanged
 
+#### Scenario: Group classified rows
+- **WHEN** Choice classification completes
+- **THEN** each non-empty category is a bullet whose children link its candidates in document order
+
+#### Scenario: Leave uncertain candidates unclassified
+- **WHEN** a candidate's chosen category probability is below the configured minimum probability
+- **THEN** list output places it under a final Unclassified bullet with its best-guess category as the row value
+- **AND** reorder output moves it after every classified candidate and tag output leaves it untagged
+
 ### Requirement: Extension-owned ordering and semantic filtering
-The extension SHALL support document/numeric ascending/numeric descending ordering with document-order ties. Noul filtering SHALL use an inclusive threshold on unrounded yes probabilities from zero to one; rounding SHALL affect display only. Empty filtered output SHALL contain an ordinary no-matches summary.
+The extension SHALL order Choice comparison, Score and Noul rows highest value first and classification rows by configured category with rows below the minimum probability last, with document-order ties; in-place reordering SHALL use the same order. Noul filtering SHALL use an inclusive threshold on unrounded yes probabilities from zero to one; rounding SHALL affect display only. Empty filtered output SHALL contain an ordinary no-matches summary.
 
 #### Scenario: Filter actionable notes
 - **WHEN** the configured Noul threshold is 0.8
@@ -92,6 +110,22 @@ The extension SHALL support document/numeric ascending/numeric descending orderi
 #### Scenario: No matches
 - **WHEN** no candidate passes
 - **THEN** extension output contains the condition and threshold in a plain summary
+
+### Requirement: Opt-in in-place tag output
+With tag output, the extension SHALL write no bullets and SHALL return host-applied inline tag edits for the candidates instead. Tag output SHALL be limited to Choice classification and Noul. Classification SHALL tag each candidate with its chosen category's tag, derived from the category label unless a tag is configured, and SHALL leave it untagged when an optional minimum probability is not met. Noul SHALL add its configured tag to candidates at or above the inclusive threshold and remove it from the rest. Each edit SHALL remove the skill's other tags so a rerun replaces the previous answer, and each candidate's answer SHALL be reported in run activity.
+
+#### Scenario: Tag classified notes
+- **WHEN** classification with tag output assigns a candidate to the "Build later" category
+- **THEN** `#build-later` is appended to the candidate's text and the skill's other category tags are removed from it
+- **AND** no result bullets are written
+
+#### Scenario: Rerun Noul tagging
+- **WHEN** a candidate previously tagged `#actionable` now falls below the threshold
+- **THEN** its `#actionable` tag is removed and its other text is unchanged
+
+#### Scenario: Tag output for an unsupported kind
+- **WHEN** a Score or comparison skill selects tag output
+- **THEN** configuration validation rejects it before any provider request
 
 ### Requirement: Ordinary output lifecycle without extension code
 Saved output SHALL use normal persistence, provenance, sync, undo/redo and recoverable placement. It SHALL remain readable/editable/navigable without the extension installed. There SHALL be no special evaluation node, stored executable query, refresh/staleness UI or automatic reevaluation. New invocations SHALL create separate snapshots.

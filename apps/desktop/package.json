@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "pnpm --filter forage-sidecar build && node scripts/sync-dev-sidecar.mjs && tauri dev",
     "dev:web": "vite --port 1420",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",

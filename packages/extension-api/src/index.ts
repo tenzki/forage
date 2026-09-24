@@ -199,11 +199,12 @@ export type ExtensionSkillResultSegment =
 export interface ExtensionSkillResultNode {
   readonly type: 'text'
   readonly segments: ReadonlyArray<ExtensionSkillResultSegment>
+  readonly note?: string
   readonly children?: ReadonlyArray<ExtensionSkillResultNode>
 }
 
 export interface ExtensionSkillResult {
-  /** New bullets placed under the invocation. May be empty only when `reorder` is present. */
+  /** New bullets placed under the invocation. May be empty only when `reorder` or `tags` is present. */
   readonly nodes: ReadonlyArray<ExtensionSkillResultNode>
   readonly sources?: ReadonlyArray<{ readonly url: string; readonly label: string }>
   /**
@@ -211,6 +212,15 @@ export interface ExtensionSkillResult {
    * positions they already occupy; other siblings keep their places.
    */
   readonly reorder?: { readonly nodeIds: ReadonlyArray<string> }
+  /**
+   * Inline `#tag`s (names without `#`) to add to or remove from admitted bullets.
+   * The host appends missing tags to the end of the bullet text and deletes removed ones.
+   */
+  readonly tags?: ReadonlyArray<{
+    readonly nodeId: string
+    readonly add: ReadonlyArray<string>
+    readonly remove?: ReadonlyArray<string>
+  }>
 }
 
 export interface ExtensionSkillExecutionInput {

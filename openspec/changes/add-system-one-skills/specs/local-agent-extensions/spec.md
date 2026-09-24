@@ -18,7 +18,7 @@ Forage SHALL load entries through one current @forage/extension-api contract sup
 - **THEN** a user-created skill can explicitly select it and execute without Pi, LLM credentials or unrelated extension hooks
 
 ### Requirement: Observable bounded execution
-Forage SHALL show bounded tool/executor activity with provenance, propagate cancellation and terminate unresponsive validation, preparation or execution processes after bounded deadlines/grace periods. Logs SHALL NOT corrupt the protocol or expose scoped secrets, including JSON-escaped secrets in nested observable fields. Source/configuration revisions and prepared input SHALL be immutable for an admitted run. Generic result validation SHALL enforce bounds and host-admitted reference IDs, reject invalid/late output and use application-owned commit paths; extensions SHALL NOT mutate the document directly.
+Forage SHALL show bounded tool/executor activity with provenance, propagate cancellation and terminate unresponsive validation, preparation or execution processes after bounded deadlines/grace periods. Logs SHALL NOT corrupt the protocol or expose scoped secrets, including JSON-escaped secrets in nested observable fields. Source/configuration revisions and prepared input SHALL be immutable for an admitted run. Generic result nodes MAY carry a plain-text note materialized as the bullet's note and counted toward text bounds. A generic result MAY instead carry inline tag edits for host-admitted nodes: the host SHALL append missing tags as plain `#tag` text at the end of the bullet text, delete removed tags, skip tags already in place, and apply all edits in the result's single undoable transaction. Generic result validation SHALL enforce bounds and host-admitted reference IDs, reject invalid/late output and use application-owned commit paths; extensions SHALL NOT mutate the document directly.
 
 #### Scenario: Extension tool logs and throws
 - **WHEN** a tool logs and throws
@@ -31,6 +31,10 @@ Forage SHALL show bounded tool/executor activity with provenance, propagate canc
 #### Scenario: Source changes before execution
 - **WHEN** the selected executor digest differs from the admitted revision
 - **THEN** execution fails before loading changed code or making a provider request
+
+#### Scenario: Extension tags a node it was not given
+- **WHEN** output edits tags of a node outside the host-admitted input IDs
+- **THEN** host validation rejects the output without changing any bullet
 
 #### Scenario: Extension supplies its own reference allowlist
 - **WHEN** output includes a link outside host-admitted input IDs even if the extension lists it as allowed

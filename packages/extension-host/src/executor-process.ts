@@ -201,12 +201,14 @@ export class NodeExtensionExecutorProcess {
             nodes: value.nodes,
             sources: value.sources ?? [],
             ...(value.reorder ? { reorder: value.reorder } : {}),
+            ...(value.tags ? { tags: value.tags } : {}),
           }, { allowedReferenceIds: (input as ExtensionSkillExecutionInput).plan.admittedReferenceIds })
           if (parsed.version !== 2) throw new Error('Executor result must use generic structured text nodes.')
           result = {
             nodes: parsed.nodes,
             ...(value.sources ? { sources: parsed.sources } : {}),
             ...(parsed.reorder ? { reorder: parsed.reorder } : {}),
+            ...(parsed.tags ? { tags: parsed.tags } : {}),
           }
         } else {
           result = parseValidationResult(event.value)

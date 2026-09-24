@@ -107,8 +107,8 @@ describe('System One through the generic executor host', () => {
       ...baseConfiguration,
       kind: 'choice-classification',
       categories: [
-        { id: 'build', label: 'Build', description: 'Build now.' },
-        { id: 'defer', label: 'Defer', description: 'Defer it.' },
+        { label: 'Build', description: 'Build now.' },
+        { label: 'Defer', description: 'Defer it.' },
       ],
     }],
     ['Score', baseConfiguration],
@@ -132,7 +132,7 @@ describe('System One through the generic executor host', () => {
   })
 
   it('carries an in-place reorder through the executor host and reports each answer in activity', async () => {
-    const value = await admit({ ...baseConfiguration, output: 'reorder', ordering: 'descending' })
+    const value = await admit({ ...baseConfiguration, output: 'reorder' })
     const logs: Array<{ message: string }> = []
     const result = await value.admission.execute({
       signal: new AbortController().signal,

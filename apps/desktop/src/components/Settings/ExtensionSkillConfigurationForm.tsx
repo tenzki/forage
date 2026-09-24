@@ -23,6 +23,35 @@ export function configurationWithDefaults(
   return configuration
 }
 
+/**
+ * Drop values for fields the executor no longer declares, so a skill saved
+ * before an extension removed a field can be re-saved. Hidden branch values are
+ * kept, matching validation.
+ */
+export function configurationWithoutUndeclaredFields(
+  form: ExtensionSkillConfigurationFormDefinition,
+  current: ExtensionJsonObject,
+): ExtensionJsonObject {
+  return declaredValues([...form.fields, ...(form.branches ?? []).flatMap((branch) => branch.fields)], current)
+}
+
+function declaredValues(fields: readonly ExtensionSkillConfigurationField[], value: ExtensionJsonObject): ExtensionJsonObject {
+  const byKey = new Map(fields.map((field) => [field.key, field]))
+  return Object.fromEntries(Object.entries(value).flatMap(([key, entry]): Array<[string, ExtensionJsonValue]> => {
+    const field = byKey.get(key)
+    if (!field) return []
+    if (field.type === 'object' && isJsonObject(entry)) return [[key, declaredValues(field.fields, entry)]]
+    if (field.type === 'repeat' && Array.isArray(entry)) {
+      return [[key, entry.map((item) => isJsonObject(item) ? declaredValues(field.fields, item) : item)]]
+    }
+    return [[key, entry]]
+  }))
+}
+
+function isJsonObject(value: ExtensionJsonValue): value is ExtensionJsonObject {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function applyDefaults(fields: readonly ExtensionSkillConfigurationField[], target: ExtensionJsonObject): void {
   for (const field of fields) {
     if (target[field.key] !== undefined) continue

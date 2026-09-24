@@ -162,8 +162,20 @@ describe('agent runtime contracts', () => {
     const result = { version: 2 as const, nodes: [], sources: [], reorder: { nodeIds: ['two', 'one'] } }
     expect(parseStructuredResult(result, { allowedReferenceIds: ['one', 'two'] })).toEqual(result)
     expect(() => parseStructuredResult(result, { allowedReferenceIds: ['one'] })).toThrow(/unadmitted node/i)
-    expect(() => parseStructuredResult({ ...result, reorder: undefined })).toThrow(/nodes or a reorder/i)
+    expect(() => parseStructuredResult({ ...result, reorder: undefined })).toThrow(/nodes, a reorder, or tags/i)
     expect(() => parseStructuredResult({ ...result, reorder: { nodeIds: ['one', 'one'] } })).toThrow(/unique/i)
+  })
+
+  it('accepts inline tag edits of admitted nodes in place of new bullets', () => {
+    const result = {
+      version: 2 as const, nodes: [], sources: [],
+      tags: [{ nodeId: 'one', add: ['build'], remove: ['later'] }, { nodeId: 'two', add: [] }],
+    }
+    expect(parseStructuredResult(result, { allowedReferenceIds: ['one', 'two'] })).toEqual(result)
+    expect(() => parseStructuredResult(result, { allowedReferenceIds: ['one'] })).toThrow(/tags an unadmitted node/i)
+    expect(() => parseStructuredResult({ ...result, tags: [...result.tags, { nodeId: 'one', add: [] }] })).toThrow(/unique/i)
+    expect(() => parseStructuredResult({ ...result, tags: [{ nodeId: 'one', add: ['two words'] }] })).toThrow(/tags must be/i)
+    expect(() => parseStructuredResult({ ...result, tags: [{ nodeId: 'one', add: ['#build'] }] })).toThrow(/tags must be/i)
   })
 
   it('validates generic linked results against host authority and aggregate text limits', () => {
@@ -181,6 +193,24 @@ describe('agent runtime contracts', () => {
       ...result, nodes: Array.from({ length: 6 }, () => ({ type: 'text', segments: [{ type: 'text', text: 'x'.repeat(20_000) }] })),
     }, { allowedReferenceIds: [] })).toThrow(/maximum text size/i)
     expect(parseStructuredResult({ version: 1, nodes: [{ type: 'text', text: 'Historical' }], sources: [] }).version).toBe(1)
+  })
+
+  it('accepts plain bullet notes on linked results and counts them toward text limits', () => {
+    const result = {
+      version: 2 as const,
+      nodes: [{
+        type: 'text' as const,
+        segments: [{ type: 'internal-reference' as const, nodeId: 'one', label: 'First note' }],
+        note: 'Probability 62%',
+      }],
+      sources: [],
+    }
+    expect(parseStructuredResult(result, { allowedReferenceIds: ['one'] })).toEqual(result)
+    expect(() => parseStructuredResult({ ...result, nodes: [{ ...result.nodes[0], note: '  ' }] })).toThrow()
+    expect(() => parseStructuredResult({
+      ...result,
+      nodes: Array.from({ length: 6 }, () => ({ type: 'text', segments: [{ type: 'text', text: 'x' }], note: 'y'.repeat(20_000) })),
+    })).toThrow(/maximum text size/i)
   })
 
   it('keeps existing bounded helper contracts', () => {

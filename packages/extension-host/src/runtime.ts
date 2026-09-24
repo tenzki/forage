@@ -283,6 +283,7 @@ export async function loadForageExtension(
           nodes: result.nodes,
           sources: result.sources ?? [],
           ...(result.reorder ? { reorder: result.reorder } : {}),
+          ...(result.tags ? { tags: result.tags } : {}),
         }, {
           allowedReferenceIds: admittedReferenceIds,
         })
@@ -294,6 +295,7 @@ export async function loadForageExtension(
         nodes: parsed.nodes,
         ...(result.sources ? { sources: parsed.sources } : {}),
         ...(parsed.reorder ? { reorder: parsed.reorder } : {}),
+        ...(parsed.tags ? { tags: parsed.tags } : {}),
       }
     },
     async runStart(runId, execution) {

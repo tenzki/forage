@@ -22,6 +22,21 @@ export function tagsInText(text: string): string[] {
   return tags
 }
 
+export interface TagMatch {
+  tag: string
+  /** Offset of the `#`. */
+  from: number
+  /** Offset just past the tag name. */
+  to: number
+}
+
+export function tagMatchesInText(text: string): TagMatch[] {
+  return [...text.matchAll(TAG_PATTERN)].map((match) => {
+    const from = (match.index ?? 0) + match[1].length
+    return { tag: match[2].toLocaleLowerCase(), from, to: from + match[2].length + 1 }
+  })
+}
+
 export function collectTags(doc: ProseMirrorNode): string[] {
   const tags = new Set<string>()
   doc.descendants((node) => {

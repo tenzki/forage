@@ -34,6 +34,7 @@ import {
   type StructuredResultV2Node,
 } from '@forage/agent-runtime'
 import { clearStreamingText, showStreamingText, type StreamingTextRange } from '../editor/agentStreamingText'
+import { tagMatchesInText } from '../editor/tags'
 
 function contextText(item: ProseMirrorNode): string {
   const title = item.firstChild?.textContent?.trim() ?? ''
@@ -496,6 +497,17 @@ function extensionInlineContent(
   return inline
 }
 
+function extensionNote(editor: Editor, note: string): ProseMirrorNode {
+  const type = editor.schema.nodes.bulletNote
+  if (!type) throw new Error('The editor cannot materialize bullet notes.')
+  const inline: ProseMirrorNode[] = []
+  note.split('\n').forEach((line, index) => {
+    if (index > 0) inline.push(editor.schema.nodes.hardBreak.create())
+    if (line) inline.push(editor.schema.text(line))
+  })
+  return type.create(null, inline)
+}
+
 function createExtensionResultItem(
   editor: Editor,
   node: StructuredResultV2Node,
@@ -505,6 +517,7 @@ function createExtensionResultItem(
   const content: ProseMirrorNode[] = [
     editor.schema.nodes.paragraph.create(null, extensionInlineContent(editor, node)),
   ]
+  if (node.note) content.push(extensionNote(editor, node.note))
   if (node.children?.length) {
     content.push(editor.schema.nodes.bulletList.create(null, node.children.map((child, index) => (
       createExtensionResultItem(editor, child, runId, [...path, index])
@@ -578,6 +591,55 @@ function applyExtensionReorder(transaction: Transaction, nodeIds: readonly strin
   transaction.replaceWith(listPos + 1, listPos + list.nodeSize - 1, children)
 }
 
+/**
+ * Edit inline `#tag`s in admitted bullets' text. Removed tags are deleted with
+ * one adjoining space; missing added tags are appended as unmarked text. Both
+ * steps skip what is already in place, so reapplying is a no-op.
+ */
+function applyExtensionTags(
+  transaction: Transaction,
+  edits: NonNullable<StructuredResultV2['tags']>,
+): void {
+  const schema = transaction.doc.type.schema
+  for (const edit of edits) {
+    const item = findListItemIn(transaction.doc, edit.nodeId)
+    const paragraph = item?.node.firstChild
+    if (!item || paragraph?.type.name !== 'paragraph') throw new Error('A bullet the extension tagged is no longer available.')
+    const add = [...new Set(edit.add.map((tag) => tag.toLocaleLowerCase()))]
+    const remove = new Set((edit.remove ?? []).map((tag) => tag.toLocaleLowerCase()).filter((tag) => !add.includes(tag)))
+    const contentStart = item.pos + 2
+    // Every inline leaf counts as one character, so text offsets equal document offsets.
+    const text = paragraph.textBetween(0, paragraph.content.size, undefined, '\ufffc')
+    const matches = tagMatchesInText(text)
+    const deletions: Array<{ from: number; to: number }> = []
+    for (const match of matches.filter((candidate) => remove.has(candidate.tag))) {
+      let { from, to } = match
+      if (/\s/.test(text[from - 1] ?? '')) from -= 1
+      else if (/\s/.test(text[to] ?? '')) to += 1
+      // Adjacent tags can claim the same space; merge so it is deleted once.
+      const previous = deletions[deletions.length - 1]
+      if (previous && from <= previous.to) previous.to = Math.max(previous.to, to)
+      else deletions.push({ from, to })
+    }
+    for (const { from, to } of deletions.reverse()) transaction.delete(contentStart + from, contentStart + to)
+    const present = new Set(matches.map((match) => match.tag).filter((tag) => !remove.has(tag)))
+    const missing = add.filter((tag) => !present.has(tag))
+    if (!missing.length) continue
+    const updated = transaction.doc.nodeAt(item.pos)!.firstChild!
+    const updatedText = updated.textBetween(0, updated.content.size, undefined, '\ufffc')
+    const separator = updatedText && !/\s$/.test(updatedText) ? ' ' : ''
+    transaction.insert(
+      contentStart + updated.content.size,
+      schema.text(`${separator}${missing.map((tag) => `#${tag}`).join(' ')}`),
+    )
+  }
+}
+
+/** Bullets an in-place result changed, for revealing after the transaction. */
+function inPlaceResultNodeIds(result: StructuredResultV2): string[] {
+  return [...new Set([...result.reorder?.nodeIds ?? [], ...(result.tags ?? []).map((edit) => edit.nodeId)])]
+}
+
 /** Remove a list item, or its whole list when it is the only item. */
 function deleteListItem(transaction: Transaction, pos: number, node: ProseMirrorNode): void {
   const $pos = transaction.doc.resolve(pos)
@@ -592,7 +654,7 @@ function deleteListItem(transaction: Transaction, pos: number, node: ProseMirror
  * Materialize a complete generic extension result as ordinary list items in one
  * transaction. Deterministic run-scoped ids make recovery idempotent if the app
  * closes after the document event is persisted but before the retained run is
- * marked placed. A reorder is idempotent by construction.
+ * marked placed. A reorder and tag edits are idempotent by construction.
  */
 export function insertExtensionSkillResult(
   editor: Editor,
@@ -612,6 +674,7 @@ export function insertExtensionSkillResult(
   const insertNodes = rootNodeIds.length > 0 && existing.length === 0
   const transaction = editor.state.tr
   if (materializable.reorder) applyExtensionReorder(transaction, materializable.reorder.nodeIds)
+  if (materializable.tags) applyExtensionTags(transaction, materializable.tags)
   if (insertNodes) {
     const target = findListItemIn(transaction.doc, targetNodeId)
     if (!target) throw new Error('The extension skill output target is no longer available.')
@@ -621,7 +684,7 @@ export function insertExtensionSkillResult(
       editor.schema.nodes.bulletList.create(null, items),
     )
   }
-  const revealed = rootNodeIds.length ? rootNodeIds : [...materializable.reorder?.nodeIds ?? []]
+  const revealed = rootNodeIds.length ? rootNodeIds : inPlaceResultNodeIds(materializable)
   if (!transaction.docChanged) return revealed
   closeHistory(transaction)
   transaction.setMeta('forageOrigin', 'agent')
@@ -636,8 +699,8 @@ export function insertExtensionSkillResult(
  * When the invocation carries no prompt and the result is a single root with
  * children, that root's text replaces the invocation text and its children are
  * placed directly under it, so the command bullet becomes the result heading.
- * A reorder-only result moves the admitted siblings and removes an invocation
- * that carries no prompt, so no new bullets remain.
+ * A result without nodes (a reorder or tag edits) changes the admitted bullets
+ * in place and removes an invocation that carries no prompt, so no new bullets remain.
  */
 export function commitExtensionSkillResult(
   editor: Editor,
@@ -651,6 +714,7 @@ export function commitExtensionSkillResult(
   if (!findListItem(editor, invocationNodeId)) throw new Error('The extension skill invocation target is no longer available.')
   const transaction = editor.state.tr
   if (materializable.reorder) applyExtensionReorder(transaction, materializable.reorder.nodeIds)
+  if (materializable.tags) applyExtensionTags(transaction, materializable.tags)
   const target = findListItemIn(transaction.doc, invocationNodeId)
   if (!target) throw new Error('The extension skill invocation target is no longer available.')
   const rootNodeIds = materializable.nodes.map((_, index) => extensionResultNodeId(runId, [index]))
@@ -664,14 +728,14 @@ export function commitExtensionSkillResult(
   const [onlyRoot] = materializable.nodes
   let revealed = rootNodeIds
   if (!items.length) {
-    revealed = [...materializable.reorder?.nodeIds ?? []]
+    revealed = inPlaceResultNodeIds(materializable)
     if (promptless && target.node.childCount === 1) deleteListItem(transaction, target.pos, target.node)
     else if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
-  } else if (paragraph && items.length === 1 && onlyRoot?.children?.length && promptless) {
+  } else if (paragraph && items.length === 1 && onlyRoot?.children?.length && !onlyRoot.note && promptless) {
     const rootItem = items[0]!
     transaction.replaceWith(target.pos + 2, target.pos + 2 + paragraph.content.size, rootItem.child(0).content)
     const insertPosition = transaction.mapping.map(target.pos + target.node.nodeSize - 1, -1)
-    transaction.insert(insertPosition, rootItem.child(1))
+    transaction.insert(insertPosition, rootItem.lastChild!)
     revealed = [invocationNodeId]
   } else {
     if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)

@@ -3,8 +3,8 @@ import {
   type ExtensionSkillConfigurationForm,
   type ExtensionSkillExecutorDefinition,
 } from '@forage/extension-api'
-import { requireSystemOneConfiguration, validateSystemOneConfiguration } from './domain.js'
-import { formatSystemOneResult, systemOneResultRows } from './format.js'
+import { requireSystemOneConfiguration, resolveSystemOneQuestion, validateSystemOneConfiguration } from './domain.js'
+import { describeSystemOneRow, formatSystemOneResult, systemOneResultRows } from './format.js'
 import { prepareSystemOneInput, requirePreparedSystemOneData } from './preparation.js'
 import { evaluateWithTypeSafe } from './transport.js'
 
@@ -37,9 +37,9 @@ export const systemOneConfigurationForm = {
       default: 'score', required: true,
     },
     {
-      key: 'question', label: 'Question',
-      description: 'A complete explicit question. Candidate IDs are never used as inferred instructions.',
-      type: 'multiline', required: true, minLength: 1, maxLength: 2_000,
+      key: 'question', label: 'Default question',
+      description: 'Used when the command is run without typed text; typed text after the command replaces it.',
+      type: 'multiline', required: false, maxLength: 2_000,
     },
     {
       key: 'candidate_scope', label: 'Candidate scope', type: 'choice',
@@ -50,27 +50,15 @@ export const systemOneConfigurationForm = {
       default: 'siblings', required: true,
     },
     {
-      key: 'ordering', label: 'Result order', type: 'choice',
-      options: [
-        { value: 'document', label: 'Document order' },
-        { value: 'ascending', label: 'Numeric ascending' },
-        { value: 'descending', label: 'Numeric descending' },
-      ],
-      default: 'document', required: true,
-    },
-    {
       key: 'output', label: 'Output',
-      description: 'Reordering moves the sibling bullets into the result order without writing new bullets.',
+      description: 'Reordering moves the sibling bullets into the result order (highest first, or by category). Tagging adds each bullet\'s category tag (classification) or the yes tag (Noul) to its text. Neither writes new bullets.',
       type: 'choice',
       options: [
         { value: 'list', label: 'List results under the question' },
         { value: 'reorder', label: 'Reorder the bullets in place' },
+        { value: 'tag', label: 'Tag the bullets in place' },
       ],
       default: 'list', required: false,
-    },
-    {
-      key: 'decimal_places', label: 'Displayed decimal places', type: 'number', integer: true,
-      minimum: 0, maximum: 6, default: 2, required: true,
     },
   ],
   branches: [
@@ -78,13 +66,21 @@ export const systemOneConfigurationForm = {
       when: { field: 'kind', equals: 'choice-classification' },
       fields: [{
         key: 'categories', label: 'Categories',
-        description: 'Unordered answer choices with explicit stable IDs and definitions.',
+        description: 'Answer choices with definitions. Results are grouped in this order.',
         type: 'repeat', minimumItems: 2, maximumItems: 50, required: true,
         fields: [
-          { key: 'id', label: 'Category ID', type: 'text', required: true, minLength: 1, maxLength: 64 },
           { key: 'label', label: 'Label', type: 'text', required: true, minLength: 1, maxLength: 100 },
           { key: 'description', label: 'Definition', type: 'multiline', required: true, minLength: 1, maxLength: 1_000 },
+          {
+            key: 'tag', label: 'Tag',
+            description: 'Used by tag output. Defaults to the label, e.g. "Build later" becomes #build-later.',
+            type: 'text', required: false, maxLength: 65,
+          },
         ],
+      }, {
+        key: 'minimum_probability', label: 'Minimum probability',
+        description: 'Bullets whose chosen category falls below this are left unclassified: listed under Unclassified, moved last when reordering, and left untagged.',
+        type: 'number', minimum: 0, maximum: 1, required: false,
       }],
     },
     {
@@ -105,6 +101,11 @@ export const systemOneConfigurationForm = {
         { key: 'yes_definition', label: 'Yes definition', type: 'multiline', maxLength: 1_000 },
         { key: 'no_definition', label: 'No definition', type: 'multiline', maxLength: 1_000 },
         { key: 'threshold', label: 'Inclusive yes threshold', type: 'number', minimum: 0, maximum: 1, default: 0.5, required: true },
+        {
+          key: 'tag', label: 'Tag',
+          description: 'Required by tag output. Added to bullets at or above the threshold and removed from the rest.',
+          type: 'text', required: false, maxLength: 65,
+        },
       ],
     },
   ],
@@ -130,6 +131,8 @@ export function createSystemOneExecutor(
     async prepare({ configuration, context }, operation) {
       operation.signal.throwIfAborted()
       const parsed = requireSystemOneConfiguration(configuration)
+      // Fail before any paid request when neither typed text nor a default supplies the question.
+      resolveSystemOneQuestion(parsed, context.prompt)
       const plan = prepareSystemOneInput(parsed, context)
       operation.reportProgress({
         message: `Prepared ${plan.selectedNodeIds.length} System One candidate${plan.selectedNodeIds.length === 1 ? '' : 's'}`,
@@ -166,13 +169,13 @@ export function createSystemOneExecutor(
         },
       })
       operation.signal.throwIfAborted()
-      // Reordering writes no bullets, so each candidate's answer is reported in run activity instead.
-      if (configuration.output === 'reorder') {
+      // In-place output writes no bullets, so each candidate's answer is reported in run activity instead.
+      if (configuration.output !== 'list') {
         for (const row of systemOneResultRows(configuration, prepared, evaluation)) {
-          operation.log({ level: 'info', message: `${row.candidate.label.slice(0, 200)} - ${row.detail}` })
+          operation.log({ level: 'info', message: describeSystemOneRow(row) })
         }
       }
-      return formatSystemOneResult(configuration, prepared, evaluation)
+      return formatSystemOneResult(configuration, prepared, evaluation, input.context.prompt)
     },
   }
 }

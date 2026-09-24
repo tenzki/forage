@@ -16,7 +16,7 @@ function response(answers: Record<string, unknown>, model = 'jev-1.13.0') {
 describe('TypeSafe Jev transport', () => {
   it('keeps a comparative Choice set complete in one question', () => {
     const configuration: SystemOneConfiguration = {
-      ...scoreConfiguration(), kind: 'choice-comparison', ordering: 'descending',
+      ...scoreConfiguration(), kind: 'choice-comparison',
     }
     const request = buildTypeSafeRequest(configuration, preparedData, '')
     expect(Object.keys(request.questions)).toEqual(['comparison'])
@@ -30,8 +30,8 @@ describe('TypeSafe Jev transport', () => {
     ['classification', {
       ...scoreConfiguration(), kind: 'choice-classification',
       categories: [
-        { id: 'build', label: 'Build', description: 'Build now.' },
-        { id: 'defer', label: 'Defer', description: 'Defer it.' },
+        { label: 'Build', description: 'Build now.' },
+        { label: 'Defer', description: 'Defer it.' },
       ],
     } as SystemOneConfiguration, 'choice'],
     ['score', scoreConfiguration(), 'score'],
@@ -40,14 +40,34 @@ describe('TypeSafe Jev transport', () => {
       yesDefinition: 'Actionable', noDefinition: 'Not actionable',
     } as SystemOneConfiguration, 'noul'],
   ])('batches every candidate-specific %s question in one request', (_label, configuration, type) => {
-    const request = buildTypeSafeRequest(configuration, preparedData, 'Use current constraints.')
+    const request = buildTypeSafeRequest(configuration, preparedData, '')
     expect(Object.keys(request.questions)).toEqual(['candidate_0', 'candidate_1'])
     expect(Object.values(request.questions).every((question) => question.type === type)).toBe(true)
     expect(request.questions.candidate_0?.instructions).toMatchObject({
       question: configuration.question,
       candidate_id: 'idea-a',
     })
-    expect(request.state.additional_user_guidance).toBe('Use current constraints.')
+  })
+
+  it('asks the typed question instead of the default and sends no separate guidance', () => {
+    const request = buildTypeSafeRequest(scoreConfiguration(), preparedData, ' Which ships this quarter? ')
+    expect(request.questions.candidate_0?.instructions).toMatchObject({ question: 'Which ships this quarter?' })
+    expect(request.state).not.toHaveProperty('additional_user_guidance')
+    expect(() => buildTypeSafeRequest(scoreConfiguration({ question: undefined }), preparedData, ''))
+      .toThrow(/no default question/)
+  })
+
+  it('keys classification categories by position and describes them by label', () => {
+    const configuration = {
+      ...scoreConfiguration(), kind: 'choice-classification',
+      categories: [
+        { label: 'Build', description: 'Build now.' },
+        { label: 'Defer', description: 'Defer it.' },
+      ],
+    } as SystemOneConfiguration
+    expect(buildTypeSafeRequest(configuration, preparedData, '').questions.candidate_0).toMatchObject({
+      criteria: { category_0: 'Build: Build now.', category_1: 'Defer: Defer it.' },
+    })
   })
 
   it('accepts complete typed answers and reports the concrete model behind an alias', async () => {

@@ -1,5 +1,5 @@
 import type { ExtensionProgress } from '@forage/extension-api'
-import type { SystemOneConfiguration } from './domain.js'
+import { resolveSystemOneQuestion, type SystemOneConfiguration } from './domain.js'
 import type { PreparedCandidate, PreparedSystemOneData } from './preparation.js'
 
 export const TYPESAFE_SYSTEM_ONE_URL = 'https://api.typesafe.ai/v1/systemone'
@@ -42,7 +42,6 @@ export interface TypeSafeRequest {
       evidence: ReadonlyArray<{ id: string; text: string }>
     }>
     shared_evidence: ReadonlyArray<{ id: string; text: string; provenance: string }>
-    additional_user_guidance?: string
   }
   questions: Record<string, TypeSafeQuestion>
 }
@@ -88,7 +87,7 @@ export function buildTypeSafeRequest(
   prepared: PreparedSystemOneData,
   prompt: string,
 ): TypeSafeRequest {
-  const additionalPrompt = prompt.trim()
+  const question = resolveSystemOneQuestion(configuration, prompt)
   const state = {
     candidates: prepared.candidates.map((candidate) => ({
       id: candidate.id,
@@ -100,10 +99,9 @@ export function buildTypeSafeRequest(
       text: entry.text,
       provenance: entry.provenance,
     })),
-    ...(additionalPrompt ? { additional_user_guidance: additionalPrompt } : {}),
   }
   const instructions = (candidate?: PreparedCandidate): Readonly<Record<string, unknown>> => ({
-    question: configuration.question,
+    question,
     ...(candidate ? {
       candidate_id: candidate.id,
       candidate_location: 'Find this exact candidate ID in `state.candidates`; evaluate that candidate with its evidence and shared evidence.',
@@ -127,7 +125,10 @@ export function buildTypeSafeRequest(
       },
     }
   } else if (configuration.kind === 'choice-classification') {
-    const criteria = Object.fromEntries(configuration.categories.map((category) => [category.id, category.description]))
+    const criteria = Object.fromEntries(configuration.categories.map((category, index) => [
+      categoryKey(index),
+      `${category.label}: ${category.description}`,
+    ]))
     questions = Object.fromEntries(prepared.candidates.map((candidate, index) => [
       questionKey(index),
       { type: 'choice', instructions: instructions(candidate), criteria },
@@ -392,4 +393,9 @@ export function questionKey(index: number): string {
 
 export function optionKey(index: number): string {
   return `option_${index}`
+}
+
+/** Categories are keyed by position so authors never manage identifiers. */
+export function categoryKey(index: number): string {
+  return `category_${index}`
 }

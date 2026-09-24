@@ -68,9 +68,9 @@ export const DEFAULT_SKILLS: LlmSkillDefinition[] = [
   },
 ]
 
-function cleanText(value: string, label: string, maxLength: number): string {
+function cleanText(value: string, label: string, maxLength: number, optional = false): string {
   const result = value.trim()
-  if (!result) throw new Error(`${label} is required.`)
+  if (!result && !optional) throw new Error(`${label} is required.`)
   if (result.length > maxLength) throw new Error(`${label} must be at most ${maxLength} characters.`)
   return result
 }
@@ -85,7 +85,7 @@ export function validateAgentDraft(draft: AgentDraft, availableTools: ToolOption
   return {
     id: validId(draft.id),
     name: cleanText(draft.name, 'Agent name', 80),
-    description: cleanText(draft.description, 'Agent description', 300),
+    description: cleanText(draft.description, 'Agent description', 300, true),
     systemPrompt: cleanText(draft.systemPrompt, 'Agent instructions', 20_000),
     // Known tools are validated by the catalog. Syntactically valid unknown ids are
     // retained so synchronized or temporarily missing extension tools can recover.
@@ -117,7 +117,7 @@ export function validateSkillDraft(draft: SkillDraft, agents: AgentDefinition[])
     id: validId(draft.id),
     execution: 'llm',
     label,
-    description: cleanText(draft.description, 'Skill description', 300),
+    description: cleanText(draft.description, 'Skill description', 300, true),
     systemPrompt: cleanText(draft.systemPrompt, 'Skill instructions', 20_000),
     agentId: draft.agentId,
     requiredToolIds,

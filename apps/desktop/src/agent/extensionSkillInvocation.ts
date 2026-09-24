@@ -109,6 +109,7 @@ export async function executePreparedExtensionSkill(
     nodes: result.nodes,
     sources: result.sources ?? [],
     ...(result.reorder ? { reorder: result.reorder } : {}),
+    ...(result.tags ? { tags: result.tags } : {}),
   }, { allowedReferenceIds: prepared.admission.plan.admittedReferenceIds })
   if (parsed.version !== 2) throw new Error('Extension executor returned an unsupported result version.')
   return parsed

@@ -31,7 +31,7 @@ const uniqueToolIdsSchema = z.array(toolIdSchema).max(64)
 export const portableAgentDefinitionSchema = z.object({
   id: definitionIdSchema,
   name: z.string().trim().min(1).max(80),
-  description: z.string().trim().min(1).max(300),
+  description: z.string().trim().max(300),
   systemPrompt: z.string().trim().min(1).max(MAX_AGENT_PROMPT_CHARS),
   toolIds: uniqueToolIdsSchema,
 }).strict()
@@ -52,7 +52,7 @@ export type PortableAgentDefinition = z.infer<typeof portableAgentDefinitionSche
 const skillBaseShape = {
   id: definitionIdSchema,
   label: z.string().trim().regex(/^[a-z][a-z0-9-]{1,31}$/),
-  description: z.string().trim().min(1).max(300),
+  description: z.string().trim().max(300),
 }
 
 /** @deprecated Read-only compatibility shape for configuration versions 1 and 2. */
@@ -523,12 +523,14 @@ export type StructuredResultV2Node =
   {
     type: 'text'
     segments: Array<z.infer<typeof structuredResultInlineSegmentSchema>>
+    note?: string
     children?: StructuredResultV2Node[]
   }
 
 const structuredResultV2NodeSchema: z.ZodType<StructuredResultV2Node> = z.lazy(() => z.object({
   type: z.literal('text'),
   segments: z.array(structuredResultInlineSegmentSchema).min(1).max(200),
+  note: z.string().trim().min(1).max(MAX_NODE_TEXT_CHARS).optional(),
   children: z.array(structuredResultV2NodeSchema).max(MAX_NODE_COUNT, 'Structured result exceeds maximum node count').optional(),
 }).strict().superRefine((node, context) => {
   const visibleTextLength = node.segments.reduce((length, segment) => (
@@ -545,14 +547,27 @@ export const structuredResultReorderSchema = z.object({
     .refine((nodeIds) => new Set(nodeIds).size === nodeIds.length, 'Reordered node IDs must be unique'),
 }).strict()
 
+/** An inline `#tag` name without its `#`, in the outline's tag alphabet. */
+export const structuredResultTagNameSchema = z.string().regex(/^[\p{L}\p{N}_-]{1,64}$/u, 'Tags must be 1-64 letters, digits, underscores, or hyphens')
+
+/** Inline tags to add to or remove from an existing bullet's text. */
+export const structuredResultTagEditSchema = z.object({
+  nodeId: runtimeIdSchema,
+  add: z.array(structuredResultTagNameSchema).max(20),
+  remove: z.array(structuredResultTagNameSchema).max(100).optional(),
+}).strict()
+
 export const structuredResultV2Schema = z.object({
   version: z.literal(2),
   nodes: z.array(structuredResultV2NodeSchema).max(MAX_NODE_COUNT, 'Structured result exceeds maximum node count'),
   sources: z.array(sourceReferenceSchema).max(100),
   reorder: structuredResultReorderSchema.optional(),
-}).strict().refine((result) => result.nodes.length > 0 || Boolean(result.reorder), {
+  tags: z.array(structuredResultTagEditSchema).min(1).max(MAX_NODE_COUNT)
+    .refine((edits) => new Set(edits.map((edit) => edit.nodeId)).size === edits.length, 'Tagged node IDs must be unique')
+    .optional(),
+}).strict().refine((result) => result.nodes.length > 0 || Boolean(result.reorder) || Boolean(result.tags), {
   path: ['nodes'],
-  message: 'Structured result must contain nodes or a reorder',
+  message: 'Structured result must contain nodes, a reorder, or tags',
 })
 
 export const structuredResultSchema = z.union([structuredResultV1Schema, structuredResultV2Schema])
@@ -577,7 +592,7 @@ function measureNodes(
         segments += node.segments.length
         text += node.segments.reduce((length, segment) => (
           length + (segment.type === 'text' ? segment.text.length : segment.label.length)
-        ), 0)
+        ), node.note?.length ?? 0)
       }
       if (node.children?.length) {
         const childMeasurement = measureNodes(
@@ -614,6 +629,8 @@ export function parseStructuredResult(
     visit(result.nodes)
     const unadmitted = result.reorder?.nodeIds.find((nodeId) => !allowed.has(nodeId))
     if (unadmitted) throw new Error(`Structured result reorders an unadmitted node: ${unadmitted}`)
+    const untaggable = result.tags?.find((edit) => !allowed.has(edit.nodeId))
+    if (untaggable) throw new Error(`Structured result tags an unadmitted node: ${untaggable.nodeId}`)
   }
   const measurement = measureNodes(result.nodes, 1)
   if (measurement.depth > MAX_NODE_DEPTH) throw new Error(`Structured result exceeds maximum depth of ${MAX_NODE_DEPTH}`)

@@ -16,6 +16,7 @@ import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ConfirmButton } from './ConfirmButton'
 import {
   configurationWithDefaults,
+  configurationWithoutUndeclaredFields,
   ExtensionSkillConfigurationForm,
   type ConfigurationIssue,
 } from './ExtensionSkillConfigurationForm'
@@ -75,11 +76,14 @@ function SkillForm({ initial, agents, tools, executors, onSave, onCancel }: {
     if (candidate.execution === 'extension') {
       const executor = executors.find((option) => option.extensionId === candidate.executor.extensionId && option.executorId === candidate.executor.executorId)
       if (!executor?.available) throw new Error(executor?.unavailableReason ?? 'The selected extension executor is unavailable. Its saved configuration has been retained.')
-      const validation = validateExtensionSkillConfiguration(executor.configuration, candidate.configuration)
+      const configuration = configurationWithoutUndeclaredFields(executor.configuration, candidate.configuration)
+      const validation = validateExtensionSkillConfiguration(executor.configuration, configuration)
       if (!validation.valid) {
         setConfigurationIssues(validation.issues)
         throw new Error('Fix the highlighted extension configuration fields before saving.')
       }
+      await onSave({ ...candidate, configuration })
+      return
     }
     await onSave(candidate)
   })

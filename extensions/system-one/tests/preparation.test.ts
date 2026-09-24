@@ -59,7 +59,7 @@ describe('System One candidate preparation', () => {
       provenance: { ancestorPathIds: ['parent'], localParentId: 'parent', localBranchRootId: 'parent', explicitLinkedRootIds: [] },
     }
     expect(() => prepareSystemOneInput(requireSystemOneConfiguration({
-      ...baseConfiguration, output: 'reorder', ordering: 'descending',
+      ...baseConfiguration, output: 'reorder',
     }), one)).toThrow(/at least two sibling bullets/i)
   })
 

@@ -487,6 +487,47 @@ describe('agent output insertion', () => {
     expect(bulletTexts(editor)).toEqual(['How promising is this?', 'Idea one - Strong (1.62); confidence: 90.00%', 'Original idea'])
   })
 
+  it('writes result notes as bullet notes, both hoisted and under a prompted invocation', () => {
+    const notes = (target: Editor): Array<[string, string]> => {
+      const out: Array<[string, string]> = []
+      target.state.doc.descendants((node) => {
+        if (node.type.name !== 'listItem') return
+        const note = Array.from({ length: node.childCount }, (_, index) => node.child(index))
+          .find((child) => child.type.name === 'bulletNote')
+        if (note) out.push([node.firstChild?.textContent ?? '', note.textContent])
+      })
+      return out
+    }
+    const row = {
+      type: 'text' as const,
+      segments: [
+        { type: 'internal-reference' as const, nodeId: 'idea-1', label: 'Idea one' },
+        { type: 'text' as const, text: ' Strong' },
+      ],
+      note: 'Score 1.62 of 2 · confidence 90%',
+    }
+
+    editor.destroy()
+    editor = makeEditor('/label')
+    editor.commands.setTextSelection(3)
+    commitExtensionSkillResult(editor, currentListItemId(editor)!, 'label', 'run-hoisted-note', {
+      version: 2,
+      nodes: [{ type: 'text', segments: [{ type: 'text', text: 'How promising?' }], children: [row] }],
+      sources: [],
+    }, ['idea-1'])
+    expect(bulletTexts(editor)).toEqual(['How promising?', 'Idea one Strong'])
+    expect(notes(editor)).toEqual([['Idea one Strong', 'Score 1.62 of 2 · confidence 90%']])
+
+    editor.destroy()
+    editor = makeEditor('/label Which ships first?')
+    editor.commands.setTextSelection(3)
+    commitExtensionSkillResult(editor, currentListItemId(editor)!, 'label', 'run-prompted-note', {
+      version: 2, nodes: [row], sources: [],
+    }, ['idea-1'])
+    expect(bulletTexts(editor)).toEqual(['Which ships first?', 'Idea one Strong'])
+    expect(notes(editor)).toEqual([['Idea one Strong', 'Score 1.62 of 2 · confidence 90%']])
+  })
+
   it('reorders admitted siblings in place and removes an empty invocation in one undoable step', () => {
     editor.destroy()
     editor = makeEditor('/label')
@@ -538,6 +579,42 @@ describe('agent output insertion', () => {
 
     commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-prompted', result, ['idea-1', 'idea-2'])
     expect(bulletTexts(editor)).toEqual(['focus on cost', 'Idea 2', 'Idea 1'])
+  })
+
+  it('edits inline tags of admitted bullets in place, idempotently, as one undoable step', () => {
+    editor.destroy()
+    editor = makeEditor('/label')
+    editor.commands.setTextSelection(3)
+    const invocationNodeId = currentListItemId(editor)!
+    const texts = ['Idea 1 #later', 'Idea 2 #build #later x', 'Idea 3', '#defer #build']
+    texts.forEach((text, index) => {
+      editor.commands.insertContentAt(editor.state.doc.content.size - 1, {
+        type: 'listItem',
+        attrs: { nodeId: `idea-${index + 1}` },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+      })
+    })
+    const admitted = ['idea-1', 'idea-2', 'idea-3', 'idea-4']
+    const result = {
+      version: 2 as const, nodes: [], sources: [],
+      tags: [
+        { nodeId: 'idea-1', add: ['build'], remove: ['later', 'defer'] },
+        { nodeId: 'idea-2', add: ['later'], remove: ['build', 'later'] },
+        { nodeId: 'idea-3', add: ['Build'] },
+        { nodeId: 'idea-4', add: [], remove: ['defer', 'build'] },
+      ],
+    }
+    const tagged = ['Idea 1 #build', 'Idea 2 #later x', 'Idea 3 #build', '']
+
+    expect(commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-tags', result, admitted)).toEqual(admitted)
+    expect(bulletTexts(editor)).toEqual(tagged)
+    expect(insertExtensionSkillResult(editor, 'idea-1', 'run-tags', result, admitted)).toEqual(admitted)
+    expect(bulletTexts(editor)).toEqual(tagged)
+
+    editor.commands.undo()
+    expect(bulletTexts(editor)).toEqual(['/label', ...texts])
+    expect(() => commitExtensionSkillResult(editor, invocationNodeId, 'label', 'run-bad', result, ['idea-1']))
+      .toThrow(/unadmitted node/i)
   })
 
   it('rejects an unadmitted generic reference without partially changing the outline', () => {

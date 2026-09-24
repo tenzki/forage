@@ -676,7 +676,7 @@ export function SlashMenu({
           <span className="slash-desc">
             {menu.query === command.label && menu.prompt.trim()
               ? 'Press Enter to run with this prompt'
-              : `${command.description} · Enter or Tab to select`}
+              : [command.description, 'Enter or Tab to select'].filter(Boolean).join(' · ')}
           </span>
         </li>
       ))}

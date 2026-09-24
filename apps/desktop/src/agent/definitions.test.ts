@@ -110,4 +110,19 @@ describe('agent and skill definitions', () => {
     }, [])
     expect(skill).toMatchObject({ execution: 'extension', configuration: { prefix: 'Match', nested: { enabled: true } } })
   })
+
+  it('allows empty agent and skill descriptions', () => {
+    const agent = validateAgentDraft({
+      name: 'General', description: '  ', systemPrompt: 'Help the user.', toolIds: [],
+    }, BUILTIN_TOOL_OPTIONS)
+    expect(agent.description).toBe('')
+    expect(validateSkillDraft({
+      label: 'summarize', description: '', systemPrompt: 'Summarize.', agentId: agent.id,
+    }, [agent]).description).toBe('')
+    expect(validateSkillDraft({
+      execution: 'extension', label: 'label-notes', description: '',
+      executor: { extensionId: 'dev.example.notes', executorId: 'label_notes' },
+      configuration: {},
+    }, []).description).toBe('')
+  })
 })

@@ -56,3 +56,20 @@ This replaces the earlier built-in System One / Jev-adapter slices. The old slic
 - [x] 7.3 Update ADR/architecture/authoring/user docs for whole-feature extension ownership, one current contract, one skill system, trusted code and static output.
 - [x] 7.4 Run affected API/host/extension/desktop/server/replay checks, independent package typechecks, build and strict OpenSpec validation without paid calls or development database tests.
 - [x] 7.5 Perform a real Tauri mocked smoke test covering installation, configuration, preview, invocation, links, cancellation, undo/restart/removal, absence without installation and unavailable server mode.
+
+## 8. Simplified System One inputs and outputs
+
+- [x] 8.1 Make the configured question an optional default: typed invocation text is the question, `additional_user_guidance` is removed, and a missing question fails before any provider request.
+- [x] 8.2 Remove authored category IDs (derive positional keys), result ordering and display precision from the configuration form, manifest and domain validation.
+- [x] 8.3 Add an optional plain-text `note` to generic result nodes in the public API and shared result contract, counted toward text bounds and materialized as a bullet note.
+- [x] 8.4 Format one value per row with numeric detail in bullet notes, classification grouped by category, highest-first ordering, and a question root only for default questions; test typed/default placement and hoisting with notes.
+- [x] 8.5 Drop values for fields an executor no longer declares when a skill is saved in Settings, so skills carrying `ordering`, `decimal_places` or category `id` recover by re-saving.
+- [ ] 8.6 Review the note-based output in the real Tauri app and adjust if the numbers read poorly.
+
+## 9. In-place tag output
+
+- [x] 9.1 Add generic inline tag edits (`tags: [{ nodeId, add, remove }]`) to the public result API and shared result contract, admitted like reorders, and pass them through the extension host and desktop invocation.
+- [x] 9.2 Apply tag edits in the editor commit and recovery paths as unmarked `#tag` text in the run's single undo step, idempotently, and test append, removal, adjacency, admission and undo.
+- [x] 9.3 Add System One tag output for Choice classification (category tags derived from labels, optional minimum probability) and Noul (configured tag at the threshold), with validation, form/manifest fields and run-activity reporting.
+- [ ] 9.4 Try classification and Noul tagging in the real Tauri app, including a rerun that changes a candidate's category.
+- [x] 9.5 Apply the classification minimum probability to every output: an Unclassified group (with the best guess) for lists, last place for reorders, and no tag for tagging.

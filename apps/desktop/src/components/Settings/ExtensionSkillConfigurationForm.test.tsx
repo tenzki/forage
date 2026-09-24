@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ExtensionJsonObject, ExtensionSkillConfigurationForm as Form } from '@forage/agent-runtime'
-import { configurationWithDefaults, ExtensionSkillConfigurationForm } from './ExtensionSkillConfigurationForm'
+import {
+  configurationWithDefaults,
+  configurationWithoutUndeclaredFields,
+  ExtensionSkillConfigurationForm,
+} from './ExtensionSkillConfigurationForm'
 
 const form: Form = {
   fields: [
@@ -47,5 +51,20 @@ describe('generic extension skill configuration form', () => {
     await user.click(screen.getAllByRole('button', { name: 'Remove Rule' })[0]!)
     expect(screen.getAllByLabelText('Pattern')).toHaveLength(1)
     expect(screen.getByText(/"advanced":true/)).toBeTruthy()
+  })
+
+  it('drops values for fields the executor no longer declares while keeping hidden branch values', () => {
+    expect(configurationWithoutUndeclaredFields(form, {
+      title: 'Notes',
+      ordering: 'descending',
+      metadata: { tag: 'todo', retired: true },
+      rules: [{ pattern: 'one', id: 'old' }],
+      style: 'long',
+    })).toEqual({
+      title: 'Notes',
+      metadata: { tag: 'todo' },
+      rules: [{ pattern: 'one' }],
+      style: 'long',
+    })
   })
 })

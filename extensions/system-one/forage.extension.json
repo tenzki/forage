@@ -52,11 +52,10 @@
             },
             {
               "key": "question",
-              "label": "Question",
-              "description": "A complete explicit question. Candidate IDs are never used as inferred instructions.",
+              "label": "Default question",
+              "description": "Used when the command is run without typed text; typed text after the command replaces it.",
               "type": "multiline",
-              "required": true,
-              "minLength": 1,
+              "required": false,
               "maxLength": 2000
             },
             {
@@ -71,38 +70,17 @@
               "required": true
             },
             {
-              "key": "ordering",
-              "label": "Result order",
-              "type": "choice",
-              "options": [
-                { "value": "document", "label": "Document order" },
-                { "value": "ascending", "label": "Numeric ascending" },
-                { "value": "descending", "label": "Numeric descending" }
-              ],
-              "default": "document",
-              "required": true
-            },
-            {
               "key": "output",
               "label": "Output",
-              "description": "Reordering moves the sibling bullets into the result order without writing new bullets.",
+              "description": "Reordering moves the sibling bullets into the result order (highest first, or by category). Tagging adds each bullet's category tag (classification) or the yes tag (Noul) to its text. Neither writes new bullets.",
               "type": "choice",
               "options": [
                 { "value": "list", "label": "List results under the question" },
-                { "value": "reorder", "label": "Reorder the bullets in place" }
+                { "value": "reorder", "label": "Reorder the bullets in place" },
+                { "value": "tag", "label": "Tag the bullets in place" }
               ],
               "default": "list",
               "required": false
-            },
-            {
-              "key": "decimal_places",
-              "label": "Displayed decimal places",
-              "type": "number",
-              "integer": true,
-              "minimum": 0,
-              "maximum": 6,
-              "default": 2,
-              "required": true
             }
           ],
           "branches": [
@@ -112,16 +90,32 @@
                 {
                   "key": "categories",
                   "label": "Categories",
-                  "description": "Unordered answer choices with explicit stable IDs and definitions.",
+                  "description": "Answer choices with definitions. Results are grouped in this order.",
                   "type": "repeat",
                   "minimumItems": 2,
                   "maximumItems": 50,
                   "required": true,
                   "fields": [
-                    { "key": "id", "label": "Category ID", "type": "text", "required": true, "minLength": 1, "maxLength": 64 },
                     { "key": "label", "label": "Label", "type": "text", "required": true, "minLength": 1, "maxLength": 100 },
-                    { "key": "description", "label": "Definition", "type": "multiline", "required": true, "minLength": 1, "maxLength": 1000 }
+                    { "key": "description", "label": "Definition", "type": "multiline", "required": true, "minLength": 1, "maxLength": 1000 },
+                    {
+                      "key": "tag",
+                      "label": "Tag",
+                      "description": "Used by tag output. Defaults to the label, e.g. \"Build later\" becomes #build-later.",
+                      "type": "text",
+                      "required": false,
+                      "maxLength": 65
+                    }
                   ]
+                },
+                {
+                  "key": "minimum_probability",
+                  "label": "Minimum probability",
+                  "description": "Bullets whose chosen category falls below this are left unclassified: listed under Unclassified, moved last when reordering, and left untagged.",
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "required": false
                 }
               ]
             },
@@ -148,7 +142,15 @@
               "fields": [
                 { "key": "yes_definition", "label": "Yes definition", "type": "multiline", "maxLength": 1000 },
                 { "key": "no_definition", "label": "No definition", "type": "multiline", "maxLength": 1000 },
-                { "key": "threshold", "label": "Inclusive yes threshold", "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "required": true }
+                { "key": "threshold", "label": "Inclusive yes threshold", "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "required": true },
+                {
+                  "key": "tag",
+                  "label": "Tag",
+                  "description": "Required by tag output. Added to bullets at or above the threshold and removed from the rest.",
+                  "type": "text",
+                  "required": false,
+                  "maxLength": 65
+                }
               ]
             }
           ]

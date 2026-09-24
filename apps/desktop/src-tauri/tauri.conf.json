@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.forage.app",
   "build": {
-    "beforeDevCommand": "pnpm --filter forage-sidecar build && pnpm dev:web",
+    "beforeDevCommand": "pnpm dev:web",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm --filter forage-sidecar build && pnpm build",
     "frontendDist": "../dist"
