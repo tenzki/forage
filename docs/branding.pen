@@ -1,5 +1,5 @@
 {
-  "version": "2.18",
+  "version": "2.19",
   "children": [
     {
       "type": "frame",
@@ -25089,6 +25089,1569 @@
               "fontWeight": "normal"
             }
           ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "C2Bj1n",
+      "x": 3080,
+      "y": 3819,
+      "name": "03A — Identity explorations / three routes",
+      "clip": true,
+      "width": 1440,
+      "fill": "$paper",
+      "layout": "vertical",
+      "gap": 30,
+      "padding": 64,
+      "children": [
+        {
+          "type": "text",
+          "id": "f3R6v",
+          "name": "Exploration chapter",
+          "fill": "$moss",
+          "content": "03A   /   IDENTITY EXPLORATIONS",
+          "fontFamily": "$mono",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "letterSpacing": 1.2
+        },
+        {
+          "type": "text",
+          "id": "XUuYg",
+          "name": "Exploration title",
+          "fill": "$ink",
+          "content": "Three ways to grow the mark.",
+          "fontFamily": "$display",
+          "fontSize": 52,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "Ov4lm",
+          "name": "Exploration intro",
+          "fill": "$ink",
+          "content": "Each route pairs a wordmark, a compact icon, and an expressive botanical illustration.",
+          "fontFamily": "$body",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "zSTJ0",
+          "name": "Route A — Branching seed",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "beuMm",
+              "name": "Route title A — Branching seed",
+              "fill": "$ink",
+              "content": "A — Branching seed",
+              "fontFamily": "$display",
+              "fontSize": 26,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "LXkSY",
+              "name": "Specimens A — Branching seed",
+              "width": "fill_container",
+              "height": 380,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "IejF8",
+                  "name": "Logo panel A — Branching seed",
+                  "width": 535,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "gap": 26,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "u2hWg",
+                      "name": "Logo label A — Branching seed",
+                      "fill": "$moss",
+                      "content": "01 / LOGO",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "J8K4f",
+                      "name": "Logo lockup A — Branching seed",
+                      "width": "fill_container",
+                      "height": 180,
+                      "gap": 20,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "OL71J",
+                          "name": "Master mark A — Branching seed",
+                          "clip": true,
+                          "width": 108,
+                          "height": 108,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "Kfczj",
+                              "x": 16.8294970860347,
+                              "y": 13,
+                              "geometry": "M30.19846 22.20231l0 4.40308c-0.24923 2.2223-0.72692 4.29923-1.26692 5.85692-5.77385-11.02846-11.48539-16.74-28.93154-15.55616 3.69692 8.80616 9.65769 14.51769 19.04538 15.72231 5.91923 0.81 8.45308 3.92538 8.45308 7.58077 0 3.05308-1.70308 5.85692-3.55154 6.64615-2.38846 1.10077-3.80077 3.48923-3.80077 6.16846 0 3.82154 3.03231 6.79154 6.85385 6.79154 3.84231 0 6.72923-3.17769 6.72923-6.79154 0-3.01154-1.72385-5.60769-4.23692-6.31384 1.37076-3.82153 1.72384-7.60154 2.07692-11.56846 0.49846-5.94 2.09769-9.32538 8.1-12.29539 8.70231-4.44461 13.33385-12.54462 14.55923-22.84615-15.90923 3.34385-24.03 9.61615-24.03 22.20231z",
+                              "fill": "$ink",
+                              "width": 74.3410058279306,
+                              "height": 82
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "tHNoB",
+                          "name": "Wordmark A — Branching seed",
+                          "fill": "$ink",
+                          "content": "forage",
+                          "fontFamily": "$display",
+                          "fontSize": 92,
+                          "fontWeight": "500",
+                          "letterSpacing": -4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u65qEV",
+                  "name": "Favicon panel A — Branching seed",
+                  "width": 260,
+                  "height": "fill_container",
+                  "fill": "$paper",
+                  "stroke": "$rule",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 24,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "D3tcW",
+                      "name": "Favicon label A — Branching seed",
+                      "fill": "$moss",
+                      "content": "02 / FAVICON",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ARdJ4",
+                      "name": "Icon tile A — Branching seed",
+                      "width": 160,
+                      "height": 160,
+                      "fill": "$ink",
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "i15C9c",
+                          "name": "Favicon master A — Branching seed",
+                          "width": 92,
+                          "height": 92,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "Qx9jH",
+                              "x": 11.549289982178507,
+                              "y": 8,
+                              "name": "Favicon master A — Branching seed shape 1",
+                              "geometry": "M30.19846 22.20231l0 4.40308c-0.24923 2.2223-0.72692 4.29923-1.26692 5.85692-5.77385-11.02846-11.48539-16.74-28.93154-15.55616 3.69692 8.80616 9.65769 14.51769 19.04538 15.72231 5.91923 0.81 8.45308 3.92538 8.45308 7.58077 0 3.05308-1.70308 5.85692-3.55154 6.64615-2.38846 1.10077-3.80077 3.48923-3.80077 6.16846 0 3.82154 3.03231 6.79154 6.85385 6.79154 3.84231 0 6.72923-3.17769 6.72923-6.79154 0-3.01154-1.72385-5.60769-4.23692-6.31384 1.37076-3.82153 1.72384-7.60154 2.07692-11.56846 0.49846-5.94 2.09769-9.32538 8.1-12.29539 8.70231-4.44461 13.33385-12.54462 14.55923-22.84615-15.90923 3.34385-24.03 9.61615-24.03 22.20231z",
+                              "fill": "$paper",
+                              "width": 68.901420035643,
+                              "height": 76
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "XoxmJ",
+                      "name": "True-size checks A — Branching seed",
+                      "width": "fill_container",
+                      "height": 92,
+                      "gap": 12,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "BXvc6",
+                          "name": "16 px preview holder A — Branching seed",
+                          "width": 28,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "FOe3v",
+                              "name": "16 px favicon A — Branching seed",
+                              "width": 16,
+                              "height": 16,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "s8aMo",
+                                  "x": 1.6538165756644618,
+                                  "y": 0.9999999999999991,
+                                  "name": "16 px favicon A — Branching seed shape 1",
+                                  "geometry": "M30.19846 22.20231l0 4.40308c-0.24923 2.2223-0.72692 4.29923-1.26692 5.85692-5.77385-11.02846-11.48539-16.74-28.93154-15.55616 3.69692 8.80616 9.65769 14.51769 19.04538 15.72231 5.91923 0.81 8.45308 3.92538 8.45308 7.58077 0 3.05308-1.70308 5.85692-3.55154 6.64615-2.38846 1.10077-3.80077 3.48923-3.80077 6.16846 0 3.82154 3.03231 6.79154 6.85385 6.79154 3.84231 0 6.72923-3.17769 6.72923-6.79154 0-3.01154-1.72385-5.60769-4.23692-6.31384 1.37076-3.82153 1.72384-7.60154 2.07692-11.56846 0.49846-5.94 2.09769-9.32538 8.1-12.29539 8.70231-4.44461 13.33385-12.54462 14.55923-22.84615-15.90923 3.34385-24.03 9.61615-24.03 22.20231z",
+                                  "fill": "$ink",
+                                  "width": 12.69236684867108,
+                                  "height": 14.000000000000002
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "oxpcu",
+                              "name": "16 px label A — Branching seed",
+                              "fill": "$moss",
+                              "content": "16",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "w0CdR",
+                          "name": "32 px preview holder A — Branching seed",
+                          "width": 44,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "AlcaE",
+                              "name": "32 px favicon A — Branching seed",
+                              "width": 32,
+                              "height": 32,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "dUnq1",
+                                  "x": 3.3076331513289237,
+                                  "y": 1.9999999999999982,
+                                  "name": "32 px favicon A — Branching seed shape 1",
+                                  "geometry": "M30.19846 22.20231l0 4.40308c-0.24923 2.2223-0.72692 4.29923-1.26692 5.85692-5.77385-11.02846-11.48539-16.74-28.93154-15.55616 3.69692 8.80616 9.65769 14.51769 19.04538 15.72231 5.91923 0.81 8.45308 3.92538 8.45308 7.58077 0 3.05308-1.70308 5.85692-3.55154 6.64615-2.38846 1.10077-3.80077 3.48923-3.80077 6.16846 0 3.82154 3.03231 6.79154 6.85385 6.79154 3.84231 0 6.72923-3.17769 6.72923-6.79154 0-3.01154-1.72385-5.60769-4.23692-6.31384 1.37076-3.82153 1.72384-7.60154 2.07692-11.56846 0.49846-5.94 2.09769-9.32538 8.1-12.29539 8.70231-4.44461 13.33385-12.54462 14.55923-22.84615-15.90923 3.34385-24.03 9.61615-24.03 22.20231z",
+                                  "fill": "$ink",
+                                  "width": 25.38473369734216,
+                                  "height": 28.000000000000004
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "E0Ie6",
+                              "name": "32 px label A — Branching seed",
+                              "fill": "$moss",
+                              "content": "32",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "zTqGM",
+                          "name": "64 px preview holder A — Branching seed",
+                          "width": 76,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "ZRFu7",
+                              "name": "64 px favicon A — Branching seed",
+                              "width": 64,
+                              "height": 64,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "Rd4q3",
+                                  "x": 4.80207103856198,
+                                  "y": 2,
+                                  "name": "64 px favicon A — Branching seed shape 1",
+                                  "geometry": "M30.19846 22.20231l0 4.40308c-0.24923 2.2223-0.72692 4.29923-1.26692 5.85692-5.77385-11.02846-11.48539-16.74-28.93154-15.55616 3.69692 8.80616 9.65769 14.51769 19.04538 15.72231 5.91923 0.81 8.45308 3.92538 8.45308 7.58077 0 3.05308-1.70308 5.85692-3.55154 6.64615-2.38846 1.10077-3.80077 3.48923-3.80077 6.16846 0 3.82154 3.03231 6.79154 6.85385 6.79154 3.84231 0 6.72923-3.17769 6.72923-6.79154 0-3.01154-1.72385-5.60769-4.23692-6.31384 1.37076-3.82153 1.72384-7.60154 2.07692-11.56846 0.49846-5.94 2.09769-9.32538 8.1-12.29539 8.70231-4.44461 13.33385-12.54462 14.55923-22.84615-15.90923 3.34385-24.03 9.61615-24.03 22.20231z",
+                                  "fill": "$ink",
+                                  "width": 54.39585792287605,
+                                  "height": 60
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "E1Avhe",
+                              "name": "64 px label A — Branching seed",
+                              "fill": "$moss",
+                              "content": "64",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oMyar",
+                  "name": "Illustration panel A — Branching seed",
+                  "width": 475,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "XZyo3",
+                      "name": "Illustration label A — Branching seed",
+                      "fill": "$moss",
+                      "content": "03 / ILLUSTRATION",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "y0ApE",
+                      "name": "Square-dot artwork A — Branching seed",
+                      "width": 320,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "generated-2.png",
+                        "mode": "fill"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "ly4PS",
+              "name": "Route note A — Branching seed",
+              "fill": "$moss",
+              "content": "An origin point growing into two lifted leaves.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "rectangle",
+              "id": "hNnGH",
+              "name": "Route separator A — Branching seed",
+              "fill": "$rule",
+              "width": "fill_container",
+              "height": 1
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "n4aSA",
+          "name": "Route B — Lavender sprig",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "cxxhU",
+              "name": "Route title B — Lavender sprig",
+              "fill": "$ink",
+              "content": "B — Lavender sprig",
+              "fontFamily": "$display",
+              "fontSize": 26,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "XIF6z",
+              "name": "Specimens B — Lavender sprig",
+              "width": "fill_container",
+              "height": 380,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "sSH4v",
+                  "name": "Logo panel B — Lavender sprig",
+                  "width": 535,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "gap": 26,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Uu6ac",
+                      "name": "Logo label B — Lavender sprig",
+                      "fill": "$moss",
+                      "content": "01 / LOGO",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "CRMid",
+                      "name": "Logo lockup B — Lavender sprig",
+                      "width": "fill_container",
+                      "height": 180,
+                      "gap": 20,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "qRQUB",
+                          "name": "Master mark B — Lavender sprig",
+                          "clip": true,
+                          "width": 108,
+                          "height": 108,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "IK3z7",
+                              "x": 27.869197936224545,
+                              "y": 13,
+                              "geometry": "M61.57623 8.30739c-1.605-0.675-4.92001 1.785-6.49501 3.255 0.16501-0.315 0.97501-1.185 1.905-2.205 2.63999-2.955 2.445-8.22 0.645-9.21-1.65-0.885-5.25 2.355-5.775 5.985-0.21 1.53-0.09 3.705-0.27 4.215-0.33-3.69-1.8-6.285-3.23999-6.165-2.43 0.255-4.155 9.885 1.23 13.965-0.72001 2.31-12.51 24.045-15.12001 28.635 1.68-11.025-3.45-18.585-9.27-22.14-0.615-0.345-0.96-0.12-0.945 0.69 0.45001 12.63 8.97 18.855 8.775 24.09-0.36 1.32-12.84 24.69-15.555 28.65 0.93-13.035-7.14-21.54-16.095-23.895-0.78-0.195-1.05 0.165-0.855 0.825 1.8 4.905 5.22 9.885 9.27 14.35499 3.405 3.795 6.615 7.72501 6.165 11.19001-3.78 6.34499-10.38 13.12501-15.255 15.045-1.29 0.495-0.66 2.32499 0.945 1.995 5.415-1.68 12.405-9.855 15.975-15.31501 1.575-1.8 5.01-2.80499 8.43-3.88499 7.575-2.46001 13.935-9.21001 16.515-12.09 0.495-0.66 0.21-1.095-0.63-0.99-10.77 1.995-17.43 7.62-21.69 12.58499 4.23-6.95999 10.485-18.98999 13.77-25.28999 1.335-1.815 5.16-3.435 8.655-4.92 7.35-3.195 13.2-9.855 15.255-12.69 0.42-0.69 0.16499-1.095-0.69-0.99-9.99 2.025-17.115 8.955-20.955 14.145 4.335-8.58 12.03-22.41 15.25501-29.37 8.00999-0.555 12.435-9.39 10.05-10.47z",
+                              "fill": "$ink",
+                              "width": 52.26160412755091,
+                              "height": 82
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "RpzWW",
+                          "name": "Wordmark B — Lavender sprig",
+                          "fill": "$ink",
+                          "content": "forage",
+                          "fontFamily": "$display",
+                          "fontSize": 92,
+                          "fontWeight": "500",
+                          "letterSpacing": -4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "MAl5h",
+                  "name": "Favicon panel B — Lavender sprig",
+                  "width": 260,
+                  "height": "fill_container",
+                  "fill": "$paper",
+                  "stroke": "$rule",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 24,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Nbju9",
+                      "name": "Favicon label B — Lavender sprig",
+                      "fill": "$moss",
+                      "content": "02 / FAVICON",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Cq9Lg",
+                      "name": "Icon tile B — Lavender sprig",
+                      "width": 160,
+                      "height": 160,
+                      "fill": "$ink",
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "mqJPl",
+                          "name": "Favicon master B — Lavender sprig",
+                          "width": 92,
+                          "height": 92,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "GMfob",
+                              "x": 21.781207843330062,
+                              "y": 8,
+                              "name": "Favicon master B — Lavender sprig shape 1",
+                              "geometry": "M61.57623 8.30739c-1.605-0.675-4.92001 1.785-6.49501 3.255 0.16501-0.315 0.97501-1.185 1.905-2.205 2.63999-2.955 2.445-8.22 0.645-9.21-1.65-0.885-5.25 2.355-5.775 5.985-0.21 1.53-0.09 3.705-0.27 4.215-0.33-3.69-1.8-6.285-3.23999-6.165-2.43 0.255-4.155 9.885 1.23 13.965-0.72001 2.31-12.51 24.045-15.12001 28.635 1.68-11.025-3.45-18.585-9.27-22.14-0.615-0.345-0.96-0.12-0.945 0.69 0.45001 12.63 8.97 18.855 8.775 24.09-0.36 1.32-12.84 24.69-15.555 28.65 0.93-13.035-7.14-21.54-16.095-23.895-0.78-0.195-1.05 0.165-0.855 0.825 1.8 4.905 5.22 9.885 9.27 14.35499 3.405 3.795 6.615 7.72501 6.165 11.19001-3.78 6.34499-10.38 13.12501-15.255 15.045-1.29 0.495-0.66 2.32499 0.945 1.995 5.415-1.68 12.405-9.855 15.975-15.31501 1.575-1.8 5.01-2.80499 8.43-3.88499 7.575-2.46001 13.935-9.21001 16.515-12.09 0.495-0.66 0.21-1.095-0.63-0.99-10.77 1.995-17.43 7.62-21.69 12.58499 4.23-6.95999 10.485-18.98999 13.77-25.28999 1.335-1.815 5.16-3.435 8.655-4.92 7.35-3.195 13.2-9.855 15.255-12.69 0.42-0.69 0.16499-1.095-0.69-0.99-9.99 2.025-17.115 8.955-20.955 14.145 4.335-8.58 12.03-22.41 15.25501-29.37 8.00999-0.555 12.435-9.39 10.05-10.47z",
+                              "fill": "$paper",
+                              "width": 48.43758431333987,
+                              "height": 76
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "XI8ej",
+                      "name": "True-size checks B — Lavender sprig",
+                      "width": "fill_container",
+                      "height": 92,
+                      "gap": 12,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "sBjyX",
+                          "name": "16 px preview holder B — Lavender sprig",
+                          "width": 28,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "ORe5Z",
+                              "name": "16 px favicon B — Lavender sprig",
+                              "width": 16,
+                              "height": 16,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "ie5vr",
+                                  "x": 3.5386435500871167,
+                                  "y": 0.9999999999999991,
+                                  "name": "16 px favicon B — Lavender sprig shape 1",
+                                  "geometry": "M61.57623 8.30739c-1.605-0.675-4.92001 1.785-6.49501 3.255 0.16501-0.315 0.97501-1.185 1.905-2.205 2.63999-2.955 2.445-8.22 0.645-9.21-1.65-0.885-5.25 2.355-5.775 5.985-0.21 1.53-0.09 3.705-0.27 4.215-0.33-3.69-1.8-6.285-3.23999-6.165-2.43 0.255-4.155 9.885 1.23 13.965-0.72001 2.31-12.51 24.045-15.12001 28.635 1.68-11.025-3.45-18.585-9.27-22.14-0.615-0.345-0.96-0.12-0.945 0.69 0.45001 12.63 8.97 18.855 8.775 24.09-0.36 1.32-12.84 24.69-15.555 28.65 0.93-13.035-7.14-21.54-16.095-23.895-0.78-0.195-1.05 0.165-0.855 0.825 1.8 4.905 5.22 9.885 9.27 14.35499 3.405 3.795 6.615 7.72501 6.165 11.19001-3.78 6.34499-10.38 13.12501-15.255 15.045-1.29 0.495-0.66 2.32499 0.945 1.995 5.415-1.68 12.405-9.855 15.975-15.31501 1.575-1.8 5.01-2.80499 8.43-3.88499 7.575-2.46001 13.935-9.21001 16.515-12.09 0.495-0.66 0.21-1.095-0.63-0.99-10.77 1.995-17.43 7.62-21.69 12.58499 4.23-6.95999 10.485-18.98999 13.77-25.28999 1.335-1.815 5.16-3.435 8.655-4.92 7.35-3.195 13.2-9.855 15.255-12.69 0.42-0.69 0.16499-1.095-0.69-0.99-9.99 2.025-17.115 8.955-20.955 14.145 4.335-8.58 12.03-22.41 15.25501-29.37 8.00999-0.555 12.435-9.39 10.05-10.47z",
+                                  "fill": "$ink",
+                                  "width": 8.922712899825767,
+                                  "height": 14.000000000000002
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "oLArZ",
+                              "name": "16 px label B — Lavender sprig",
+                              "fill": "$moss",
+                              "content": "16",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "r2iY2R",
+                          "name": "32 px preview holder B — Lavender sprig",
+                          "width": 44,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "MbeyJ",
+                              "name": "32 px favicon B — Lavender sprig",
+                              "width": 32,
+                              "height": 32,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "ccc2e",
+                                  "x": 7.0772871001742335,
+                                  "y": 1.9999999999999982,
+                                  "name": "32 px favicon B — Lavender sprig shape 1",
+                                  "geometry": "M61.57623 8.30739c-1.605-0.675-4.92001 1.785-6.49501 3.255 0.16501-0.315 0.97501-1.185 1.905-2.205 2.63999-2.955 2.445-8.22 0.645-9.21-1.65-0.885-5.25 2.355-5.775 5.985-0.21 1.53-0.09 3.705-0.27 4.215-0.33-3.69-1.8-6.285-3.23999-6.165-2.43 0.255-4.155 9.885 1.23 13.965-0.72001 2.31-12.51 24.045-15.12001 28.635 1.68-11.025-3.45-18.585-9.27-22.14-0.615-0.345-0.96-0.12-0.945 0.69 0.45001 12.63 8.97 18.855 8.775 24.09-0.36 1.32-12.84 24.69-15.555 28.65 0.93-13.035-7.14-21.54-16.095-23.895-0.78-0.195-1.05 0.165-0.855 0.825 1.8 4.905 5.22 9.885 9.27 14.35499 3.405 3.795 6.615 7.72501 6.165 11.19001-3.78 6.34499-10.38 13.12501-15.255 15.045-1.29 0.495-0.66 2.32499 0.945 1.995 5.415-1.68 12.405-9.855 15.975-15.31501 1.575-1.8 5.01-2.80499 8.43-3.88499 7.575-2.46001 13.935-9.21001 16.515-12.09 0.495-0.66 0.21-1.095-0.63-0.99-10.77 1.995-17.43 7.62-21.69 12.58499 4.23-6.95999 10.485-18.98999 13.77-25.28999 1.335-1.815 5.16-3.435 8.655-4.92 7.35-3.195 13.2-9.855 15.255-12.69 0.42-0.69 0.16499-1.095-0.69-0.99-9.99 2.025-17.115 8.955-20.955 14.145 4.335-8.58 12.03-22.41 15.25501-29.37 8.00999-0.555 12.435-9.39 10.05-10.47z",
+                                  "fill": "$ink",
+                                  "width": 17.845425799651533,
+                                  "height": 28.000000000000004
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "ag1Yn",
+                              "name": "32 px label B — Lavender sprig",
+                              "fill": "$moss",
+                              "content": "32",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "ouPZD",
+                          "name": "64 px preview holder B — Lavender sprig",
+                          "width": 76,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "tY3WG",
+                              "name": "64 px favicon B — Lavender sprig",
+                              "width": 64,
+                              "height": 64,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "ArAyf",
+                                  "x": 12.879900928944785,
+                                  "y": 2,
+                                  "name": "64 px favicon B — Lavender sprig shape 1",
+                                  "geometry": "M61.57623 8.30739c-1.605-0.675-4.92001 1.785-6.49501 3.255 0.16501-0.315 0.97501-1.185 1.905-2.205 2.63999-2.955 2.445-8.22 0.645-9.21-1.65-0.885-5.25 2.355-5.775 5.985-0.21 1.53-0.09 3.705-0.27 4.215-0.33-3.69-1.8-6.285-3.23999-6.165-2.43 0.255-4.155 9.885 1.23 13.965-0.72001 2.31-12.51 24.045-15.12001 28.635 1.68-11.025-3.45-18.585-9.27-22.14-0.615-0.345-0.96-0.12-0.945 0.69 0.45001 12.63 8.97 18.855 8.775 24.09-0.36 1.32-12.84 24.69-15.555 28.65 0.93-13.035-7.14-21.54-16.095-23.895-0.78-0.195-1.05 0.165-0.855 0.825 1.8 4.905 5.22 9.885 9.27 14.35499 3.405 3.795 6.615 7.72501 6.165 11.19001-3.78 6.34499-10.38 13.12501-15.255 15.045-1.29 0.495-0.66 2.32499 0.945 1.995 5.415-1.68 12.405-9.855 15.975-15.31501 1.575-1.8 5.01-2.80499 8.43-3.88499 7.575-2.46001 13.935-9.21001 16.515-12.09 0.495-0.66 0.21-1.095-0.63-0.99-10.77 1.995-17.43 7.62-21.69 12.58499 4.23-6.95999 10.485-18.98999 13.77-25.28999 1.335-1.815 5.16-3.435 8.655-4.92 7.35-3.195 13.2-9.855 15.255-12.69 0.42-0.69 0.16499-1.095-0.69-0.99-9.99 2.025-17.115 8.955-20.955 14.145 4.335-8.58 12.03-22.41 15.25501-29.37 8.00999-0.555 12.435-9.39 10.05-10.47z",
+                                  "fill": "$ink",
+                                  "width": 38.24019814211042,
+                                  "height": 60
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "uyzy9",
+                              "name": "64 px label B — Lavender sprig",
+                              "fill": "$moss",
+                              "content": "64",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "e9cOt",
+                  "name": "Illustration panel B — Lavender sprig",
+                  "width": 475,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "A3D2z",
+                      "name": "Illustration label B — Lavender sprig",
+                      "fill": "$moss",
+                      "content": "03 / ILLUSTRATION",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "lBFyo",
+                      "name": "Square-dot artwork B — Lavender sprig",
+                      "width": 320,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "generated.png",
+                        "mode": "fill"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "HuVTy",
+              "name": "Route note B — Lavender sprig",
+              "fill": "$moss",
+              "content": "A small flowering branch from the existing botanical world.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "rectangle",
+              "id": "Pis5t",
+              "name": "Route separator B — Lavender sprig",
+              "fill": "$rule",
+              "width": "fill_container",
+              "height": 1
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "F5VUg",
+          "name": "Route C — Unfurling fern",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "w0EaG4",
+              "name": "Route title C — Unfurling fern",
+              "fill": "$ink",
+              "content": "C — Unfurling fern",
+              "fontFamily": "$display",
+              "fontSize": 26,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "FERud",
+              "name": "Specimens C — Unfurling fern",
+              "width": "fill_container",
+              "height": 380,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "FbZml",
+                  "name": "Logo panel C — Unfurling fern",
+                  "width": 535,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "gap": 26,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "RZKAw",
+                      "name": "Logo label C — Unfurling fern",
+                      "fill": "$moss",
+                      "content": "01 / LOGO",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "P80tT",
+                      "name": "Logo lockup C — Unfurling fern",
+                      "width": "fill_container",
+                      "height": 180,
+                      "gap": 20,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "fqklh",
+                          "name": "Master mark C — Unfurling fern",
+                          "clip": true,
+                          "width": 108,
+                          "height": 108,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "VZvgy",
+                              "x": 25.63082429959511,
+                              "y": 32.07770856047762,
+                              "geometry": "M44.79923 6.98877c-6.453 0-12.44699 4.7655-15.29549 9.47701-0.054 0.0675-0.1485 0.0405-0.1485-0.04051 0.0135-3.456-0.5265-7.3035-2.87551-10.3545-3.8475-5.103-11.94749-6.7635-18.35999-5.8185-0.405 0.0675-0.567 0.4455-0.43201 0.7695 1.728 4.2795 2.6325 9.3825 6.48001 14.391 2.214 2.8755 5.1975 4.5765 7.83 6.345 3.996 2.6865 4.9545 7.587 4.7925 12.1095 0 0.0945-0.108 0.1215-0.135 0.04051-2.187-5.69701-6.696-9.73351-12.501-9.73351-5.4 0-11.4075 3.6315-13.8915 5.508-0.459 0.3105-0.2835 0.9315 0.27 1.107 2.8755 0.972 5.13 2.9835 7.776 5.04901 4.5225 3.645 10.044 4.725 15.1335 4.58999 0.2295 0 0.378 0.2025 0.324 0.432-1.8495 7.76251-8.5455 14.58-16.119 19.04851-1.593 0.945-2.376 2.26799-2.3895 3.267 0 0.4185 0.324 0.729 0.7425 0.729l3.24 0c7.2765 0 18.9135-10.40851 20.9925-24.79951 0.5535-3.5235 0.3645-6.939 0.3375-10.368-0.054-9.8145 6.588-16.2135 12.60899-16.21349 4.52251 0 8.0325 3.21299 8.0325 7.78949 0 3.672-2.106 6.237-4.6305 6.8985-0.59399 0.162-0.5535 0.8775 0.0405 1.08001 0.7155 0.2565 1.458 0.378 2.2005 0.37799 4.69801-0.0945 8.802-4.32 8.80201-9.5715 0.0135-6.858-5.913-12.1095-12.82501-12.1095z",
+                              "fill": "$ink",
+                              "width": 56.73835140080979,
+                              "height": 62.92229143952238
+                            },
+                            {
+                              "type": "path",
+                              "id": "StfCM",
+                              "x": 54.26924582494801,
+                              "y": 13,
+                              "geometry": "M2.36209 30.30645c2.8755-3.7935 7.479-5.8995 12.6225-8.154 9.9765-4.38751 11.529-15.05251 10.9485-21.4785-0.0405-0.5805-0.45901-0.81-0.9315-0.594-3.7395 1.782-8.154 3.0645-12.366 4.4685-11.988 4.0635-14.7015 15.633-11.2455 25.5285 0.1755 0.54001 0.648 0.648 0.972 0.2295z",
+                              "fill": "$ink",
+                              "width": 25.638858602984616,
+                              "height": 30.09231944130912
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "HxeDU",
+                          "name": "Wordmark C — Unfurling fern",
+                          "fill": "$ink",
+                          "content": "forage",
+                          "fontFamily": "$display",
+                          "fontSize": 92,
+                          "fontWeight": "500",
+                          "letterSpacing": -4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "CdccM",
+                  "name": "Favicon panel C — Unfurling fern",
+                  "width": 260,
+                  "height": "fill_container",
+                  "fill": "$paper",
+                  "stroke": "$rule",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 24,
+                  "padding": 24,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "LxdrC",
+                      "name": "Favicon label C — Unfurling fern",
+                      "fill": "$moss",
+                      "content": "02 / FAVICON",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "brzqh",
+                      "name": "Icon tile C — Unfurling fern",
+                      "width": 160,
+                      "height": 160,
+                      "fill": "$ink",
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "c4ur5",
+                          "name": "Favicon master C — Unfurling fern",
+                          "width": 92,
+                          "height": 92,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "path",
+                              "id": "m5Y7h",
+                              "x": 19.70661764352717,
+                              "y": 25.681778665808526,
+                              "name": "Favicon master C — Unfurling fern shape 1",
+                              "geometry": "M44.79923 6.98877c-6.453 0-12.44699 4.7655-15.29549 9.47701-0.054 0.0675-0.1485 0.0405-0.1485-0.04051 0.0135-3.456-0.5265-7.3035-2.87551-10.3545-3.8475-5.103-11.94749-6.7635-18.35999-5.8185-0.405 0.0675-0.567 0.4455-0.43201 0.7695 1.728 4.2795 2.6325 9.3825 6.48001 14.391 2.214 2.8755 5.1975 4.5765 7.83 6.345 3.996 2.6865 4.9545 7.587 4.7925 12.1095 0 0.0945-0.108 0.1215-0.135 0.04051-2.187-5.69701-6.696-9.73351-12.501-9.73351-5.4 0-11.4075 3.6315-13.8915 5.508-0.459 0.3105-0.2835 0.9315 0.27 1.107 2.8755 0.972 5.13 2.9835 7.776 5.04901 4.5225 3.645 10.044 4.725 15.1335 4.58999 0.2295 0 0.378 0.2025 0.324 0.432-1.8495 7.76251-8.5455 14.58-16.119 19.04851-1.593 0.945-2.376 2.26799-2.3895 3.267 0 0.4185 0.324 0.729 0.7425 0.729l3.24 0c7.2765 0 18.9135-10.40851 20.9925-24.79951 0.5535-3.5235 0.3645-6.939 0.3375-10.368-0.054-9.8145 6.588-16.2135 12.60899-16.21349 4.52251 0 8.0325 3.21299 8.0325 7.78949 0 3.672-2.106 6.237-4.6305 6.8985-0.59399 0.162-0.5535 0.8775 0.0405 1.08001 0.7155 0.2565 1.458 0.378 2.2005 0.37799 4.69801-0.0945 8.802-4.32 8.80201-9.5715 0.0135-6.858-5.913-12.1095-12.82501-12.1095z",
+                              "fill": "$paper",
+                              "width": 52.58676471294566,
+                              "height": 58.31822133419148
+                            },
+                            {
+                              "type": "path",
+                              "id": "d92KDw",
+                              "x": 46.24954491092742,
+                              "y": 8,
+                              "name": "Favicon master C — Unfurling fern shape 2",
+                              "geometry": "M2.36209 30.30645c2.8755-3.7935 7.479-5.8995 12.6225-8.154 9.9765-4.38751 11.529-15.05251 10.9485-21.4785-0.0405-0.5805-0.45901-0.81-0.9315-0.594-3.7395 1.782-8.154 3.0645-12.366 4.4685-11.988 4.0635-14.7015 15.633-11.2455 25.5285 0.1755 0.54001 0.648 0.648 0.972 0.2295z",
+                              "fill": "$paper",
+                              "width": 23.76284455886379,
+                              "height": 27.89044240901821
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "mTDBY",
+                      "name": "True-size checks C — Unfurling fern",
+                      "width": "fill_container",
+                      "height": 92,
+                      "gap": 12,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "MhfNO",
+                          "name": "16 px preview holder C — Unfurling fern",
+                          "width": 28,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "qSnwc",
+                              "name": "16 px favicon C — Unfurling fern",
+                              "width": 16,
+                              "height": 16,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "W1FIJ",
+                                  "x": 3.1564821974918464,
+                                  "y": 4.257169754227885,
+                                  "name": "16 px favicon C — Unfurling fern shape 1",
+                                  "geometry": "M44.79923 6.98877c-6.453 0-12.44699 4.7655-15.29549 9.47701-0.054 0.0675-0.1485 0.0405-0.1485-0.04051 0.0135-3.456-0.5265-7.3035-2.87551-10.3545-3.8475-5.103-11.94749-6.7635-18.35999-5.8185-0.405 0.0675-0.567 0.4455-0.43201 0.7695 1.728 4.2795 2.6325 9.3825 6.48001 14.391 2.214 2.8755 5.1975 4.5765 7.83 6.345 3.996 2.6865 4.9545 7.587 4.7925 12.1095 0 0.0945-0.108 0.1215-0.135 0.04051-2.187-5.69701-6.696-9.73351-12.501-9.73351-5.4 0-11.4075 3.6315-13.8915 5.508-0.459 0.3105-0.2835 0.9315 0.27 1.107 2.8755 0.972 5.13 2.9835 7.776 5.04901 4.5225 3.645 10.044 4.725 15.1335 4.58999 0.2295 0 0.378 0.2025 0.324 0.432-1.8495 7.76251-8.5455 14.58-16.119 19.04851-1.593 0.945-2.376 2.26799-2.3895 3.267 0 0.4185 0.324 0.729 0.7425 0.729l3.24 0c7.2765 0 18.9135-10.40851 20.9925-24.79951 0.5535-3.5235 0.3645-6.939 0.3375-10.368-0.054-9.8145 6.588-16.2135 12.60899-16.21349 4.52251 0 8.0325 3.21299 8.0325 7.78949 0 3.672-2.106 6.237-4.6305 6.8985-0.59399 0.162-0.5535 0.8775 0.0405 1.08001 0.7155 0.2565 1.458 0.378 2.2005 0.37799 4.69801-0.0945 8.802-4.32 8.80201-9.5715 0.0135-6.858-5.913-12.1095-12.82501-12.1095z",
+                                  "fill": "$ink",
+                                  "width": 9.687035605016307,
+                                  "height": 10.742830245772115
+                                },
+                                {
+                                  "type": "path",
+                                  "id": "RNjrR",
+                                  "x": 8.045968799381367,
+                                  "y": 0.9999999999999991,
+                                  "name": "16 px favicon C — Unfurling fern shape 2",
+                                  "geometry": "M2.36209 30.30645c2.8755-3.7935 7.479-5.8995 12.6225-8.154 9.9765-4.38751 11.529-15.05251 10.9485-21.4785-0.0405-0.5805-0.45901-0.81-0.9315-0.594-3.7395 1.782-8.154 3.0645-12.366 4.4685-11.988 4.0635-14.7015 15.633-11.2455 25.5285 0.1755 0.54001 0.648 0.648 0.972 0.2295z",
+                                  "fill": "$ink",
+                                  "width": 4.377366102948593,
+                                  "height": 5.137713075345459
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "AAF35",
+                              "name": "16 px label C — Unfurling fern",
+                              "fill": "$moss",
+                              "content": "16",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "KyCYt",
+                          "name": "32 px preview holder C — Unfurling fern",
+                          "width": 44,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "cDHN8",
+                              "name": "32 px favicon C — Unfurling fern",
+                              "width": 32,
+                              "height": 32,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "nD7LI",
+                                  "x": 6.312964394983693,
+                                  "y": 8.51433950845577,
+                                  "name": "32 px favicon C — Unfurling fern shape 1",
+                                  "geometry": "M44.79923 6.98877c-6.453 0-12.44699 4.7655-15.29549 9.47701-0.054 0.0675-0.1485 0.0405-0.1485-0.04051 0.0135-3.456-0.5265-7.3035-2.87551-10.3545-3.8475-5.103-11.94749-6.7635-18.35999-5.8185-0.405 0.0675-0.567 0.4455-0.43201 0.7695 1.728 4.2795 2.6325 9.3825 6.48001 14.391 2.214 2.8755 5.1975 4.5765 7.83 6.345 3.996 2.6865 4.9545 7.587 4.7925 12.1095 0 0.0945-0.108 0.1215-0.135 0.04051-2.187-5.69701-6.696-9.73351-12.501-9.73351-5.4 0-11.4075 3.6315-13.8915 5.508-0.459 0.3105-0.2835 0.9315 0.27 1.107 2.8755 0.972 5.13 2.9835 7.776 5.04901 4.5225 3.645 10.044 4.725 15.1335 4.58999 0.2295 0 0.378 0.2025 0.324 0.432-1.8495 7.76251-8.5455 14.58-16.119 19.04851-1.593 0.945-2.376 2.26799-2.3895 3.267 0 0.4185 0.324 0.729 0.7425 0.729l3.24 0c7.2765 0 18.9135-10.40851 20.9925-24.79951 0.5535-3.5235 0.3645-6.939 0.3375-10.368-0.054-9.8145 6.588-16.2135 12.60899-16.21349 4.52251 0 8.0325 3.21299 8.0325 7.78949 0 3.672-2.106 6.237-4.6305 6.8985-0.59399 0.162-0.5535 0.8775 0.0405 1.08001 0.7155 0.2565 1.458 0.378 2.2005 0.37799 4.69801-0.0945 8.802-4.32 8.80201-9.5715 0.0135-6.858-5.913-12.1095-12.82501-12.1095z",
+                                  "fill": "$ink",
+                                  "width": 19.374071210032614,
+                                  "height": 21.48566049154423
+                                },
+                                {
+                                  "type": "path",
+                                  "id": "P8w7gD",
+                                  "x": 16.091937598762733,
+                                  "y": 1.9999999999999982,
+                                  "name": "32 px favicon C — Unfurling fern shape 2",
+                                  "geometry": "M2.36209 30.30645c2.8755-3.7935 7.479-5.8995 12.6225-8.154 9.9765-4.38751 11.529-15.05251 10.9485-21.4785-0.0405-0.5805-0.45901-0.81-0.9315-0.594-3.7395 1.782-8.154 3.0645-12.366 4.4685-11.988 4.0635-14.7015 15.633-11.2455 25.5285 0.1755 0.54001 0.648 0.648 0.972 0.2295z",
+                                  "fill": "$ink",
+                                  "width": 8.754732205897186,
+                                  "height": 10.275426150690919
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "fiTdI",
+                              "name": "32 px label C — Unfurling fern",
+                              "fill": "$moss",
+                              "content": "32",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "sBVwF",
+                          "name": "64 px preview holder C — Unfurling fern",
+                          "width": 76,
+                          "height": 92,
+                          "layout": "vertical",
+                          "gap": 4,
+                          "justifyContent": "end",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "uIQgZ",
+                              "name": "64 px favicon C — Unfurling fern",
+                              "width": 64,
+                              "height": 64,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "path",
+                                  "id": "wZUzL",
+                                  "x": 11.242066560679344,
+                                  "y": 15.95929894669094,
+                                  "name": "64 px favicon C — Unfurling fern shape 1",
+                                  "geometry": "M44.79923 6.98877c-6.453 0-12.44699 4.7655-15.29549 9.47701-0.054 0.0675-0.1485 0.0405-0.1485-0.04051 0.0135-3.456-0.5265-7.3035-2.87551-10.3545-3.8475-5.103-11.94749-6.7635-18.35999-5.8185-0.405 0.0675-0.567 0.4455-0.43201 0.7695 1.728 4.2795 2.6325 9.3825 6.48001 14.391 2.214 2.8755 5.1975 4.5765 7.83 6.345 3.996 2.6865 4.9545 7.587 4.7925 12.1095 0 0.0945-0.108 0.1215-0.135 0.04051-2.187-5.69701-6.696-9.73351-12.501-9.73351-5.4 0-11.4075 3.6315-13.8915 5.508-0.459 0.3105-0.2835 0.9315 0.27 1.107 2.8755 0.972 5.13 2.9835 7.776 5.04901 4.5225 3.645 10.044 4.725 15.1335 4.58999 0.2295 0 0.378 0.2025 0.324 0.432-1.8495 7.76251-8.5455 14.58-16.119 19.04851-1.593 0.945-2.376 2.26799-2.3895 3.267 0 0.4185 0.324 0.729 0.7425 0.729l3.24 0c7.2765 0 18.9135-10.40851 20.9925-24.79951 0.5535-3.5235 0.3645-6.939 0.3375-10.368-0.054-9.8145 6.588-16.2135 12.60899-16.21349 4.52251 0 8.0325 3.21299 8.0325 7.78949 0 3.672-2.106 6.237-4.6305 6.8985-0.59399 0.162-0.5535 0.8775 0.0405 1.08001 0.7155 0.2565 1.458 0.378 2.2005 0.37799 4.69801-0.0945 8.802-4.32 8.80201-9.5715 0.0135-6.858-5.913-12.1095-12.82501-12.1095z",
+                                  "fill": "$ink",
+                                  "width": 41.51586687864131,
+                                  "height": 46.04070105330906
+                                },
+                                {
+                                  "type": "path",
+                                  "id": "EOgxr",
+                                  "x": 32.19700914020586,
+                                  "y": 2,
+                                  "name": "64 px favicon C — Unfurling fern shape 2",
+                                  "geometry": "M2.36209 30.30645c2.8755-3.7935 7.479-5.8995 12.6225-8.154 9.9765-4.38751 11.529-15.05251 10.9485-21.4785-0.0405-0.5805-0.45901-0.81-0.9315-0.594-3.7395 1.782-8.154 3.0645-12.366 4.4685-11.988 4.0635-14.7015 15.633-11.2455 25.5285 0.1755 0.54001 0.648 0.648 0.972 0.2295z",
+                                  "fill": "$ink",
+                                  "width": 18.760140441208254,
+                                  "height": 22.01877032290911
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "id": "poIYv",
+                              "name": "64 px label C — Unfurling fern",
+                              "fill": "$moss",
+                              "content": "64",
+                              "fontFamily": "$mono",
+                              "fontSize": 9,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ulVKp",
+                  "name": "Illustration panel C — Unfurling fern",
+                  "width": 475,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "padding": 20,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "biaoQ",
+                      "name": "Illustration label C — Unfurling fern",
+                      "fill": "$moss",
+                      "content": "03 / ILLUSTRATION",
+                      "fontFamily": "$mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dM3jO",
+                      "name": "Square-dot artwork C — Unfurling fern",
+                      "width": 320,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "generated-1.png",
+                        "mode": "fill"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "B5BGf",
+              "name": "Route note C — Unfurling fern",
+              "fill": "$moss",
+              "content": "A curved new frond with a sense of discovery.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "x8nQSf",
+          "name": "Selection note",
+          "fill": "$moss",
+          "content": "SELECT ONE DIRECTION   /   THEN REFINE THE MASTER MARK AND EXPORT THE ICON SET",
+          "fontFamily": "$mono",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "LyuJ2",
+      "x": 3080,
+      "y": 2340,
+      "name": "03B — Botanical f / logo studies",
+      "clip": true,
+      "width": 1440,
+      "fill": "$paper",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 64,
+      "children": [
+        {
+          "type": "text",
+          "id": "E8vdU",
+          "name": "Logo studies chapter",
+          "fill": "$moss",
+          "content": "03B   /   LOGO STUDIES",
+          "fontFamily": "$mono",
+          "fontSize": 12,
+          "fontWeight": "normal",
+          "letterSpacing": 1.2
+        },
+        {
+          "type": "text",
+          "id": "MEh9L",
+          "name": "Logo studies title",
+          "fill": "$ink",
+          "content": "A plant-shaped f, reduced to its gesture.",
+          "fontFamily": "$display",
+          "fontSize": 52,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "n3WhQx",
+          "name": "Logo studies intro",
+          "fill": "$ink",
+          "content": "Three simpler standalone marks from your sketch. The plant forms the entire letter, with only a few accents.",
+          "fontFamily": "$body",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "A9iVAK",
+          "name": "Logo study A — Seed f",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "Oudsa",
+              "name": "Logo study title A — Seed f",
+              "fill": "$ink",
+              "content": "A — Seedling",
+              "fontFamily": "$display",
+              "fontSize": 25,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "o1XmZ",
+              "name": "Logo presentation A — Seed f",
+              "width": "fill_container",
+              "height": 320,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "uyR4T",
+                  "name": "Integrated wordmark panel A — Seed f",
+                  "clip": true,
+                  "width": 845,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "sA3GF",
+                      "name": "Standalone cursive f SEED / ORIGIN",
+                      "width": 300,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "branding-assets/cursive-f-seed-minimal-study.png",
+                        "mode": "fit"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qMBlw",
+                  "name": "Letter study panel A — Seed f",
+                  "width": 447,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 18,
+                  "padding": 36,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "qCZpM",
+                      "name": "Logo concept label SEED / ORIGIN",
+                      "fill": "$moss",
+                      "content": "SEED / ORIGIN",
+                      "fontFamily": "$mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "s1RSJv",
+                      "name": "Logo concept text SEED / ORIGIN",
+                      "fill": "$ink",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "A supple seedling f with two leaves and a quiet root loop.",
+                      "fontFamily": "$display",
+                      "fontSize": 28,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "Va2cm",
+              "name": "Logo study note A — Seed f",
+              "fill": "$moss",
+              "content": "Two leaves; the stem and branch carry the rest of the plant form.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "rectangle",
+              "id": "feHSG",
+              "name": "Logo route separator A — Seed f",
+              "fill": "$rule",
+              "width": "fill_container",
+              "height": 1
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "HEhPY",
+          "name": "Logo study B — Lavender f",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "M501EB",
+              "name": "Logo study title B — Lavender f",
+              "fill": "$ink",
+              "content": "B — Lavender",
+              "fontFamily": "$display",
+              "fontSize": 25,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "OzBSd",
+              "name": "Logo presentation B — Lavender f",
+              "width": "fill_container",
+              "height": 320,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "l239gA",
+                  "name": "Integrated wordmark panel B — Lavender f",
+                  "clip": true,
+                  "width": 845,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "xm7sA",
+                      "name": "Standalone cursive f LAVENDER / BLOOM",
+                      "width": 300,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "branding-assets/cursive-f-lavender-minimal-study.png",
+                        "mode": "fit"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XndwC",
+                  "name": "Letter study panel B — Lavender f",
+                  "width": 447,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 18,
+                  "padding": 36,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "k5cLDE",
+                      "name": "Logo concept label LAVENDER / BLOOM",
+                      "fill": "$moss",
+                      "content": "LAVENDER / BLOOM",
+                      "fontFamily": "$mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "d7BMc",
+                      "name": "Logo concept text LAVENDER / BLOOM",
+                      "fill": "$ink",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "A lean lavender stalk within the cursive f gesture.",
+                      "fontFamily": "$display",
+                      "fontSize": 28,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "U7PJ6j",
+              "name": "Logo study note B — Lavender f",
+              "fill": "$moss",
+              "content": "A tiny flowering accent; broad, clean curves elsewhere.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "rectangle",
+              "id": "DBQ1T",
+              "name": "Logo route separator B — Lavender f",
+              "fill": "$rule",
+              "width": "fill_container",
+              "height": 1
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "XwcLF",
+          "name": "Logo study C — Fern f",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "NxeVT",
+              "name": "Logo study title C — Fern f",
+              "fill": "$ink",
+              "content": "C — Fern",
+              "fontFamily": "$display",
+              "fontSize": 25,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "vUT3o",
+              "name": "Logo presentation C — Fern f",
+              "width": "fill_container",
+              "height": 320,
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "e5vUx",
+                  "name": "Integrated wordmark panel C — Fern f",
+                  "clip": true,
+                  "width": 845,
+                  "height": "fill_container",
+                  "fill": "$sage",
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "SGRpq",
+                      "name": "Standalone cursive f FERN / UNFURL",
+                      "width": 300,
+                      "height": 300,
+                      "fill": {
+                        "type": "image",
+                        "enabled": true,
+                        "url": "branding-assets/cursive-f-fern-minimal-study.png",
+                        "mode": "fit"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "e2IQif",
+                  "name": "Letter study panel C — Fern f",
+                  "width": 447,
+                  "height": "fill_container",
+                  "fill": "$lilac",
+                  "layout": "vertical",
+                  "gap": 18,
+                  "padding": 36,
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "WKriS",
+                      "name": "Logo concept label FERN / UNFURL",
+                      "fill": "$moss",
+                      "content": "FERN / UNFURL",
+                      "fontFamily": "$mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal",
+                      "letterSpacing": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "TTWSL",
+                      "name": "Logo concept text FERN / UNFURL",
+                      "fill": "$ink",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "A pared-back fiddlehead f with a few spare leaves.",
+                      "fontFamily": "$display",
+                      "fontSize": 28,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "X5a6a",
+              "name": "Logo study note C — Fern f",
+              "fill": "$moss",
+              "content": "The fern idea rests in the curl and taper, with open space.",
+              "fontFamily": "$body",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "nkuZq",
+          "name": "Logo study status",
+          "fill": "$moss",
+          "content": "MINIMAL PLANT LETTERMARKS  /  CHOOSE A FORM TO REFINE",
+          "fontFamily": "$mono",
+          "fontSize": 12,
+          "fontWeight": "normal"
         }
       ]
     }
