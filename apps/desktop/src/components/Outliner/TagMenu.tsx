@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Editor } from '@tiptap/react'
+import type { Transaction } from '@tiptap/pm/state'
 import { activeTagAtSelection, collectTags, type ActiveTag } from '../../editor/tags'
 
 interface TagMenuState extends ActiveTag {
@@ -20,15 +21,16 @@ export function TagMenu({ editor }: { editor: Editor | null }) {
 
   useEffect(() => {
     if (!editor) return
-    const update = () => {
-      setMenu(readTagMenu(editor))
+    // Open only while a tag is being typed. A caret that merely lands after an
+    // existing tag must not open the menu, or it would swallow arrows and Enter.
+    const update = ({ transaction }: { transaction: Transaction }) => {
+      if (!transaction.docChanged && !transaction.selectionSet) return
+      setMenu((current) => (transaction.docChanged || current ? readTagMenu(editor) : null))
       setActiveIndex(0)
     }
-    editor.on('selectionUpdate', update)
-    editor.on('update', update)
+    editor.on('transaction', update)
     return () => {
-      editor.off('selectionUpdate', update)
-      editor.off('update', update)
+      editor.off('transaction', update)
     }
   }, [editor])
 

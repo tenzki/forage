@@ -117,6 +117,22 @@ describe('outliner chrome', () => {
     expect(screen.getByRole('button', { name: 'Open Bojan Babić' })).toBeTruthy()
   })
 
+  it('starts a zoomed page at the top of the workspace', () => {
+    const workspace = document.createElement('section')
+    workspace.className = 'outline-workspace'
+    workspace.append(editor.view.dom)
+    document.body.append(workspace)
+    const scrollTo = vi.fn()
+    workspace.scrollTo = scrollTo as typeof workspace.scrollTo
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    scrollTo.mockClear()
+
+    act(() => setZoom(editor, 'bravo'))
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0 })
+    workspace.remove()
+  })
+
   it('navigates backward and forward with toolbar buttons and shortcuts', async () => {
     const user = userEvent.setup()
     setZoom(editor, 'alpha')

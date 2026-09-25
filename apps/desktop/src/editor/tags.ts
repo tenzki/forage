@@ -1,12 +1,14 @@
-import { Extension } from '@tiptap/core'
+import { Extension, type Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { EditorState } from '@tiptap/pm/state'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { ReplaceStep } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
 export const OUTLINE_TAG_EVENT = 'outline:tag-click'
 
 const tagPluginKey = new PluginKey('outlineTags')
+const tagTypingKey = new PluginKey<boolean>('outlineTagTyping')
 const TAG_PATTERN = /(^|[^\p{L}\p{N}_\/#])#([\p{L}\p{N}_-]+)/gu
 const ACTIVE_TAG_PATTERN = /(^|[^\p{L}\p{N}_\/#])#([\p{L}\p{N}_-]*)$/u
 
@@ -77,6 +79,37 @@ function tagDecorations(doc: ProseMirrorNode): DecorationSet {
   return DecorationSet.create(doc, decorations)
 }
 
+/**
+ * Whether the tag before the caret is still being typed: text was inserted at
+ * the caret inside it, and the caret has stayed in it since. Moving the caret
+ * or finishing the tag ends it.
+ */
+function tagTyping(transaction: Transaction, typing: boolean, state: EditorState): boolean {
+  if (!transaction.docChanged) return transaction.selectionSet ? false : typing
+  if (!activeTagAtSelection(state)) return false
+  if (typing) return true
+  return transaction.steps.some((step, index) => step instanceof ReplaceStep
+    && step.slice.size > 0
+    && transaction.mapping.slice(index + 1).map(step.from + step.slice.size) === state.selection.from)
+}
+
+/** Backspace in or just after a finished tag removes the whole tag. */
+function deleteTagAtCaret(editor: Editor): boolean {
+  const { state } = editor
+  const { $from, empty } = state.selection
+  if (!empty || $from.parent.type.name !== 'paragraph' || tagTypingKey.getState(state)) return false
+  // Every inline leaf counts as one character, so text offsets equal document offsets.
+  const text = $from.parent.textBetween(0, $from.parent.content.size, undefined, '\ufffc')
+  const offset = $from.parentOffset
+  const tag = tagMatchesInText(text).find((match) => match.from < offset && offset <= match.to)
+  if (!tag) return false
+  // Take the space before a tag in mid-sentence along, so no double space remains.
+  const from = /\s/.test(text[tag.to] ?? '') && /\s/.test(text[tag.from - 1] ?? '') ? tag.from - 1 : tag.from
+  const start = $from.start()
+  editor.view.dispatch(state.tr.delete(start + from, start + tag.to).scrollIntoView())
+  return true
+}
+
 function clickedTag(event: MouseEvent): string | null {
   const target = event.target instanceof Element
     ? event.target.closest<HTMLElement>('.outline-tag')
@@ -87,8 +120,20 @@ function clickedTag(event: MouseEvent): string | null {
 export const TagDecorations = Extension.create({
   name: 'tagDecorations',
 
+  addKeyboardShortcuts() {
+    return {
+      Backspace: () => deleteTagAtCaret(this.editor),
+    }
+  },
+
   addProseMirrorPlugins() {
-    return [new Plugin({
+    return [new Plugin<boolean>({
+      key: tagTypingKey,
+      state: {
+        init: () => false,
+        apply: (transaction, typing, _previous, state) => tagTyping(transaction, typing, state),
+      },
+    }), new Plugin({
       key: tagPluginKey,
       state: {
         init: (_, state) => tagDecorations(state.doc),

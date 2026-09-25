@@ -4,6 +4,7 @@ pub mod page_peek;
 pub mod persistence;
 pub mod server_stream;
 pub mod server_transport;
+pub mod shortcuts_key;
 pub mod sync_commands;
 
 // The privileged Rust boundary owns local durability and native integrations.
@@ -41,6 +42,7 @@ pub fn run() {
                 http_client,
             });
             app.manage(server_stream::ServerStreamState::default());
+            shortcuts_key::install(app.handle());
             Ok(())
         })
         .invoke_handler({
@@ -84,10 +86,13 @@ pub fn run() {
             commands::local_credential_remove,
             commands::asset_ingest_data_url,
             commands::asset_read,
-            page_peek::page_peek_open,
+            page_peek::page_peek_prepare,
+            page_peek::page_peek_load,
+            page_peek::page_peek_show,
             page_peek::page_peek_set_bounds,
             page_peek::page_peek_set_visible,
             page_peek::page_peek_navigate,
+            page_peek::page_peek_snapshot,
             page_peek::page_peek_close,
             sync_commands::server_enroll,
             sync_commands::server_seed_outline,

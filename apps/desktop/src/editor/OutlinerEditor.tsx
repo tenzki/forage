@@ -102,6 +102,19 @@ export function OutlinerEditor({
         return true
       },
       handleDOMEvents: {
+        // On macOS the Edit menu takes Mod-Z before the page sees the key and
+        // asks WebKit to undo, which only knows the typed characters. Route
+        // that request to the durable history too.
+        beforeinput: (_view, event) => {
+          const input = event as InputEvent
+          if (input.inputType !== 'historyUndo' && input.inputType !== 'historyRedo') return false
+          const current = editorRef.current
+          if (!current) return false
+          event.preventDefault()
+          if (input.inputType === 'historyRedo') redoHandler.current?.(current)
+          else undoHandler.current?.(current)
+          return true
+        },
         mousedown: (view, event) => {
           if (event.target !== view.dom) return false
           const editable = collectBullets(view.state.doc)

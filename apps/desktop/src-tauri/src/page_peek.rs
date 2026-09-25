@@ -4,38 +4,72 @@
 //! The app's CSP forbids framing remote origins, so the page is a native child
 //! webview (`Window::add_child`, Tauri's `unstable` multi-webview API) laid over
 //! the pane's content rectangle. The frontend owns the geometry and reports it
-//! in logical pixels relative to the window's content area, which is the same
-//! space `getBoundingClientRect` measures in the main webview.
+//! as `getBoundingClientRect` measures it: logical pixels in the main webview.
+//! Child webviews are placed relative to the window's content view, which on
+//! macOS runs up under the title bar while the main webview sits below it, so
+//! the main webview's own origin is added before placing the page.
 //!
 //! The page is untrusted remote content. Plugin commands are denied to it by the
 //! capability ACL (every capability is local-only), and app commands are denied
 //! by the trusted-webview guard in `lib.rs`. Its state reaches the app only
 //! through the `page-peek:state` event emitted from here.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
-use tauri::webview::{NewWindowResponse, PageLoadEvent};
+use tauri::ipc::Response;
+use tauri::webview::{Color, NewWindowResponse, PageLoadEvent};
 use tauri::{
     AppHandle, Emitter, EventTarget, LogicalPosition, LogicalSize, Manager, Rect, Url,
     WebviewBuilder, WebviewUrl,
 };
+use tokio::sync::oneshot;
 
 /// Label of the embedded page webview. Never trusted with app commands.
 pub const PAGE_PEEK_LABEL: &str = "link-peek-page";
 const MAIN_LABEL: &str = "main";
 const STATE_EVENT: &str = "page-peek:state";
 
+/// A rectangle as the main webview's DOM measures it, plus that webview's
+/// viewport size, which anchors it to the window.
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PeekBounds {
     x: f64,
     y: f64,
     width: f64,
     height: f64,
+    viewport_width: f64,
+    viewport_height: f64,
 }
 
 impl PeekBounds {
-    fn rect(self) -> Rect {
+    /// These bounds in the parent view's space, where child webviews live.
+    ///
+    /// The DOM viewport and the parent view do not share a top edge on macOS:
+    /// the content view runs up under the title bar, and depending on the
+    /// window setup the main webview either starts below it or insets its page
+    /// beneath it. They do share the bottom-right corner, so the DOM rectangle
+    /// is placed from there: the offset is wherever the main webview's frame
+    /// ends, minus the viewport the page actually got.
+    fn rect(self, app: &AppHandle) -> Rect {
+        let offset = app
+            .get_webview(MAIN_LABEL)
+            .and_then(|main| {
+                let scale = main.window().scale_factor().ok()?;
+                let frame = main.bounds().ok()?;
+                let origin = frame.position.to_logical::<f64>(scale);
+                let size = frame.size.to_logical::<f64>(scale);
+                Some(LogicalPosition::new(
+                    (origin.x + size.width - self.viewport_width).max(0.0),
+                    (origin.y + size.height - self.viewport_height).max(0.0),
+                ))
+            })
+            .unwrap_or(LogicalPosition::new(0.0, 0.0));
         Rect {
-            position: LogicalPosition::new(self.x, self.y).into(),
+            position: LogicalPosition::new(offset.x + self.x, offset.y + self.y).into(),
             size: LogicalSize::new(self.width.max(1.0), self.height.max(1.0)).into(),
         }
     }
@@ -70,31 +104,69 @@ fn emit_state(app: &AppHandle, state: PageState) {
     let _ = app.emit_to(EventTarget::webview_window(MAIN_LABEL), STATE_EVENT, state);
 }
 
-fn page_webview(app: &AppHandle) -> Result<tauri::Webview, String> {
-    app.get_webview(PAGE_PEEK_LABEL)
-        .ok_or_else(|| "the page peek is not open".to_string())
+/// Whether the page is on screen. WebKit does not repaint a loading page it
+/// is stretched over, so while it is hidden it waits at full window size and is
+/// only ever shrunk onto the pane.
+static PAGE_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// The page's current address, tracked here rather than read back from the
+/// webview: wry's `url()` unwraps WebKit's `URL`, which is nil until a first
+/// navigation commits, and a nil there aborts the whole app.
+static CURRENT_URL: Mutex<Option<Url>> = Mutex::new(None);
+
+fn current_url() -> Option<Url> {
+    CURRENT_URL.lock().ok().and_then(|current| current.clone())
 }
 
-/// Show `url` in the embedded page, creating the webview on first use.
-#[tauri::command]
-pub fn page_peek_open(app: AppHandle, url: String, bounds: PeekBounds) -> Result<(), String> {
-    let url = web_url(&url)?;
-    if let Some(webview) = app.get_webview(PAGE_PEEK_LABEL) {
-        webview.set_bounds(bounds.rect()).map_err(|error| error.to_string())?;
-        if webview.url().ok().as_ref() != Some(&url) {
-            webview.navigate(url).map_err(|error| error.to_string())?;
-        }
-        return webview.show().map_err(|error| error.to_string());
+fn remember_url(url: Option<Url>) {
+    if let Ok(mut current) = CURRENT_URL.lock() {
+        *current = url;
     }
+}
 
+fn navigate_to(webview: &tauri::Webview, url: Url) -> Result<(), String> {
+    let web = url.scheme() != "about";
+    webview.navigate(url.clone()).map_err(|error| error.to_string())?;
+    remember_url(web.then_some(url));
+    Ok(())
+}
+
+fn page_webview(app: &AppHandle) -> Result<tauri::Webview, String> {
+    app.get_webview(PAGE_PEEK_LABEL)
+        .ok_or_else(|| "the page peek is not ready".to_string())
+}
+
+fn blank() -> Url {
+    Url::parse("about:blank").expect("about:blank is a valid URL")
+}
+
+fn set_visible(webview: &tauri::Webview, visible: bool) -> Result<(), String> {
+    if visible { webview.show() } else { webview.hide() }.map_err(|error| error.to_string())?;
+    PAGE_VISIBLE.store(visible, Ordering::SeqCst);
+    Ok(())
+}
+
+/// The embedded page, created hidden on first use.
+fn ensure_webview(app: &AppHandle) -> Result<tauri::Webview, String> {
+    if let Some(webview) = app.get_webview(PAGE_PEEK_LABEL) {
+        return Ok(webview);
+    }
     let window = app
         .get_window(MAIN_LABEL)
         .ok_or_else(|| "the main window is missing".to_string())?;
     let loads = app.clone();
     let titles = app.clone();
     let popups = app.clone();
-    let builder = WebviewBuilder::new(PAGE_PEEK_LABEL, WebviewUrl::External(url))
+    let builder = WebviewBuilder::new(PAGE_PEEK_LABEL, WebviewUrl::External(blank()))
+        // WebKit leaves area it has not painted yet black; most pages are white.
+        .background_color(Color(255, 255, 255, 255))
         .on_page_load(move |_webview, payload| {
+            // The idle page is not something the user navigated to.
+            if payload.url().scheme() == "about" {
+                return;
+            }
+            // Follows navigation inside the page, redirects included.
+            remember_url(Some(payload.url().clone()));
             emit_state(
                 &loads,
                 PageState {
@@ -104,8 +176,8 @@ pub fn page_peek_open(app: AppHandle, url: String, bounds: PeekBounds) -> Result
                 },
             );
         })
-        .on_document_title_changed(move |webview, title| {
-            if let Ok(url) = webview.url() {
+        .on_document_title_changed(move |_webview, title| {
+            if let Some(url) = current_url() {
                 emit_state(
                     &titles,
                     PageState {
@@ -121,33 +193,76 @@ pub fn page_peek_open(app: AppHandle, url: String, bounds: PeekBounds) -> Result
         .on_new_window(move |url, _features| {
             if matches!(url.scheme(), "http" | "https") {
                 if let Some(webview) = popups.get_webview(PAGE_PEEK_LABEL) {
-                    let _ = webview.navigate(url);
+                    let _ = navigate_to(&webview, url);
                 }
             }
             NewWindowResponse::Deny
         });
-    let rect = bounds.rect();
-    window
-        .add_child(builder, rect.position, rect.size)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    // Created as a speck and hidden straight away, so it never flashes over the
+    // outline; `page_peek_load` sizes it before it loads anything.
+    let webview = window
+        .add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0))
+        .map_err(|error| error.to_string())?;
+    set_visible(&webview, false)?;
+    Ok(webview)
+}
+
+/// Warm the embedded page up at app start, so the first peek does not pay for
+/// creating a webview and its web content process.
+#[tauri::command]
+pub fn page_peek_prepare(app: AppHandle) -> Result<(), String> {
+    ensure_webview(&app).map(|_| ())
+}
+
+/// Start loading `url` without showing it, so the page loads while the pane
+/// slides in. A hidden page waits at full window size; see `PAGE_VISIBLE`.
+#[tauri::command]
+pub fn page_peek_load(app: AppHandle, url: String) -> Result<(), String> {
+    let url = web_url(&url)?;
+    let webview = ensure_webview(&app)?;
+    if !PAGE_VISIBLE.load(Ordering::SeqCst) {
+        let window = webview.window();
+        let scale = window.scale_factor().map_err(|error| error.to_string())?;
+        let size = window
+            .inner_size()
+            .map_err(|error| error.to_string())?
+            .to_logical::<f64>(scale);
+        webview
+            .set_bounds(Rect {
+                position: LogicalPosition::new(0.0, 0.0).into(),
+                size: size.into(),
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    if current_url().as_ref() != Some(&url) {
+        navigate_to(&webview, url)?;
+    }
+    Ok(())
+}
+
+/// Lay the page over the pane and show it.
+#[tauri::command]
+pub fn page_peek_show(app: AppHandle, bounds: PeekBounds) -> Result<(), String> {
+    let webview = page_webview(&app)?;
+    webview.set_bounds(bounds.rect(&app)).map_err(|error| error.to_string())?;
+    set_visible(&webview, true)
 }
 
 /// Keep the page over the pane as the layout moves.
 #[tauri::command]
 pub fn page_peek_set_bounds(app: AppHandle, bounds: PeekBounds) -> Result<(), String> {
     page_webview(&app)?
-        .set_bounds(bounds.rect())
+        .set_bounds(bounds.rect(&app))
         .map_err(|error| error.to_string())
 }
 
 /// Hide the page without losing it, e.g. while the pane shows the reader view.
 #[tauri::command]
 pub fn page_peek_set_visible(app: AppHandle, visible: bool) -> Result<(), String> {
-    let Some(webview) = app.get_webview(PAGE_PEEK_LABEL) else {
-        return Ok(());
-    };
-    if visible { webview.show() } else { webview.hide() }.map_err(|error| error.to_string())
+    match app.get_webview(PAGE_PEEK_LABEL) {
+        Some(webview) => set_visible(&webview, visible),
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -161,12 +276,93 @@ pub fn page_peek_navigate(app: AppHandle, action: PeekAction) -> Result<(), Stri
     .map_err(|error| error.to_string())
 }
 
+/// How long a snapshot may take before the page is hidden without one.
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(400);
+
+/// A JPEG of the page as it is on screen. The app shows it in the page's place
+/// while a dialog is up: the page is a native view, so the dialog's HTML cannot
+/// draw over it and the page has to be hidden.
+#[tauri::command]
+pub async fn page_peek_snapshot(app: AppHandle) -> Result<Response, String> {
+    let webview = page_webview(&app)?;
+    let (done, captured) = oneshot::channel();
+    webview
+        .with_webview(move |platform| snapshot::capture(platform, done))
+        .map_err(|error| error.to_string())?;
+    let bytes = tokio::time::timeout(SNAPSHOT_TIMEOUT, captured)
+        .await
+        .map_err(|_| "the page snapshot timed out".to_string())?
+        .map_err(|_| "the page snapshot was dropped".to_string())??;
+    Ok(Response::new(bytes))
+}
+
+#[cfg(target_os = "macos")]
+mod snapshot {
+    use std::cell::Cell;
+
+    use block2::RcBlock;
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
+    use objc2_foundation::{NSDictionary, NSError};
+    use objc2_web_kit::WKWebView;
+    use tauri::webview::PlatformWebview;
+    use tokio::sync::oneshot;
+
+    type Done = oneshot::Sender<Result<Vec<u8>, String>>;
+
+    /// Runs on the main thread (`with_webview`), where WebKit also calls back.
+    pub fn capture(platform: PlatformWebview, done: Done) {
+        let done = Cell::new(Some(done));
+        let handler = RcBlock::new(move |image: *mut NSImage, _error: *mut NSError| {
+            // SAFETY: WebKit passes either a valid image or nil.
+            let result = unsafe { image.as_ref() }
+                .ok_or_else(|| "WebKit returned no snapshot".to_string())
+                .and_then(jpeg);
+            if let Some(done) = done.take() {
+                let _ = done.send(result);
+            }
+        });
+        // SAFETY: on macOS wry's platform webview is its WKWebView, alive for
+        // the duration of this main-thread callback; WebKit retains the block.
+        unsafe {
+            let view = &*platform.inner().cast::<WKWebView>();
+            view.takeSnapshotWithConfiguration_completionHandler(None, &handler);
+        }
+    }
+
+    fn jpeg(image: &NSImage) -> Result<Vec<u8>, String> {
+        let tiff = image
+            .TIFFRepresentation()
+            .ok_or_else(|| "the snapshot has no bitmap".to_string())?;
+        let bitmap = NSBitmapImageRep::imageRepWithData(&tiff)
+            .ok_or_else(|| "the snapshot bitmap is unreadable".to_string())?;
+        // SAFETY: an empty property dictionary is valid for every file type.
+        let data = unsafe {
+            bitmap.representationUsingType_properties(NSBitmapImageFileType::JPEG, &NSDictionary::new())
+        }
+        .ok_or_else(|| "the snapshot could not be encoded".to_string())?;
+        Ok(data.to_vec())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod snapshot {
+    use tauri::webview::PlatformWebview;
+    use tokio::sync::oneshot;
+
+    pub fn capture(_platform: PlatformWebview, done: oneshot::Sender<Result<Vec<u8>, String>>) {
+        let _ = done.send(Err("page snapshots are only available on macOS".to_string()));
+    }
+}
+
+/// Put the page away when the pane closes. The webview stays, hidden and
+/// blank, ready for the next peek; blanking stops any audio or video.
 #[tauri::command]
 pub fn page_peek_close(app: AppHandle) -> Result<(), String> {
-    match app.get_webview(PAGE_PEEK_LABEL) {
-        Some(webview) => webview.close().map_err(|error| error.to_string()),
-        None => Ok(()),
-    }
+    let Some(webview) = app.get_webview(PAGE_PEEK_LABEL) else {
+        return Ok(());
+    };
+    set_visible(&webview, false)?;
+    navigate_to(&webview, blank())
 }
 
 #[cfg(test)]

@@ -989,6 +989,20 @@ describe('Workflowy-style outline interactions', () => {
     }
   })
 
+  it('shows a zoomed bullet whose ancestor is collapsed', () => {
+    const alpha = collectBullets(editor.state.doc).find((entry) => entry.id === 'alpha')!
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(alpha.pos, undefined, {
+      ...alpha.node.attrs,
+      collapsed: true,
+    }))
+
+    setZoom(editor, 'alpha-child')
+
+    const ancestor = editor.view.dom.querySelector('[data-node-id="alpha"]')
+    expect(ancestor?.classList.contains('zoom-ancestor')).toBe(true)
+    expect(ancestor?.classList.contains('is-collapsed')).toBe(false)
+  })
+
   it('hoists a branch while retaining the single document', () => {
     setZoom(editor, 'alpha')
     const hidden = editor.view.dom.querySelector('[data-node-id="bravo"]')

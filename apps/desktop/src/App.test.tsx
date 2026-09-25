@@ -12,10 +12,11 @@ import App from './App'
 import { formatDailyDate, localCalendarDate } from './editor/dailyNotes'
 import { replayOutlineEvents, type EventEnvelope } from '@forage/domain'
 import { EMPTY_DOC } from './editor/emptyDoc'
+import { insertExtensionSkillResult } from './agent/insertIntoEditor'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeMocks.invoke }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeMocks.invoke, isTauri: () => false }))
 
 vi.mock('@tauri-apps/api/path', () => ({
   homeDir: async () => '/home/test',
@@ -385,6 +386,53 @@ describe('App view switching', () => {
 
     await user.keyboard('{Control>}z{/Control}')
     expect(paragraphTexts()).not.toContain('a')
+  })
+
+  it('undoes tags an extension added to a bullet', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const dom = container.querySelector('.ProseMirror') as HTMLElement & { editor: import('@tiptap/core').Editor }
+    await user.click(dom)
+    await user.keyboard('Ship it')
+    let nodeId = ''
+    dom.editor.state.doc.descendants((node) => {
+      if (node.type.name === 'listItem' && node.firstChild?.textContent === 'Ship it') nodeId = String(node.attrs.nodeId)
+    })
+    const paragraphTexts = () => [...dom.querySelectorAll(':scope p')].map((node) => node.textContent)
+
+    insertExtensionSkillResult(dom.editor as never, nodeId, 'run-tags', {
+      version: 2, nodes: [], sources: [], tags: [{ nodeId, add: ['build', 'later'] }],
+    }, [nodeId])
+    expect(paragraphTexts()).toContain('Ship it #build #later')
+
+    await user.keyboard('{Control>}z{/Control}')
+    expect(paragraphTexts()).toContain('Ship it')
+    expect(paragraphTexts()).not.toContain('Ship it #build #later')
+  })
+
+  it('routes the Edit menu undo and redo through the durable history', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const dom = container.querySelector('.ProseMirror') as HTMLElement & { editor: import('@tiptap/core').Editor }
+    await user.click(dom)
+    await user.keyboard('Ship it')
+    let nodeId = ''
+    dom.editor.state.doc.descendants((node) => {
+      if (node.type.name === 'listItem' && node.firstChild?.textContent === 'Ship it') nodeId = String(node.attrs.nodeId)
+    })
+    const paragraphTexts = () => [...dom.querySelectorAll(':scope p')].map((node) => node.textContent)
+    insertExtensionSkillResult(dom.editor as never, nodeId, 'run-tags', {
+      version: 2, nodes: [], sources: [], tags: [{ nodeId, add: ['build'] }],
+    }, [nodeId])
+
+    // WebKit's menu-driven undo arrives as beforeinput, never as a keydown.
+    const undo = new InputEvent('beforeinput', { inputType: 'historyUndo', bubbles: true, cancelable: true })
+    fireEvent(dom, undo)
+    expect(undo.defaultPrevented).toBe(true)
+    expect(paragraphTexts()).toContain('Ship it')
+
+    fireEvent(dom, new InputEvent('beforeinput', { inputType: 'historyRedo', bubbles: true, cancelable: true }))
+    expect(paragraphTexts()).toContain('Ship it #build')
   })
 
   it('captures immediate undo before hashing and persistence finish', async () => {

@@ -403,9 +403,11 @@ function createControls(editor: Editor, node: ProseMirrorNode): HTMLElement {
 function nodeClasses(
   entry: ReturnType<typeof collectBullets>[number],
   ui: OutlinerUiState,
+  zoomPath: ReadonlySet<string>,
 ): string[] {
   const classes: string[] = []
-  if (entry.node.attrs.collapsed && entry.id !== ui.zoomId) classes.push('is-collapsed')
+  // A collapsed zoom root or ancestor would hide the branch being viewed.
+  if (entry.node.attrs.collapsed && !zoomPath.has(entry.id)) classes.push('is-collapsed')
   if (entry.bulletKind === 'todo') classes.push('is-todo')
   if (entry.completed) classes.push('is-completed')
   if (!ui.zoomId) return classes
@@ -512,7 +514,7 @@ function buildDecorations(editor: Editor): DecorationSet {
   const viewingDailyNotes = Boolean(dailyNotes && zoomPath.has(dailyNotes.id))
   const decorations: Decoration[] = []
   for (const entry of entries) {
-    const classes = nodeClasses(entry, ui)
+    const classes = nodeClasses(entry, ui, zoomPath)
     const activity = ui.agentActivity[entry.id]
     if (activity?.notes.length) classes.push('is-agent-active')
     if (ui.zoomId && !zoomPath.has(entry.id) && !entry.ancestorIds.includes(ui.zoomId)) {

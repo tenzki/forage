@@ -558,6 +558,12 @@ export function OutlinerChrome({
   const [searchSession, setSearchSession] = useState(0)
   const [nodeMenu, setNodeMenu] = useNodeMenu()
   const [actionError, setActionError] = useState<string | null>(null)
+
+  // Zooming opens a new page: start it at the top. Keeping the old scroll
+  // offset left a link clicked low on a long page looking at empty space.
+  useEffect(() => {
+    document.querySelector<HTMLElement>('.outline-workspace')?.scrollTo?.({ top: 0 })
+  }, [zoomId])
   useDeepLinks(editor)
 
   const openMoveForCurrentBullet = useCallback(() => {

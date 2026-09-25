@@ -18,6 +18,7 @@ import { recordReplacedOutput, requestSkillRun, steeredPrompt } from './agent/sk
 import { takeAiOutput } from './agent/insertIntoEditor'
 import { isExtensionSkill } from './agent/definitions'
 import { LinkPeekPane } from './components/Outliner/LinkPeekPane'
+import { pagePeekAvailable, preparePage } from './components/Outliner/pagePeek'
 import { OUTLINE_LINK_PEEK_EVENT, type LinkPeekRequest } from './editor/externalLinks'
 import type { ActivityEvent } from './agent/activity'
 import { applyActivityEvent, callsFromHistory, fromRuntimeEvent } from './agent/activityCalls'
@@ -59,6 +60,9 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
 import { useExtensionStore } from './store/extensionStore'
 import { placeRetainedExtensionSkillResult } from './agent/extensionResultPlacement'
+
+/** Delay before the link peek's page webview is created in the background. */
+const PAGE_PEEK_WARMUP_MS = 1500
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 
@@ -235,7 +239,17 @@ export default function App() {
 
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
 
-  // Links open in the reader peek beside the outline.
+  // Warm up the link peek's page webview once the app has settled, so the
+  // first link does not wait for a web content process to start.
+  useEffect(() => {
+    if (!pagePeekAvailable()) return undefined
+    const timer = window.setTimeout(() => {
+      void preparePage().catch(() => undefined)
+    }, PAGE_PEEK_WARMUP_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  // Links open in the peek pane beside the outline.
   useEffect(() => {
     const onPeek = (event: Event) => {
       const request = (event as CustomEvent<LinkPeekRequest>).detail
@@ -469,6 +483,26 @@ export default function App() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // On macOS the webview never sees Command+?; native code forwards it
+  // (src-tauri/src/shortcuts_key.rs).
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('forage-toggle-keyboard-shortcuts', () => {
+        setShortcutsOpen((open) => !open)
+      }))
+      .then((stopListening) => {
+        if (disposed) stopListening()
+        else unlisten = stopListening
+      })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
   }, [])
 
   const handleDocChange = useCallback((doc: JsonValue) => { liveDoc.current = doc }, [])

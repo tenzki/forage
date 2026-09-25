@@ -4881,17 +4881,25 @@ body.is-dragging-rule * {
     text-decoration: none;
   }
 
+  /* Stay inline: WebKit cannot move the caret up or down out of an
+     inline-block, so a title ending in a tag trapped ArrowDown. */
+  /* Sized in em so the chip follows its text, from a 15px bullet to a page title. */
   .outline-tag {
-    display: inline-block;
-    padding: 0 7px;
+    padding: 0.15em 0.55em;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
     border: 0;
     border-radius: var(--radius-s);
     background: var(--sage);
     color: var(--ink);
-    font-size: 12px;
+    font-size: 0.8em;
     font-weight: 400;
-    line-height: 20px;
-    vertical-align: 1px;
+    vertical-align: 0.08em;
+  }
+
+  .outliner-editor li.zoom-root > p .outline-tag {
+    font-size: 0.55em;
+    vertical-align: 0.3em;
   }
 
   .outline-tag:hover {
@@ -7297,6 +7305,17 @@ body.is-dragging-rule * {
     min-height: 0;
     flex: 1;
     background: var(--paper);
+  }
+
+  /* Stands in for the page while a dialog has it hidden. */
+  .link-peek-page-still {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top left;
+    pointer-events: none;
   }
 
   .link-peek-toolbar .is-spinning {

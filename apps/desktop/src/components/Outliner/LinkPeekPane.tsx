@@ -1,9 +1,9 @@
-// The link peek (Screen 08 in docs/desktop.pen): a reader pane beside the
-// outline. It shows the page as clean reader text fetched through Jina Reader,
-// lets the user clip a selection into the outline under the bullet that held
-// the link, or ask an agent to summarize the page there. "Page" shows the live
-// site in the same pane through a native webview laid over the page surface
-// (see pagePeek.ts), since the app's CSP forbids framing remote origins.
+// The link peek (Screen 08 in docs/desktop.pen): a pane beside the outline.
+// It opens on the live site, shown through a native webview laid over the page
+// surface (see pagePeek.ts) since the app's CSP forbids framing remote origins.
+// "Reader" swaps in clean text fetched through Jina Reader on demand. Either
+// way the user can clip into the outline under the bullet that held the link,
+// or ask an agent to summarize the page there.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Editor } from '@tiptap/react'
@@ -39,11 +39,13 @@ import {
   boundsOf,
   closePage,
   navigatePage,
+  loadPage,
   onPageState,
-  openPage,
   pagePeekAvailable,
   setPageBounds,
   setPageVisible,
+  showPage,
+  snapshotPage,
   type PageAction,
   type PageState,
 } from './pagePeek'
@@ -56,6 +58,10 @@ type ReaderState =
   | { status: 'error'; message: string }
 
 const COPIED_FEEDBACK_MS = 1400
+/** Frames the page surface must hold still before the live page is laid over it. */
+const SURFACE_STILL_FRAMES = 3
+/** Open the page regardless after this long, should the layout never settle. */
+const SURFACE_SETTLE_MAX_MS = 800
 const CLIPPED_FEEDBACK_MS = 1800
 /** Skills tried, in order, for "Summarize into outline". */
 const SUMMARY_SKILLS = ['research', 'ask']
@@ -161,12 +167,16 @@ export function LinkPeekPane({
   const [selection, setSelection] = useState('')
   const [copied, setCopied] = useState(false)
   const [clipped, setClipped] = useState(false)
-  const [mode, setMode] = useState<PeekMode>('reader')
+  const pageLive = pagePeekAvailable()
+  // The live page is the default; the reader is fetched only once it is asked for.
+  const [mode, setMode] = useState<PeekMode>(pageLive ? 'page' : 'reader')
   const [page, setPage] = useState<PageState | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
+  const [pageStill, setPageStill] = useState<string | null>(null)
+  /** The reader load already started for `href` and `reloadToken`, if any. */
+  const readerLoad = useRef<string | null>(null)
   const readerRef = useRef<HTMLDivElement>(null)
   const pageRef = useRef<HTMLDivElement>(null)
-  const pageLive = pagePeekAvailable()
   const skills = useSettingsStore((store) => store.skills)
   const href = history.entries[history.index]!
 
@@ -176,7 +186,12 @@ export function LinkPeekPane({
   }, [openedHref])
 
   useEffect(() => {
+    if (mode !== 'reader') return undefined
+    const key = `${reloadToken}:${href}`
+    if (readerLoad.current === key) return undefined
+    readerLoad.current = key
     const controller = new AbortController()
+    let settled = false
     setState({ status: 'loading' })
     setSelection('')
     fetchReaderDocument(href, controller.signal)
@@ -187,54 +202,124 @@ export function LinkPeekPane({
         if (controller.signal.aborted) return
         setState({ status: 'error', message: errorMessage(error) })
       })
+      .finally(() => {
+        settled = true
+      })
     readerRef.current?.scrollTo({ top: 0 })
-    return () => controller.abort()
-  }, [href, reloadToken])
+    return () => {
+      controller.abort()
+      // Leaving mid-load: fetch again next time the reader is shown.
+      if (!settled && readerLoad.current === key) readerLoad.current = null
+    }
+  }, [href, reloadToken, mode])
 
   // Show the live page over the page surface, or hide it while the reader is up.
+  //
+  // The page is a native view on top of this webview, so it has to follow the
+  // surface wherever the layout moves it; the surface is re-measured every
+  // frame, since not every move is a resize. The page starts loading at once,
+  // out of sight, but is only shown once the surface holds still: the pane
+  // opens with a column transition, and WebKit does not repaint a loading page
+  // it has been stretched over, leaving the newly covered area blank.
   useEffect(() => {
-    if (!pageLive) return
+    if (!pageLive) return undefined
     const surface = pageRef.current
     if (mode !== 'page' || !surface) {
       void setPageVisible(false).catch(() => undefined)
-      return
+      return undefined
     }
     setPageError(null)
     setPage((current) => current && sameUrl(current.url, href) ? current : null)
-    openPage(href, boundsOf(surface)).catch((error: unknown) => setPageError(errorMessage(error)))
+
+    let cancelled = false
+    let failed = false
+    const fail = (error: unknown) => {
+      failed = true
+      if (!cancelled) setPageError(errorMessage(error))
+    }
+    loadPage(href).catch(fail)
+    let phase: 'settling' | 'opening' | 'open' = 'settling'
+    let frame = 0
+    let placed = ''
+    let stillFrames = 0
+    const startedAt = performance.now()
+    const follow = () => {
+      const bounds = boundsOf(surface)
+      const key = `${bounds.x},${bounds.y},${bounds.width},${bounds.height},${bounds.viewportWidth},${bounds.viewportHeight}`
+      if (failed) return
+      if (phase === 'settling') {
+        stillFrames = key === placed ? stillFrames + 1 : 0
+        placed = key
+        if (stillFrames >= SURFACE_STILL_FRAMES || performance.now() - startedAt > SURFACE_SETTLE_MAX_MS) {
+          phase = 'opening'
+          showPage(bounds)
+            .then(() => {
+              phase = 'open'
+            })
+            .catch(fail)
+        }
+      } else if (phase === 'open' && key !== placed) {
+        placed = key
+        void setPageBounds(bounds).catch(() => {
+          placed = ''
+        })
+      }
+      frame = requestAnimationFrame(follow)
+    }
+    frame = requestAnimationFrame(follow)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(frame)
+    }
   }, [mode, href, pageLive])
 
-  // The page is a native view on top of this webview, so it has to follow the
-  // pane as the layout moves, and step aside while a modal dialog is up.
+  // A modal dialog is HTML, and the page is a native view over the HTML, so it
+  // would sit on top of the dialog. Step it aside while one is up, leaving a
+  // picture of it in its place so the pane does not blank out.
   useEffect(() => {
     if (!pageLive || mode !== 'page') return undefined
-    const surface = pageRef.current
-    if (!surface) return undefined
-    let frame = 0
-    const sync = () => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        void setPageBounds(boundsOf(surface)).catch(() => undefined)
-      })
-    }
     let covered = false
+    let turn = 0
+    let still: string | null = null
+    const release = () => {
+      if (still) URL.revokeObjectURL(still)
+      still = null
+    }
     const checkModal = () => {
       const next = Boolean(document.querySelector('[aria-modal="true"]'))
       if (next === covered) return
       covered = next
-      void setPageVisible(!covered).catch(() => undefined)
+      const current = ++turn
+      if (covered) {
+        void snapshotPage().catch(() => null).then((picture) => {
+          if (current !== turn) {
+            if (picture) URL.revokeObjectURL(picture)
+            return
+          }
+          release()
+          still = picture
+          setPageStill(picture)
+          return setPageVisible(false)
+        }).catch(() => undefined)
+      } else {
+        void setPageVisible(true).catch(() => undefined).then(() => {
+          // Drop the picture only once the page is back over it.
+          requestAnimationFrame(() => {
+            if (current !== turn) return
+            setPageStill(null)
+            release()
+          })
+        })
+      }
     }
-    const resizes = new ResizeObserver(sync)
-    resizes.observe(surface)
     const modals = new MutationObserver(checkModal)
     modals.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal'] })
-    window.addEventListener('resize', sync)
     checkModal()
     return () => {
-      cancelAnimationFrame(frame)
-      resizes.disconnect()
       modals.disconnect()
-      window.removeEventListener('resize', sync)
+      turn += 1
+      setPageStill(null)
+      release()
     }
   }, [mode, pageLive])
 
@@ -430,6 +515,7 @@ export function LinkPeekPane({
         <div className="link-peek-page" ref={pageRef}>
           {/* The live page is a native view drawn over this box; what is here
               shows only while it loads, or when it cannot be shown at all. */}
+          {pageStill && <img className="link-peek-page-still" src={pageStill} alt="" />}
           {(!pageLive || pageError) && (
             <div className="link-peek-status" role={pageError ? 'alert' : 'status'}>
               <strong>{pageError ? 'This page could not be shown here.' : 'Live pages open in the desktop app.'}</strong>
