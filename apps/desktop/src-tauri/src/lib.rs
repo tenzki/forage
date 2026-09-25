@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod commands;
+pub mod page_peek;
 pub mod persistence;
 pub mod server_stream;
 pub mod server_transport;
@@ -12,6 +13,12 @@ pub mod sync_commands;
 //   - plugin-opener: open the ChatGPT subscription login page
 //   - plugin-shell:  run the embedded Pi SDK in an isolated Node.js sidecar
 //   - plugin-dialog: pick local extension directories with the native folder picker
+
+/// Webviews that run the app's own pages. Any other webview, such as the link
+/// peek's embedded page, shows untrusted remote content. Tauri checks the
+/// capability ACL only for plugin commands and injects the IPC bridge into every
+/// page, so app commands are gated here.
+const TRUSTED_WEBVIEWS: &[&str] = &["main"];
 
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -36,7 +43,8 @@ pub fn run() {
             app.manage(server_stream::ServerStreamState::default());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler({
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             commands::event_store_append,
             commands::event_store_events_after,
             commands::event_store_events_before,
@@ -76,7 +84,11 @@ pub fn run() {
             commands::local_credential_remove,
             commands::asset_ingest_data_url,
             commands::asset_read,
-            commands::peek_page_url,
+            page_peek::page_peek_open,
+            page_peek::page_peek_set_bounds,
+            page_peek::page_peek_set_visible,
+            page_peek::page_peek_navigate,
+            page_peek::page_peek_close,
             sync_commands::server_enroll,
             sync_commands::server_seed_outline,
             commands::event_store_mark_seeded,
@@ -111,7 +123,15 @@ pub fn run() {
             sync_commands::server_agent_cancel,
             sync_commands::server_agent_retry,
             sync_commands::server_agent_place,
-        ])
+            ];
+            move |invoke| {
+                if !TRUSTED_WEBVIEWS.contains(&invoke.message.webview_ref().label()) {
+                    invoke.resolver.reject("app commands are not available to this webview");
+                    return true;
+                }
+                handler(invoke)
+            }
+        })
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())

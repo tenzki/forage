@@ -210,6 +210,63 @@ export function removeAiList(editor: Editor, rootNodeId: string): void {
   editor.view.dispatch(transaction)
 }
 
+/**
+ * Remove the agent output directly under an invocation bullet — its `ai`
+ * children and their subtrees — and return that output as indented text lines.
+ * A steered iteration uses this to replace the previous version.
+ */
+export function takeAiOutput(editor: Editor, invocationNodeId: string): string[] {
+  let invocation: { pos: number; node: ProseMirrorNode } | null = null
+  editor.state.doc.descendants((node, pos) => {
+    if (invocation) return false
+    if (node.type.name === 'listItem' && node.attrs.nodeId === invocationNodeId) {
+      invocation = { pos, node }
+      return false
+    }
+  })
+  if (!invocation) return []
+  const { pos: invocationPos, node: invocationNode } = invocation as { pos: number; node: ProseMirrorNode }
+  const lines: string[] = []
+  const ranges: Array<{ from: number; to: number }> = []
+  const collect = (item: ProseMirrorNode, depth: number) => {
+    lines.push(`${'  '.repeat(depth)}- ${item.firstChild?.textContent ?? ''}`)
+    item.forEach((child) => {
+      if (child.type.name === 'bulletList') child.forEach((grandchild) => collect(grandchild, depth + 1))
+    })
+  }
+  let offset = invocationPos + 1
+  invocationNode.forEach((child) => {
+    if (child.type.name === 'bulletList') {
+      let allAi = true
+      child.forEach((item) => { if (item.attrs.nodeType !== 'ai') allAi = false })
+      if (allAi) {
+        // An empty list is invalid, so a list of only agent output goes whole.
+        child.forEach((item) => collect(item, 0))
+        ranges.push({ from: offset, to: offset + child.nodeSize })
+      } else {
+        let itemPos = offset + 1
+        child.forEach((item) => {
+          if (item.attrs.nodeType === 'ai') {
+            collect(item, 0)
+            ranges.push({ from: itemPos, to: itemPos + item.nodeSize })
+          }
+          itemPos += item.nodeSize
+        })
+      }
+    }
+    offset += child.nodeSize
+  })
+  if (!ranges.length) return []
+  const transaction = editor.state.tr
+  // Delete back to front so earlier positions stay valid.
+  for (const range of [...ranges].reverse()) transaction.delete(range.from, range.to)
+  transaction.setMeta('addToHistory', false)
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', invocationNodeId)
+  editor.view.dispatch(transaction)
+  return lines
+}
+
 /** Split streamed text into the lines that should become bullets. */
 function toLines(text: string): string[] {
   // Models often separate ideas with blank lines. Empty list items create

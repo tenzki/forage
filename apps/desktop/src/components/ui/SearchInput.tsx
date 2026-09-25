@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { Search, X } from 'lucide-react'
 import { cn } from './cn'
+import { Kbd } from './Kbd'
 
 export type SearchInputProps = Readonly<{
   containerClassName?: string
@@ -85,9 +86,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
           </button>
         ) : null}
         {shortcutHint ? (
-          <kbd className="rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 shadow-xs">
-            {shortcutHint}
-          </kbd>
+          <Kbd>{shortcutHint}</Kbd>
         ) : null}
       </span>
     </div>

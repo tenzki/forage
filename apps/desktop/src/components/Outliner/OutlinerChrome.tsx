@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookmarkPlus,
+  ChevronRight,
   CalendarDays,
   Home,
   Inbox,
@@ -42,7 +43,6 @@ import {
 import { openOrCreateDailyNote } from '../../editor/dailyNotes'
 import { newNodeId } from '../../types/tree'
 import { OUTLINE_INTERNAL_LINK_EVENT } from '../../editor/internalLinks'
-import { useLinkPeek } from './useLinkPeek'
 import { OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut, TrashEntry } from '../../types/tree'
 import { NodeActions } from './NodeActions'
@@ -50,6 +50,8 @@ import { SearchInput } from '../ui/SearchInput'
 import { IconButton } from '../ui/IconButton'
 import { validateSystemNodeAction } from '../../editor/systemNodeGuards'
 import { useMotionPresence, type MotionPresenceState } from '../ui/useMotionPresence'
+import { FilterChip } from '../ui/FilterChip'
+import { Kbd } from '../ui/Kbd'
 
 function displayText(entry: BulletEntry): string {
   return entry.text.trim() || 'Untitled'
@@ -75,7 +77,7 @@ function Breadcrumbs({ editor, zoomId }: { editor: Editor; zoomId: string | null
       <button className="breadcrumb-home" onClick={() => setZoom(editor, null)}>Home</button>
       {path.map((entry) => (
         <span className="breadcrumb-segment" key={entry.id}>
-          <span aria-hidden="true">›</span>
+          <ChevronRight className="breadcrumb-separator" size={13} aria-hidden="true" />
           <button onClick={() => setZoom(editor, entry.id)}>{displayText(entry)}</button>
         </span>
       ))}
@@ -107,7 +109,7 @@ function Toolbar({
   onToggleActivitySidebar: () => void
 }) {
   return (
-    <div className="sticky top-0 z-20 flex min-h-12 items-center justify-between gap-4 border-b border-neutral-100 bg-white/90 px-3 py-2 backdrop-blur-xl">
+    <div className="outline-toolbar-bar sticky top-0 z-20 flex min-h-12 items-center justify-between gap-4 border-b border-neutral-200 bg-white px-3 py-2">
       <div className="flex min-w-0 items-center gap-1.5">
         <IconButton
           label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -140,6 +142,7 @@ function Toolbar({
             <ArrowRight size={16} aria-hidden="true" />
           </IconButton>
         </div>
+        <span className="toolbar-divider" aria-hidden="true" />
         <Breadcrumbs editor={editor} zoomId={zoomId} />
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -147,6 +150,7 @@ function Toolbar({
           label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
           title={`${activitySidebarCollapsed ? 'Expand' : 'Collapse'} activity sidebar (\u2318/ / Ctrl+/)`}
           aria-keyshortcuts="Meta+/ Control+/"
+          active={!activitySidebarCollapsed}
           onClick={onToggleActivitySidebar}
         >
           <span className="t-icon-swap" data-state={activitySidebarCollapsed ? 'a' : 'b'}>
@@ -186,10 +190,14 @@ function SearchResultRow({
         onMouseDown={(event) => event.preventDefault()}
         onClick={onChoose}
       >
-        <span className="search-result-title">{displayText(entry)}</span>
-        <small>
-          {entry.noteText ? `${path || 'Home'} · Note: ${entry.noteText}` : (path || 'Home')}
-        </small>
+        <span className="search-result-glyph" aria-hidden="true" />
+        <span className="search-result-copy">
+          <span className="search-result-title">{displayText(entry)}</span>
+          <small>
+            {entry.noteText ? `${path ? `Home › ${path}` : 'Home'} · Note: ${entry.noteText}` : (path ? `Home › ${path}` : 'Home')}
+          </small>
+        </span>
+        {active && <Kbd className="search-result-enter border-rule! bg-paper-raised!" aria-hidden="true">enter</Kbd>}
       </button>
     </li>
   )
@@ -213,6 +221,8 @@ function SearchResults({
   if (!query.trim() || (!entries.length && hasCommands)) return null
   if (!entries.length) return <p className="search-empty">No matching commands or bullets.</p>
   return (
+    <>
+    <h3 className="search-section-heading">Bullets · {entries.length}</h3>
     <ul className="search-results" aria-label="Matching bullets">
       {entries.map((entry, index) => (
         <SearchResultRow
@@ -224,6 +234,7 @@ function SearchResults({
         />
       ))}
     </ul>
+    </>
   )
 }
 
@@ -285,6 +296,8 @@ function SearchCommands({
 }) {
   if (!commands.length) return null
   return (
+    <>
+    <h3 className="search-section-heading">Commands</h3>
     <ul className="search-commands" aria-label="Commands">
       {commands.map((command, index) => (
         <li key={command.id} className={index === active ? 'active' : ''}>
@@ -301,7 +314,27 @@ function SearchCommands({
         </li>
       ))}
     </ul>
+    </>
   )
+}
+
+const SEARCH_FILTERS = [
+  { label: 'All', token: null },
+  { label: 'Todos', token: 'is:todo' },
+  { label: 'Open todos', token: 'is:open' },
+  { label: 'Completed', token: 'is:complete' },
+] as const
+
+const SEARCH_FILTER_PATTERN = /(^|\s)is:(todo|open|complete)(?=\s|$)/giu
+
+function searchFilterToken(query: string): string | null {
+  const match = query.match(/(?:^|\s)(is:(?:todo|open|complete))(?=\s|$)/iu)
+  return match ? match[1].toLowerCase() : null
+}
+
+function withSearchFilter(query: string, token: string | null): string {
+  const rest = query.replace(SEARCH_FILTER_PATTERN, ' ').replace(/\s+/gu, ' ').trim()
+  return [token, rest].filter(Boolean).join(' ')
 }
 
 function OutlineSearch({
@@ -348,6 +381,7 @@ function OutlineSearch({
     return commandTerms.every((term) => text.includes(term))
   })
   const resultCount = matchingCommands.length + results.length
+  const activeFilter = searchFilterToken(query)
 
   useEffect(() => {
     setQuery(initialQuery)
@@ -405,8 +439,9 @@ function OutlineSearch({
         aria-label="Search outline"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="border-b border-neutral-100 p-3">
+        <div className="search-input-row">
           <SearchInput
+            className="search-dialog-input h-12! border-0! bg-transparent! pl-10! text-[17px]! shadow-none!"
             ref={inputRef}
             value={query}
             onValueChange={changeQuery}
@@ -420,25 +455,38 @@ function OutlineSearch({
           />
         </div>
         <div className="search-options">
-          <div className="search-status-filters" aria-label="Todo filters">
-            <button onClick={() => changeQuery('is:todo')}>Todos</button>
-            <button onClick={() => changeQuery('is:open')}>Open</button>
-            <button onClick={() => changeQuery('is:complete')}>Completed</button>
+          <div className="search-status-filters" role="group" aria-label="Todo filters">
+            {SEARCH_FILTERS.map((filter) => (
+              <FilterChip
+                key={filter.label}
+                active={activeFilter === filter.token}
+                onClick={() => changeQuery(withSearchFilter(query, filter.token))}
+              >
+                {filter.label}
+              </FilterChip>
+            ))}
           </div>
           <SaveSearchControl
             query={query}
             onSave={(label) => onSaveSearch(query.trim(), label, null)}
           />
         </div>
-        <SearchCommands commands={matchingCommands} active={active} onChoose={chooseCommand} />
-        <SearchResults
-          entries={results}
-          allEntries={allEntries}
-          query={query}
-          active={active - matchingCommands.length}
-          hasCommands={matchingCommands.length > 0}
-          onChoose={choose}
-        />
+        <div className="search-body">
+          <SearchCommands commands={matchingCommands} active={active} onChoose={chooseCommand} />
+          <SearchResults
+            entries={results}
+            allEntries={allEntries}
+            query={query}
+            active={active - matchingCommands.length}
+            hasCommands={matchingCommands.length > 0}
+            onChoose={choose}
+          />
+        </div>
+        <footer className="search-footer" aria-hidden="true">
+          <span><Kbd>up/down</Kbd> navigate</span>
+          <span><Kbd>enter</Kbd> open</span>
+          <span><Kbd>esc</Kbd> close</span>
+        </footer>
       </section>
     </div>
   )
@@ -616,8 +664,6 @@ export function OutlinerChrome({
     window.addEventListener(OUTLINE_TAG_EVENT, openTag)
     return () => window.removeEventListener(OUTLINE_TAG_EVENT, openTag)
   }, [])
-
-  useLinkPeek()
 
   useEffect(() => {
     const openInternalLink = (event: Event) => {

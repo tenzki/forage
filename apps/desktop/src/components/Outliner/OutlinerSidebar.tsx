@@ -27,6 +27,20 @@ import {
 import { collectTags, OUTLINE_TAG_EVENT } from '../../editor/tags'
 import type { OutlineShortcut } from '../../types/tree'
 import { newNodeId } from '../../types/tree'
+import { ForageLockup, ForageMark } from '../ForageMark'
+import { cn } from '../ui/cn'
+import { CountBadge } from '../ui/CountBadge'
+import { Kbd } from '../ui/Kbd'
+
+export interface SidebarStorageStatus {
+  /** Short storage location, e.g. `local` or `server`. */
+  location: string
+  /** Current save/sync state, e.g. `saved` or `syncing`. */
+  state: string
+  tone: 'ok' | 'busy' | 'error'
+  /** Full description for assistive technology and the tooltip. */
+  description: string
+}
 
 interface OutlinerSidebarProps {
   editor: Editor | null
@@ -43,6 +57,7 @@ interface OutlinerSidebarProps {
   onOpenSettings?: () => void
   onOpenTrash?: () => void
   onOpenTasks?: () => void
+  storageStatus?: SidebarStorageStatus
 }
 
 interface ShortcutDragGhost {
@@ -129,6 +144,7 @@ export function OutlinerSidebar({
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
   onOpenTasks = () => undefined,
+  storageStatus,
 }: OutlinerSidebarProps) {
   const [, setRevision] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -287,6 +303,9 @@ export function OutlinerSidebar({
 
   return (
     <aside ref={sidebarRef} className={`outline-sidebar${collapsed ? ' is-collapsed' : ''}${dragOver ? ' is-drop-target' : ''}`} aria-label="Outline sidebar">
+      <div className="sidebar-brand">
+        {collapsed ? <ForageMark className="sidebar-brand-mark" /> : <ForageLockup />}
+      </div>
       <button
         className="sidebar-search"
         onClick={openSearch}
@@ -296,7 +315,7 @@ export function OutlinerSidebar({
       >
         <SearchIcon className="sidebar-primary-icon" aria-hidden="true" />
         <span className="sidebar-primary-label">Search</span>
-        <kbd className="sidebar-search-kbd">⌘K</kbd>
+        <Kbd className={cn('sidebar-search-kbd ml-auto', collapsed && 'hidden!')}>⌘K</Kbd>
       </button>
       <div className="sidebar-top-row">
         <button
@@ -336,7 +355,7 @@ export function OutlinerSidebar({
         >
           <ListTodo className="sidebar-primary-icon" aria-hidden="true" />
           <span className="sidebar-primary-label">Tasks</span>
-          <span className="sidebar-tasks-count" aria-hidden="true">{taskCount}</span>
+          <CountBadge className={cn('sidebar-tasks-count ml-auto', collapsed && 'hidden!')} aria-hidden="true">{taskCount}</CountBadge>
         </button>
       </nav>
       {!collapsed && (
@@ -424,8 +443,21 @@ export function OutlinerSidebar({
         >
           <Trash2 className="sidebar-primary-icon" aria-hidden="true" />
           <span className="sidebar-primary-label">Trash</span>
-          {trashCount > 0 && <span className="sidebar-trash-count">{trashCount}</span>}
+          {trashCount > 0 && <CountBadge className={cn('sidebar-trash-count ml-auto', collapsed && 'hidden!')}>{trashCount}</CountBadge>}
         </button>
+        {storageStatus && (
+          <div
+            className={`storage-backend-widget sidebar-storage-status is-${storageStatus.tone}`}
+            role="status"
+            aria-label={storageStatus.description}
+            title={storageStatus.description}
+          >
+            <span className="sidebar-storage-dot" aria-hidden="true" />
+            <span className="sidebar-storage-label">{storageStatus.location}</span>
+            <span className="sidebar-storage-state" aria-hidden="true">·</span>
+            <span className="sidebar-storage-state">{storageStatus.state}</span>
+          </div>
+        )}
       </nav>
       {dragOver && <div className="sidebar-drop-message">Drop to add shortcut</div>}
       {shortcutGhost && (

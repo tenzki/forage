@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.2",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@forage/agent-runtime": "workspace:*",
     "@forage/document": "workspace:*",
     "@forage/domain": "workspace:*",

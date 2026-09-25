@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Compass, Keyboard, ListTree, PencilLine, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { MotionPresenceState } from './ui/useMotionPresence'
+import { Kbd } from './ui/Kbd'
 
 interface ShortcutItem {
   label: string
@@ -73,12 +74,9 @@ function ShortcutKeys({ chords }: { chords: string[][] }) {
         <span className="flex items-center gap-1" key={keys.join('-')}>
           {chordIndex > 0 && <span className="px-0.5 text-[10px] text-neutral-400">or</span>}
           {keys.map((key) => (
-            <kbd
-              className="min-w-6 rounded-md border border-neutral-200 bg-neutral-50 px-1.5 py-1 text-center font-mono text-[10px] font-medium leading-none text-neutral-600 shadow-[0_1px_0_white_inset,0_1px_1px_rgb(0_0_0/0.04)]"
-              key={key}
-            >
+            <Kbd className="min-w-5 justify-center" key={key}>
               {key}
-            </kbd>
+            </Kbd>
           ))}
         </span>
       ))}
@@ -192,7 +190,7 @@ export function KeyboardShortcutsPanel({
         </div>
         <footer className="flex items-center justify-between gap-3 border-t border-neutral-100 bg-neutral-50/70 px-5 py-3 text-[11px] text-neutral-400">
           <span>{IS_APPLE_PLATFORM ? 'Use Ctrl instead of ⌘ on Windows and Linux.' : 'Use ⌘ instead of Ctrl on macOS.'}</span>
-          <span className="flex shrink-0 items-center gap-1.5"><kbd className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 font-mono text-[9px] text-neutral-500 shadow-xs">Esc</kbd> to close</span>
+          <span className="flex shrink-0 items-center gap-1.5"><Kbd>Esc</Kbd> to close</span>
         </footer>
       </section>
     </div>,

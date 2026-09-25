@@ -1,10 +1,13 @@
 import { useState } from 'react'
+import { Button, type ButtonSize, type ButtonVariant } from '../ui/Button'
 
 interface ConfirmButtonProps {
   label: string
   confirmLabel: string
   onConfirm: () => void
   className?: string
+  variant?: ButtonVariant
+  size?: ButtonSize
   ariaLabel?: string
   confirmAriaLabel?: string
   disabled?: boolean
@@ -14,7 +17,9 @@ export function ConfirmButton({
   label,
   confirmLabel,
   onConfirm,
-  className = '',
+  className,
+  variant = 'secondary',
+  size = 'md',
   ariaLabel,
   confirmAriaLabel,
   disabled = false,
@@ -22,9 +27,10 @@ export function ConfirmButton({
   const [confirming, setConfirming] = useState(false)
 
   return (
-    <button
-      type="button"
-      className={`danger-action ${className}`.trim()}
+    <Button
+      variant={variant}
+      size={size}
+      className={className}
       aria-label={confirming ? confirmAriaLabel : ariaLabel}
       disabled={disabled}
       onBlur={() => setConfirming(false)}
@@ -41,6 +47,6 @@ export function ConfirmButton({
       }}
     >
       {confirming ? confirmLabel : label}
-    </button>
+    </Button>
   )
 }

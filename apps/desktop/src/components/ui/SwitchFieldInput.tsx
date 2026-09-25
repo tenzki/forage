@@ -13,7 +13,7 @@ export interface SwitchFieldInputProps {
   actions?: ReactNode
 }
 
-// Adapted from OpenSourceUI's SwitchFieldInput (MIT) for Forage settings rows.
+// Adapted from OpenSourceUI's SwitchFieldInput (MIT); styled as `Settings/Switch Row` in docs/desktop.pen.
 export function SwitchFieldInput({
   checked,
   onCheckedChange,
@@ -31,11 +31,11 @@ export function SwitchFieldInput({
     <div
       data-slot="switch-field-input"
       data-checked={checked || undefined}
-      className={cn('flex w-full items-start justify-between gap-4 rounded-xl px-3 py-3 transition-colors hover:bg-neutral-50', className)}
+      className={cn('flex w-full items-center justify-between gap-4 border-b border-rule-soft bg-paper-raised px-4 py-3 last:border-b-0', className)}
     >
       <div className="min-w-0 flex-1">
-        <p id={`${id}-label`} className="text-sm font-medium text-neutral-900">{label}</p>
-        {hint ? <div id={hintId} className="mt-0.5 text-xs leading-5 text-neutral-500">{hint}</div> : null}
+        <p id={`${id}-label`} className="text-sm leading-5 font-normal text-ink">{label}</p>
+        {hint ? <div id={hintId} className="mt-[3px] text-xs leading-[1.45] text-moss">{hint}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Switch

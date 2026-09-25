@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/react'
 import { restoreBullet } from '../../editor/outlineModel'
 import { extractText, type TrashEntry } from '../../types/tree'
 import { SecondaryViewHeader } from '../SecondaryViewHeader'
+import { Button } from '../ui/Button'
 
 interface TrashPanelProps {
   editor: Editor
@@ -49,9 +50,14 @@ export function TrashPanel({ editor, entries, onClose, onChange, onRestore, onPu
 
   return (
     <div className="secondary-view t-panel-slide" data-open="true">
-      <SecondaryViewHeader title="Trash" onBack={onClose} />
+      <SecondaryViewHeader onBack={onClose} />
       <section className="trash-page" aria-label="Trash contents">
-        <p className="trash-description">Deleted branches remain here until permanently removed.</p>
+        <div className="secondary-page-heading">
+          <div>
+            <h1 className="secondary-page-title">Trash</h1>
+            <p className="secondary-page-description trash-description">Deleted branches remain here until permanently removed.</p>
+          </div>
+        </div>
         {entries.length === 0 ? (
           <p className="trash-empty">Trash is empty.</p>
         ) : (
@@ -64,9 +70,9 @@ export function TrashPanel({ editor, entries, onClose, onChange, onRestore, onPu
                 </span>
                 <div>
                   <button onClick={() => restore(entry)}>Restore</button>
-                  <button className="danger-action" onClick={() => purge(entry)}>
+                  <Button variant="danger" onClick={() => purge(entry)}>
                     {confirmId === entry.id ? 'Confirm delete' : 'Delete forever'}
-                  </button>
+                  </Button>
                 </div>
               </li>
             ))}

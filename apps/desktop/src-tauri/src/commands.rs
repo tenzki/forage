@@ -12,9 +12,6 @@ pub struct NativeState {
     pub http_client: reqwest::Client,
 }
 
-/// Label of the page-peek window, mirrored from `useLinkPeek.tsx`.
-const PEEK_WINDOW_LABEL: &str = "link-peek";
-
 const SERVER_AGENT_CONFIGURATION_MIRROR_KEY: &str = "server_agent_configuration_mirror";
 const REMEMBERED_SERVER_RUNS_KEY: &str = "remembered_server_runs";
 const SERVER_PROVISIONING_STATE_KEY: &str = "server_provisioning_state";
@@ -594,18 +591,4 @@ pub fn local_credential_remove(
         .event_store
         .remove_credential(&reference)
         .map_err(command_error)
-}
-
-/// The URL the page peek is currently showing.
-///
-/// The peeked window holds no capability of its own and is a remote page, so it
-/// cannot report its own address; and the JS API exposes no accessor for another
-/// webview's current URL. This reads it natively so the peek's header bar can
-/// follow the page as the user navigates inside it.
-#[tauri::command]
-pub fn peek_page_url(app: tauri::AppHandle) -> Option<String> {
-    use tauri::Manager;
-    app.get_webview_window(PEEK_WINDOW_LABEL)
-        .and_then(|peek| peek.url().ok())
-        .map(|url| url.to_string())
 }

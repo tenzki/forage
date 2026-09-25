@@ -2,6 +2,7 @@ import type { ActivityEvent as RuntimeActivityEvent } from '@forage/agent-runtim
 import type { ActivityCall, ActivityEntry, ActivityStatus } from '../components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './activity'
 import type { LocalAgentRunHistory } from '../persistence/eventStore'
+import { parseSteeredPrompt } from './skillRuns'
 
 /** Newest calls are kept; older ones fall off the sidebar. */
 export const MAX_ACTIVITY_CALLS = 100
@@ -50,6 +51,7 @@ export function applyActivityEvent(
       durationMs: isCallEvent ? event.durationMs : undefined,
       nodeId: isCallEvent ? event.nodeId : undefined,
       placementPending: event.placementPending,
+      ...(isCallEvent && event.note ? { note: event.note } : {}),
       events: isCallEvent ? [] : [nextEvent],
     }].slice(-MAX_ACTIVITY_CALLS)
   }
@@ -123,15 +125,18 @@ export function callsFromHistory(history: LocalAgentRunHistory[], now: number = 
     const startedAt = timestamp(entry.run.createdAt, now)
     const settledAt = timestamp(entry.run.updatedAt, startedAt)
     const status = runStatus(entry.run)
-    const prompt = entry.run.snapshot.version === 2
+    const storedPrompt = entry.run.snapshot.version === 2
       ? entry.run.snapshot.context.prompt
       : entry.run.snapshot.prompt
+    // A steered iteration stores the revision request inside its prompt.
+    const { basePrompt: prompt, note } = parseSteeredPrompt(storedPrompt)
     const withCall = applyActivityEvent(calls, {
       id: entry.run.id,
       phase: 'complete',
       kind: 'skill',
       label: runActivityLabel(entry.run.snapshot.skill.label, prompt),
       detail: prompt || undefined,
+      ...(note ? { note } : {}),
       status,
       nodeId: entry.run.snapshot.source.nodeId,
       placementPending: entry.run.status === 'completed_unplaced',

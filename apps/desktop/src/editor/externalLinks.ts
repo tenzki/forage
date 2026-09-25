@@ -10,6 +10,7 @@
 
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import type { EditorView } from '@tiptap/pm/view'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { normalizedUrl } from '../components/Outliner/FormattingBubbleMenu'
 
@@ -27,8 +28,31 @@ export function openExternally(href: string): void {
   }
 }
 
-export function requestLinkPeek(href: string): void {
-  window.dispatchEvent(new CustomEvent(OUTLINE_LINK_PEEK_EVENT, { detail: { href } }))
+export interface LinkPeekRequest {
+  href: string
+  /** The bullet holding the link, where Clip and Summarize write. */
+  sourceNodeId?: string
+}
+
+export function requestLinkPeek(href: string, sourceNodeId?: string | null): void {
+  const detail: LinkPeekRequest = { href, ...(sourceNodeId ? { sourceNodeId } : {}) }
+  window.dispatchEvent(new CustomEvent(OUTLINE_LINK_PEEK_EVENT, { detail }))
+}
+
+/** The id of the bullet whose text contains `element`, if any. */
+export function bulletIdAtDom(view: EditorView, element: Node): string | null {
+  let pos: number
+  try {
+    pos = view.posAtDOM(element, 0)
+  } catch {
+    return null
+  }
+  const $pos = view.state.doc.resolve(pos)
+  for (let depth = $pos.depth; depth > 0; depth -= 1) {
+    const node = $pos.node(depth)
+    if (node.type.name === 'listItem' && node.attrs.nodeId) return node.attrs.nodeId as string
+  }
+  return null
 }
 
 export const ExternalLink = Extension.create({
@@ -39,7 +63,7 @@ export const ExternalLink = Extension.create({
       key: externalLinkPluginKey,
       props: {
         handleDOMEvents: {
-          click: (_view, event) => {
+          click: (view, event) => {
             const anchor = event.target instanceof Element
               ? event.target.closest<HTMLAnchorElement>('a[href]')
               : null
@@ -59,7 +83,7 @@ export const ExternalLink = Extension.create({
             if (href.startsWith('mailto:') || event.metaKey || event.ctrlKey) {
               openExternally(href)
             } else {
-              requestLinkPeek(href)
+              requestLinkPeek(href, bulletIdAtDom(view, anchor))
             }
             return true
           },

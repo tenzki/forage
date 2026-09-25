@@ -1,17 +1,23 @@
 import { useState } from 'react'
+import { Activity } from 'lucide-react'
 import {
   probeCodexRuntime,
   probePiRuntime,
   type PiRuntimeStatus,
 } from '../../agent/piSdkClient'
+import { Button } from '../ui/Button'
+import { ResultRow } from '../ui/ResultRow'
 
-function RuntimeResult({ label, status }: { label: string; status: PiRuntimeStatus | null }) {
+function RuntimeResult({ label, status, checking }: { label: string; status: PiRuntimeStatus | null; checking: boolean }) {
+  if (checking) return <ResultRow state="pending" title={`Checking ${label}…`} />
+  if (!status) return <ResultRow state="unchecked" title={`${label} not checked`} />
   return (
-    <div className="runtime-result">
-      <strong>{status?.available ? `${label} is available` : status ? `${label} is unavailable` : `${label} not checked`}</strong>
-      {status?.version && <code>{status.version}</code>}
-      {status?.error && <small>{status.error}</small>}
-    </div>
+    <ResultRow
+      state={status.available ? 'ok' : 'error'}
+      title={status.available ? `${label} is available` : `${label} is unavailable`}
+      detail={status.version}
+      error={status.error}
+    />
   )
 }
 
@@ -39,16 +45,18 @@ export function PiRuntimeSettings() {
         Subscription image generation runs in an isolated, ephemeral Codex
         app-server process with external tools disabled and read-only sandboxing.
       </p>
-      <div className="auth-card runtime-status" aria-live="polite">
-        <RuntimeResult label="Node.js" status={piStatus} />
-        <RuntimeResult label="Codex" status={codexStatus} />
-        <p className="settings-hint">
+      <div className="flex flex-col gap-3.5 rounded-[10px] border border-rule-soft bg-paper px-[18px] pt-2 pb-[18px]" aria-live="polite">
+        <div className="flex flex-col">
+          <RuntimeResult label="Node.js" status={piStatus} checking={checking} />
+          <RuntimeResult label="Codex" status={codexStatus} checking={checking} />
+        </div>
+        <p className="m-0 text-xs leading-[1.45] text-moss">
           Development requires Node.js 18+ and Codex 0.148.0+ on PATH.
           The sidecar runs via tsx with its own package dependencies in src-tauri/resources/pi/sidecar/.
         </p>
-        <button className="settings-save" disabled={checking} onClick={() => void checkRuntimes()}>
+        <Button variant="primary" icon={<Activity aria-hidden="true" />} className="self-start" disabled={checking} onClick={() => void checkRuntimes()}>
           {checking ? 'Checking…' : 'Check agent runtimes'}
-        </button>
+        </Button>
       </div>
     </section>
   )

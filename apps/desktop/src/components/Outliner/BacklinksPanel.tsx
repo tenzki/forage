@@ -1,4 +1,4 @@
-import { CornerUpLeft } from 'lucide-react'
+import { Link2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { collectBacklinks, soleInternalLinkTarget } from '../../editor/internalLinks'
@@ -42,24 +42,45 @@ export function BacklinksPanel({ editor, targetId }: BacklinksPanelProps) {
     return [owner.id, owner]
   })).values()]
 
+  const targetTitle = byId.get(resolvedTargetId)?.text.trim() ?? ''
+
   return (
     <section className="outline-backlinks" aria-label="Backlinks">
-      <h2><CornerUpLeft size={13} aria-hidden="true" /> Linked from</h2>
+      <h2>
+        <Link2 size={14} aria-hidden="true" />
+        {owners.length} linked reference{owners.length === 1 ? '' : 's'}
+      </h2>
       <ul>
         {owners.map((source) => {
-          const path = [
-            ...source.ancestorIds.map((id) => byId.get(id)?.text.trim()),
-            source.text.trim() || 'Untitled',
-          ].filter(Boolean).join(' › ')
+          const ancestors = source.ancestorIds
+            .map((id) => byId.get(id)?.text.trim())
+            .filter((text): text is string => Boolean(text))
+          const excerpt = source.text.trim() || 'Untitled'
+          const path = [...ancestors, excerpt].join(' › ')
           return (
             <li key={source.id}>
-              <button onClick={() => { setZoom(editor, source.id); selectBullet(editor, source.id) }}>
-                <span>{path}</span>
+              <button aria-label={path} onClick={() => { setZoom(editor, source.id); selectBullet(editor, source.id) }}>
+                <small className="outline-backlink-source">{ancestors.join(' › ') || 'Home'}</small>
+                <span className="outline-backlink-excerpt">
+                  <BacklinkExcerpt text={excerpt} target={targetTitle} />
+                </span>
               </button>
             </li>
           )
         })}
       </ul>
     </section>
+  )
+}
+
+function BacklinkExcerpt({ text, target }: { text: string; target: string }) {
+  const index = target ? text.indexOf(target) : -1
+  if (index < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="outline-backlink-target">{target}</span>
+      {text.slice(index + target.length)}
+    </>
   )
 }

@@ -30,6 +30,7 @@ import {
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ActivityReporter } from '../../agent/activity'
 import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
+import { OUTLINE_RUN_SKILL_EVENT, type SkillRunRequest, type SkillRunSteering } from '../../agent/skillRuns'
 import {
   nativeLocalCredentialVault,
   resolveExtensionExecutorSecretValues,
@@ -359,6 +360,15 @@ export function SlashMenu({
       onError('Could not find the skill invocation bullet.')
       return
     }
+    runSkill(skill, prompt, invocationNodeId)
+  }
+
+  /**
+   * Run `skill` for the bullet `invocationNodeId`. `steering` marks a follow-up
+   * iteration: the call keeps its original label and records the user's note.
+   */
+  function runSkill(skill: SkillDefinition, prompt: string, invocationNodeId: string, steering?: SkillRunSteering): void {
+    if (!editor) return
     if (isExtensionSkill(skill)) {
       const runId = crypto.randomUUID()
       const controller = new AbortController()
@@ -518,7 +528,7 @@ export function SlashMenu({
     // One call id per run keeps every event of this invocation in a single sidebar group.
     const runId = crypto.randomUUID()
     const startedAt = Date.now()
-    const callLabel = runActivityLabel(skill.label, prompt)
+    const callLabel = runActivityLabel(skill.label, steering?.basePrompt ?? prompt)
     let localOutputNodeId: string | null = null
     onActivity?.({
       id: runId,
@@ -526,7 +536,8 @@ export function SlashMenu({
       kind: 'skill',
       label: callLabel,
       nodeId: invocationNodeId,
-      ...(prompt ? { detail: prompt } : {}),
+      ...(prompt ? { detail: steering?.basePrompt ?? prompt } : {}),
+      ...(steering ? { note: steering.note } : {}),
     })
     void (async () => {
       const mode = await repository.storageMode()
@@ -540,7 +551,8 @@ export function SlashMenu({
           skillId: skill.id, prompt: prompt || skill.label,
           acknowledgedOutlineRevision: sync.lastPulledRevision,
         }, (event) => onActivity?.(fromRuntimeEvent(event, runId)))
-        const completed = await handle.completion
+        onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
+        const completed = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
         if (completed.status === 'completed_unplaced') {
           onActivity?.({
             id: `placement-${runId}`, callId: runId, phase: 'error', kind: 'output',
@@ -622,7 +634,8 @@ export function SlashMenu({
           streamedText = nextText
         },
       })
-      const result = await handle.completion
+      onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
+      const result = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
       setAgentActivity(editor, localOutputNodeId, null)
       const [resultNodeId] = commitStructuredAgentResultInto(
         editor,
@@ -639,6 +652,11 @@ export function SlashMenu({
       if (localOutputNodeId) {
         setAgentActivity(editor, localOutputNodeId, null)
         removeAiList(editor, localOutputNodeId)
+      }
+      if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') {
+        onActivity?.({ id: runId, phase: 'cancelled', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
+        onError(null)
+        return
       }
       onActivity?.({
         id: runId,
@@ -657,6 +675,26 @@ export function SlashMenu({
     setContextError(null)
     setMenu(null)
   }
+
+  const runSkillRef = useRef(runSkill)
+  runSkillRef.current = runSkill
+
+  // Runs requested elsewhere: the reader's Summarize and activity steering.
+  useEffect(() => {
+    if (!editor) return
+    const onRunRequest = (event: Event) => {
+      const request = (event as CustomEvent<SkillRunRequest>).detail
+      if (!request) return
+      const skill = useSettingsStore.getState().skills.find((candidate) => candidate.label === request.skillLabel)
+      if (!skill) {
+        onError(`/${request.skillLabel} no longer exists.`)
+        return
+      }
+      runSkillRef.current(skill, request.prompt, request.invocationNodeId, request.steering)
+    }
+    window.addEventListener(OUTLINE_RUN_SKILL_EVENT, onRunRequest)
+    return () => window.removeEventListener(OUTLINE_RUN_SKILL_EVENT, onRunRequest)
+  }, [editor, onError])
 
   if (!menu || matches.length === 0) return null
 

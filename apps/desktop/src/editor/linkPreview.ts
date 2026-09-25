@@ -38,11 +38,14 @@ export function parseReaderResponse(body: string): { title?: string; description
   const titleLine = headerLines.find((line) => /^Title:/u.test(line))
   const title = titleLine ? clamp(titleLine.replace(/^Title:/u, ''), MAX_TITLE) : undefined
 
-  const body_ = contentAt === -1 ? [] : lines.slice(contentAt + 1)
+  const body_ = contentAt === -1 ? [] : lines.slice(contentAt + 1).map((line) => line.trim())
   const description = body_
-    .map((line) => line.trim())
-    // Skip Markdown chrome — headings, images, links-only lines, rules, quotes.
-    .find((line) => line.length > 0 && !/^(#{1,6}\s|!\[|\[|[-*_=]{3,}|>|\||```)/u.test(line))
+    // Skip Markdown chrome — headings (including underlined ones and a repeated
+    // title), images, links-only lines, rules, quotes.
+    .find((line, index) => line.length > 0
+      && !/^(#{1,6}\s|!\[|\[|[-*_=]{3,}|>|\||```)/u.test(line)
+      && !/^(=+|-+)$/u.test(body_[index + 1] ?? '')
+      && line !== title)
   return {
     title: title || undefined,
     description: description ? clamp(description, MAX_DESCRIPTION) : undefined,
@@ -99,6 +102,12 @@ export function ensurePreview(href: string, onSettled?: () => void): LinkPreview
 
   if (onSettled) void inFlight.get(href)?.then(onSettled)
   return cache.get(href) ?? { status: 'loading', host: hostOf(href) }
+}
+
+/** Drop a failed preview and fetch it again. */
+export function retryPreview(href: string, onSettled?: () => void): LinkPreview {
+  if (!inFlight.has(href)) cache.delete(href)
+  return ensurePreview(href, onSettled)
 }
 
 /** Test seam. */

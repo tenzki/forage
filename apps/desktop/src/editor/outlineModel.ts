@@ -627,6 +627,69 @@ export function focusFirstChildOrCreate(editor: Editor, parentId: string, nextId
   return childId
 }
 
+/** A run of bullet text, optionally linked. */
+export interface BulletTextSegment {
+  text: string
+  href?: string
+}
+
+/**
+ * Append a new user bullet as the last child of `parentId` and put the cursor
+ * at its end. `content` is plain text, or segments some of which are links.
+ * Returns the new bullet's id.
+ */
+export function appendChildBullet(
+  editor: Editor,
+  parentId: string,
+  content: string | BulletTextSegment[],
+): string | null {
+  const parent = findBullet(editor.state.doc, parentId)
+  if (!parent) return null
+  const { schema } = editor
+  const childId = newNodeId()
+  const segments: BulletTextSegment[] = typeof content === 'string' ? [{ text: content }] : content
+  const inline = segments.filter((segment) => segment.text).map((segment) => {
+    const mark = segment.href ? schema.marks.link?.create({ href: segment.href }) : null
+    return schema.text(segment.text, mark ? [mark] : undefined)
+  })
+  const child = schema.nodes.listItem.create({
+    nodeId: childId,
+    nodeType: 'user',
+    collapsed: false,
+    bulletKind: 'bullet',
+    completed: false,
+    systemRole: null,
+    dailyDate: null,
+  }, schema.nodes.paragraph.create(null, inline))
+  const transaction = editor.state.tr
+  if (parent.node.attrs.collapsed) {
+    transaction.setNodeMarkup(parent.pos, undefined, { ...parent.node.attrs, collapsed: false })
+  }
+  let nestedListOffset = -1
+  let nestedListSize = 0
+  let childOffset = 0
+  parent.node.forEach((node) => {
+    if (nestedListOffset < 0 && node.type === schema.nodes.bulletList) {
+      nestedListOffset = childOffset
+      nestedListSize = node.nodeSize
+    }
+    childOffset += node.nodeSize
+  })
+  if (nestedListOffset < 0) {
+    transaction.insert(parent.pos + parent.node.nodeSize - 1, schema.nodes.bulletList.create(null, child))
+  } else {
+    // Just inside the end of the existing child list.
+    transaction.insert(parent.pos + 1 + nestedListOffset + nestedListSize - 1, child)
+  }
+  editor.view.dispatch(transaction.scrollIntoView())
+  const inserted = findBullet(editor.state.doc, childId)
+  if (inserted) {
+    editor.commands.setTextSelection(inserted.pos + 2 + inserted.node.firstChild!.content.size)
+    editor.commands.focus()
+  }
+  return childId
+}
+
 export function selectBullet(editor: Editor, nodeId: string): boolean {
   const entry = findBullet(editor.state.doc, nodeId)
   if (!entry) return false

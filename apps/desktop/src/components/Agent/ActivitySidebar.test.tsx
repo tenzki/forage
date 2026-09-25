@@ -2,31 +2,38 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ActivitySidebar, type ActivityCall } from './ActivitySidebar'
 
-describe('activity sidebar', () => {
-  it('shows observable agent phases and expandable details', () => {
-    const calls: ActivityCall[] = [
-      {
-        id: 'skill-1',
-        label: 'Run /research',
-        detail: 'Research the current topic',
-        status: 'complete',
-        timestamp: 1,
-        durationMs: 1200,
-        events: [
-          { id: 'thinking-1', kind: 'thinking', label: 'Thinking', status: 'complete', timestamp: 1 },
-          { id: 'tool-1', kind: 'tool', label: 'web_search', detail: 'query: Tauri shell plugin', status: 'running', timestamp: 2 },
-        ],
-      },
-    ]
+const researchRun: ActivityCall = {
+  id: 'skill-1',
+  kind: 'skill',
+  label: 'Run /research tauri',
+  detail: 'tauri',
+  nodeId: 'bullet-1',
+  status: 'complete',
+  timestamp: 1,
+  durationMs: 1200,
+  events: [
+    { id: 'thinking-1', kind: 'thinking', label: 'Thinking', status: 'complete', timestamp: 1 },
+    { id: 'tool-1', kind: 'tool', label: 'web_search', detail: 'query: Tauri shell plugin', status: 'complete', timestamp: 2, durationMs: 800 },
+    { id: 'tool-2', kind: 'tool', label: 'web_fetch', detail: 'url: https://v2.tauri.app/plugin/shell/', status: 'complete', timestamp: 3 },
+    { id: 'result-1', kind: 'output', label: 'Open result', status: 'complete', timestamp: 4, nodeId: 'bullet-9' },
+  ],
+}
 
-    render(<ActivitySidebar calls={calls} onClear={() => undefined} />)
+const describeNode = (nodeId: string) => ({
+  'bullet-1': { title: 'Shell plugins', bulletCount: 3 },
+  'bullet-9': { title: 'Tauri findings', bulletCount: 4 },
+}[nodeId] ?? null)
+
+describe('activity sidebar', () => {
+  it('lists skill calls with their bullet, status and version', () => {
+    render(<ActivitySidebar calls={[researchRun]} onClear={() => undefined} describeNode={describeNode} />)
 
     expect(screen.getByRole('complementary', { name: 'Agent activity' })).toBeTruthy()
-    expect(screen.getByText('Run /research')).toBeTruthy()
-    expect(screen.getByText('web_search')).toBeTruthy()
-    expect(screen.getByText('query: Tauri shell plugin')).toBeTruthy()
-    expect(screen.getByText('1.2s')).toBeTruthy()
-    expect(screen.getByRole('list', { name: 'Execution timeline for Run /research' })).toBeTruthy()
+    expect(screen.getByText('/research tauri')).toBeTruthy()
+    expect(screen.getByText(/On “Shell plugins”/)).toBeTruthy()
+    expect(screen.getByText('Done')).toBeTruthy()
+    expect(screen.getByText(/v1\s+·\s+1 iteration/)).toBeTruthy()
+    expect(screen.getByText('1 skill call')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Clear activity' })).toBeTruthy()
   })
 
@@ -37,30 +44,49 @@ describe('activity sidebar', () => {
     expect(screen.getByText('Run a skill to see its work here.')).toBeTruthy()
   })
 
-  it('opens the invocation bullet from the header and the result bullet from its event', () => {
+  it('opens a call to show its searches, pages and written bullets', () => {
     const onOpenNode = vi.fn()
-    const calls: ActivityCall[] = [
-      {
-        id: 'run-1',
-        label: 'Run /research tauri',
-        status: 'complete',
-        timestamp: 1,
-        nodeId: 'bullet-1',
-        events: [
-          { id: 'result-run-1', kind: 'output', label: 'Open result', status: 'complete', timestamp: 2, nodeId: 'bullet-9' },
-        ],
-      },
-    ]
+    render(<ActivitySidebar calls={[researchRun]} onClear={() => undefined} onOpenNode={onOpenNode} describeNode={describeNode} />)
 
-    render(<ActivitySidebar calls={calls} onClear={() => undefined} onOpenNode={onOpenNode} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open outline bullet for Run /research tauri' }))
-    expect(onOpenNode).toHaveBeenCalledWith('bullet-1')
+    expect(screen.getByText('Tauri shell plugin')).toBeTruthy()
+    expect(screen.getByText('1 query')).toBeTruthy()
+    expect(screen.getByText('v2.tauri.app')).toBeTruthy()
+    expect(screen.getByText('+4')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open outline result for Open result' }))
-    expect(onOpenNode).toHaveBeenLastCalledWith('bullet-9', 'bullet-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Go to bullets' }))
+    expect(onOpenNode).toHaveBeenCalledWith('bullet-9', 'bullet-1')
 
-    expect(screen.getByRole('button', { name: 'Collapse execution for Run /research tauri' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'All activity' }))
+    expect(screen.getByRole('button', { name: 'Open /research tauri' })).toBeTruthy()
+  })
+
+  it('groups steered runs of a skill on one bullet into versions and sends new notes', () => {
+    const onSteer = vi.fn()
+    const steered: ActivityCall = {
+      id: 'skill-2', kind: 'skill', label: 'Run /research tauri', detail: 'tauri', nodeId: 'bullet-1',
+      note: 'Prefer the official docs.', status: 'complete', timestamp: 10, events: [],
+    }
+    render(<ActivitySidebar
+      calls={[researchRun, steered]}
+      onClear={() => undefined}
+      describeNode={describeNode}
+      canSteer={() => true}
+      onSteer={onSteer}
+    />)
+
+    expect(screen.getAllByRole('button', { name: 'Open /research tauri' })).toHaveLength(1)
+    expect(screen.getByText(/v2\s+·\s+2 iterations/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+    expect(screen.getByText('Prefer the official docs.')).toBeTruthy()
+    expect(screen.getByText('replaced by v2')).toBeTruthy()
+
+    const composer = screen.getByRole('textbox', { name: 'Steer /research tauri' })
+    fireEvent.change(composer, { target: { value: 'Add a todo for a weekly review.' } })
+    fireEvent.keyDown(composer, { key: 'Enter', metaKey: true })
+    expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'skill-1' }), 'Add a todo for a weekly review.')
   })
 
   it('offers explicit recovery for a retained unplaced result', () => {
@@ -74,16 +100,19 @@ describe('activity sidebar', () => {
     expect(onPlaceResult).toHaveBeenCalledWith('run-unplaced')
   })
 
-  it('offers cancellation only for a registered running extension execution', () => {
+  it('offers stopping only for a registered running execution', () => {
     const onCancel = vi.fn()
     render(<ActivitySidebar calls={[
-      { id: 'extension-run', label: 'Run /label', status: 'running', timestamp: 1, events: [] },
-      { id: 'other-run', label: 'Run /research', status: 'running', timestamp: 2, events: [] },
+      { id: 'extension-run', kind: 'skill', label: 'Run /label', status: 'running', timestamp: 1, events: [] },
+      { id: 'other-run', kind: 'skill', label: 'Run /research', status: 'running', timestamp: 2, events: [] },
     ]} onClear={() => undefined} onCancel={onCancel} canCancel={(runId) => runId === 'extension-run'} />)
 
-    const cancel = screen.getByRole('button', { name: 'Cancel' })
-    expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(1)
-    fireEvent.click(cancel)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research' }))
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'All activity' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open /label' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     expect(onCancel).toHaveBeenCalledWith('extension-run')
   })
 })

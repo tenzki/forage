@@ -1,4 +1,4 @@
-import { Link2, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import {
@@ -16,8 +16,15 @@ interface LinkMenuState extends ActiveInternalLink {
 }
 
 type LinkChoice =
-  | { type: 'existing'; entry: BulletEntry }
+  | { type: 'existing'; entry: BulletEntry; path: string }
   | { type: 'create'; label: string }
+
+/** Where a bullet lives, as its nearest ancestor titles (`Link Picker/Option`). */
+function bulletPath(entry: BulletEntry, titles: Map<string, string>): string {
+  const ancestors = entry.ancestorIds.map((id) => titles.get(id)?.trim() || 'Untitled')
+  if (!ancestors.length) return 'Home'
+  return ancestors.slice(-2).join(' › ')
+}
 
 function readLinkMenu(editor: Editor): LinkMenuState | null {
   const active = activeInternalLinkAtSelection(editor.state)
@@ -66,10 +73,12 @@ export function InternalLinkMenu({ editor }: { editor: Editor | null }) {
     if (!editor || !menu) return []
     const query = menu.query.trim().toLocaleLowerCase()
     const currentId = currentBulletId(editor)
-    const existing: LinkChoice[] = canonicalEntries(collectBullets(editor.state.doc), currentId)
+    const entries = collectBullets(editor.state.doc)
+    const titles = new Map(entries.map((entry) => [entry.id, entry.text]))
+    const existing: LinkChoice[] = canonicalEntries(entries, currentId)
       .filter((entry) => entry.text.trim().toLocaleLowerCase().includes(query))
       .slice(0, 8)
-      .map((entry) => ({ type: 'existing', entry }))
+      .map((entry) => ({ type: 'existing', entry, path: bulletPath(entry, titles) }))
     if (menu.query.trim() && !existing.some((choice) => (
       choice.type === 'existing' && choice.entry.text.trim().toLocaleLowerCase() === query
     ))) {
@@ -111,12 +120,17 @@ export function InternalLinkMenu({ editor }: { editor: Editor | null }) {
 
   if (!menu || !choices.length) return null
 
+  const matchCount = choices.filter((choice) => choice.type === 'existing').length
   return (
-    <ul className="internal-link-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }} aria-label="Internal link suggestions">
-      {choices.map((choice, index) => {
-        const label = choice.type === 'existing' ? choice.entry.text.trim() || 'Untitled' : choice.label
-        return (
-          <li key={choiceKey(choice)}>
+    <div className="internal-link-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }}>
+      <div className="internal-link-query" aria-hidden="true">
+        <span className="internal-link-query-brackets">[[</span>
+        <span className="internal-link-query-text">{menu.query || 'Link to a bullet'}</span>
+        <span className="internal-link-query-count">{matchCount} {matchCount === 1 ? 'match' : 'matches'}</span>
+      </div>
+      <ul aria-label="Internal link suggestions">
+        {choices.map((choice, index) => (
+          <li key={choiceKey(choice)} className={choice.type === 'create' && matchCount > 0 ? 'has-divider' : undefined}>
             <button
               type="button"
               className={index === activeIndex ? 'internal-link-item active' : 'internal-link-item'}
@@ -125,15 +139,30 @@ export function InternalLinkMenu({ editor }: { editor: Editor | null }) {
                 choose(choice)
               }}
             >
-              {choice.type === 'existing'
-                ? <Link2 size={14} aria-hidden="true" />
-                : <Plus size={14} aria-hidden="true" />}
-              <span>{label}</span>
-              <small>{choice.type === 'existing' ? 'Link to item' : 'Create linked item'}</small>
+              {choice.type === 'existing' ? (
+                <>
+                  <span className="internal-link-glyph" aria-hidden="true" />
+                  <span className="internal-link-copy">
+                    <span className="internal-link-title">{choice.entry.text.trim() || 'Untitled'}</span>
+                    <small>{choice.path}</small>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Plus size={14} aria-hidden="true" />
+                  <span className="internal-link-create">Create bullet “{choice.label}”</span>
+                  <small>at top level</small>
+                </>
+              )}
             </button>
           </li>
-        )
-      })}
-    </ul>
+        ))}
+      </ul>
+      <div className="internal-link-footer" aria-hidden="true">
+        <span><kbd>↑↓</kbd> move</span>
+        <span><kbd>tab</kbd> link</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
   )
 }

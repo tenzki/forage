@@ -6,13 +6,19 @@ import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
 import { BacklinksPanel } from './components/Outliner/BacklinksPanel'
-import { OutlinerSidebar } from './components/Outliner/OutlinerSidebar'
+import { OutlinerSidebar, type SidebarStorageStatus } from './components/Outliner/OutlinerSidebar'
 import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
 import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
 import { TrashPanel } from './components/Outliner/TrashPanel'
 import { TasksPanel } from './components/Outliner/TasksPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
-import { ActivitySidebar, type ActivityCall } from './components/Agent/ActivitySidebar'
+import { ActivitySidebar, type ActivityCall, type ActivityNodeInfo } from './components/Agent/ActivitySidebar'
+import type { SkillCallGroup } from './agent/skillCalls'
+import { recordReplacedOutput, requestSkillRun, steeredPrompt } from './agent/skillRuns'
+import { takeAiOutput } from './agent/insertIntoEditor'
+import { isExtensionSkill } from './agent/definitions'
+import { LinkPeekPane } from './components/Outliner/LinkPeekPane'
+import { OUTLINE_LINK_PEEK_EVENT, type LinkPeekRequest } from './editor/externalLinks'
 import type { ActivityEvent } from './agent/activity'
 import { applyActivityEvent, callsFromHistory, fromRuntimeEvent } from './agent/activityCalls'
 import { serverRunManager } from './agent/serverRunManager'
@@ -39,14 +45,15 @@ import {
   SYSTEM_NODE_REJECTION_MESSAGE,
 } from './editor/systemNodeGuards'
 import { captureStepBatch, createOutlineSchema, findSystemNode } from '@forage/document'
-import { currentBulletId, focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
+import { currentBulletId, findBullet, focusFirstChildOrCreate, selectBullet } from './editor/outlineModel'
 import { setZoom } from './editor/outlinerUi'
 import { openOrCreateDailyNote } from './editor/dailyNotes'
 import { setEditorMutationLocked } from './editor/extensions'
 import { OutlineSession } from './application/OutlineSession'
 import { connectServerStream } from './sync/serverStream'
 import { streamLiveness } from './sync/streamLiveness'
-import type { StreamedBatch } from './sync/syncEngine'
+import type { StreamedBatch, SyncState } from './sync/syncEngine'
+import { Button } from './components/ui/Button'
 import { SystemAlertBanner } from './components/ui/SystemAlertBanner'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
@@ -58,6 +65,26 @@ type View = 'outliner' | 'settings' | 'trash' | 'tasks'
 const SAFETY_SYNC_INTERVAL_MS = 5 * 60_000
 
 const UNSTREAMED_SYNC_INTERVAL_MS = 15_000
+
+function sidebarStorageStatus(
+  kind: 'local' | 'server',
+  backendLabel: string,
+  syncState: SyncState,
+  saveFailed: boolean,
+): SidebarStorageStatus {
+  const [state, tone]: [string, SidebarStorageStatus['tone']] = saveFailed
+    ? ['not saved', 'error']
+    : syncState.kind === 'syncing' || syncState.kind === 'connecting'
+      ? ['syncing', 'busy']
+      : syncState.kind === 'up-to-date'
+        ? ['synced', 'ok']
+        : syncState.kind === 'local-only' || kind === 'local'
+          ? ['saved', 'ok']
+          : syncState.kind === 'offline'
+            ? ['offline', 'busy']
+            : ['sync issue', 'error']
+  return { location: kind, state, tone, description: `Storage backend: ${backendLabel}` }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -102,6 +129,7 @@ export default function App() {
   const agentErrorPresence = useMotionPresence(Boolean(agentError), 250)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
+  const [linkPeek, setLinkPeek] = useState<LinkPeekRequest | null>(null)
   const extensionRunCancellations = useRef(new Map<string, () => void>())
   const loadSettings = useSettingsStore((state) => state.load)
   const refreshExtensions = useExtensionStore((state) => state.refresh)
@@ -156,6 +184,45 @@ export default function App() {
     }
   }, [editor, handleActivity, session])
 
+  const describeActivityNode = useCallback((nodeId: string): ActivityNodeInfo | null => {
+    if (!editor) return null
+    const entry = findBullet(editor.state.doc, nodeId)
+    if (!entry) return null
+    let bulletCount = 0
+    entry.node.descendants((node) => {
+      if (node.type.name === 'listItem') bulletCount += 1
+    })
+    return { title: entry.text.trim() || 'Untitled', bulletCount: bulletCount + 1 }
+  }, [editor])
+
+  const skills = useSettingsStore((state) => state.skills)
+  const canSteerCall = useCallback((group: SkillCallGroup) => {
+    if (group.kind !== 'skill' || !group.nodeId || !group.skillLabel) return false
+    const skill = skills.find((candidate) => candidate.label === group.skillLabel)
+    return Boolean(skill && !isExtensionSkill(skill))
+  }, [skills])
+
+  /**
+   * Start the next version of a skill call: take the current output out of
+   * the outline, then rerun the skill with the note and that output as context.
+   */
+  const steerCall = useCallback((group: SkillCallGroup, note: string) => {
+    if (!editor || !group.nodeId || !group.skillLabel || group.status === 'running') return
+    if (!findBullet(editor.state.doc, group.nodeId)) {
+      setAgentError('The bullet this call ran on no longer exists.')
+      return
+    }
+    const iteration = group.iterations.length + 1
+    const previous = takeAiOutput(editor, group.nodeId)
+    recordReplacedOutput(group.latest.id, previous)
+    requestSkillRun({
+      invocationNodeId: group.nodeId,
+      skillLabel: group.skillLabel,
+      prompt: steeredPrompt(group.prompt || group.skillLabel, note, iteration, previous),
+      steering: { note, basePrompt: group.prompt, iteration },
+    })
+  }, [editor])
+
   const clearActivity = useCallback(() => {
     // A retained paid result is not disposable activity history. Keep its
     // recovery affordance until the user places it successfully.
@@ -167,6 +234,16 @@ export default function App() {
   }, [session])
 
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
+
+  // Links open in the reader peek beside the outline.
+  useEffect(() => {
+    const onPeek = (event: Event) => {
+      const request = (event as CustomEvent<LinkPeekRequest>).detail
+      if (request?.href) setLinkPeek(request)
+    }
+    window.addEventListener(OUTLINE_LINK_PEEK_EVENT, onPeek)
+    return () => window.removeEventListener(OUTLINE_LINK_PEEK_EVENT, onPeek)
+  }, [])
 
   const readOutline = useCallback(async () => {
     setLoadError(null)
@@ -514,8 +591,8 @@ export default function App() {
         <h1>Could not open your outline</h1>
         <p>{loadError}</p>
         <div>
-          <button className="primary-action" onClick={() => void readOutline()}>Retry</button>
-          <button onClick={() => void startEmpty()}>Start with an empty outline</button>
+          <Button variant="primary" onClick={() => void readOutline()}>Retry</Button>
+          <Button onClick={() => void startEmpty()}>Start with an empty outline</Button>
         </div>
         <small>Starting empty does not delete the existing file, but saving new edits may replace it.</small>
       </main>
@@ -526,6 +603,7 @@ export default function App() {
   const storageBackendLabel = storageBackend.kind === 'server'
     ? `server: ${storageBackend.origin}`
     : 'local'
+  const storageStatus = sidebarStorageStatus(storageBackend.kind, storageBackendLabel, syncState, Boolean(saveError))
 
   function openInbox() {
     if (!editor) return
@@ -568,14 +646,6 @@ export default function App() {
           <button onClick={() => session.dismissMaintenanceError()}>Dismiss</button>
         </div>
       )}
-      <div
-        className={`storage-backend-widget sync-${syncState.kind}`}
-        role="status"
-        aria-label={`Storage backend: ${storageBackendLabel}`}
-        title={storageBackendLabel}
-      >
-        {storageBackendLabel}
-      </div>
       {agentErrorPresence.mounted && visibleAgentError.current && (
         <SystemAlertBanner
           title="Agent error"
@@ -601,6 +671,7 @@ export default function App() {
           onOpenSettings={() => { setViewError(null); setView('settings') }}
           onOpenTrash={() => { setViewError(null); setView('trash') }}
           onOpenTasks={openTasks}
+          storageStatus={storageStatus}
         />
         <section className="outline-workspace">
           <div className="outline-editor-view" hidden={view !== 'outliner'}>
@@ -661,7 +732,14 @@ export default function App() {
             <TasksPanel editor={editor} onClose={() => setView('outliner')} />
           )}
         </section>
-        <ActivitySidebar
+        {linkPeek ? (
+          <LinkPeekPane
+            editor={editor}
+            href={linkPeek.href}
+            sourceNodeId={linkPeek.sourceNodeId}
+            onClose={() => setLinkPeek(null)}
+          />
+        ) : <ActivitySidebar
           calls={activityCalls}
           collapsed={activitySidebarCollapsed}
           onClear={clearActivity}
@@ -669,7 +747,10 @@ export default function App() {
           onPlaceResult={(runId) => void placeRetainedResult(runId)}
           canCancel={(runId) => extensionRunCancellations.current.has(runId)}
           onCancel={(runId) => extensionRunCancellations.current.get(runId)?.()}
-        />
+          describeNode={describeActivityNode}
+          canSteer={canSteerCall}
+          onSteer={steerCall}
+        />}
       </main>
       {shortcutsPresence.mounted && (
         <KeyboardShortcutsPanel onClose={closeShortcuts} motionState={shortcutsPresence.motionState} />

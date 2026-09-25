@@ -26,6 +26,8 @@ import { serverRunManager } from '../../agent/serverRunManager'
 import { usePublishedServerConfiguration } from '../../agent/serverConfigurationSync'
 import { ConfirmButton } from './ConfirmButton'
 import { SegmentedControl } from '../ui/SegmentedControl'
+import { Button } from '../ui/Button'
+import { Field, Input } from '../ui/Field'
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -414,8 +416,8 @@ export function ComputeSettings() {
           <strong>Agent configuration changed in both places</strong>
           <p className="settings-hint">Choose which complete configuration to keep. Closing Settings changes neither side.</p>
           <div className="settings-actions">
-            <button type="button" className="settings-save" disabled={busy} onClick={() => void resolveConfigurationConflict('local')}>Use local</button>
-            <button type="button" className="settings-secondary" disabled={busy} onClick={() => void resolveConfigurationConflict('server')}>Use server</button>
+            <Button variant="primary" disabled={busy} onClick={() => void resolveConfigurationConflict('local')}>Use local</Button>
+            <Button disabled={busy} onClick={() => void resolveConfigurationConflict('server')}>Use server</Button>
           </div>
         </div>
       )}
@@ -461,9 +463,9 @@ export function ComputeSettings() {
             </ul>
           )}
           <div className="settings-actions">
-            <button type="button" className="settings-save" disabled={busy} onClick={() => void testConnection()}>Test connection</button>
+            <Button variant="primary" disabled={busy} onClick={() => void testConnection()}>Test connection</Button>
             {credential?.status !== 'connected' && (
-              <button type="button" className="settings-secondary" disabled={busy} onClick={() => { setWizardActive(true); setStep('credential') }}>Configure server compute</button>
+              <Button disabled={busy} onClick={() => { setWizardActive(true); setStep('credential') }}>Configure server compute</Button>
             )}
             <ConfirmButton
               label="Use local compute"
@@ -488,10 +490,12 @@ export function ComputeSettings() {
           {step === 'connect' && (
             <>
               <p className="settings-hint">Point Forage at a self-hosted server. It becomes the source of truth for the outline and runs agents while this app is closed.</p>
-              <label htmlFor="forage-server-origin">Server URL</label>
-              <input id="forage-server-origin" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="https://notes.example.com" />
-              <label htmlFor="forage-device-token">Device token</label>
-              <input id="forage-device-token" type="password" value={deviceToken} onChange={(event) => setDeviceToken(event.target.value)} autoComplete="off" />
+              <Field label="Server URL" htmlFor="forage-server-origin">
+                <Input id="forage-server-origin" value={origin} onChange={(event) => setOrigin(event.target.value)} placeholder="https://notes.example.com" />
+              </Field>
+              <Field label="Device token" htmlFor="forage-device-token">
+                <Input id="forage-device-token" type="password" value={deviceToken} onChange={(event) => setDeviceToken(event.target.value)} autoComplete="off" />
+              </Field>
             </>
           )}
 
@@ -503,16 +507,16 @@ export function ComputeSettings() {
                     This server already holds an outline. Connecting will switch this device to it and
                     leave this device's local outline behind.
                   </p>
-                  <button type="button" className="settings-save" disabled={busy} onClick={() => void useServerOutline()}>
+                  <Button variant="primary" disabled={busy} onClick={() => void useServerOutline()}>
                     Use the server outline
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <>
                   <p className="settings-hint">This device's outline, shortcuts, agents, skills, and tool settings become the server's content. Images upload first.</p>
-                  <button type="button" className="settings-save" disabled={busy} onClick={() => void copyOutline()}>
+                  <Button variant="primary" disabled={busy} onClick={() => void copyOutline()}>
                     {outlineCopied ? 'Finish syncing setup' : 'Copy everything to server'}
-                  </button>
+                  </Button>
                 </>
               )}
             </>
@@ -521,59 +525,57 @@ export function ComputeSettings() {
           {step === 'verify' && (
             <>
               <p className="settings-hint">Check that {connection?.origin} answers with the pinned certificate and accepts this device token.</p>
-              <button type="button" className="settings-save" disabled={busy} onClick={() => void verifyServer()}>
+              <Button variant="primary" disabled={busy} onClick={() => void verifyServer()}>
                 {verified ? 'Test again' : 'Test connection'}
-              </button>
+              </Button>
             </>
           )}
 
           {step === 'credential' && (
             <>
               <p className="settings-hint">The server needs its own OpenAI credential. It is stored server-side and never sent back to this device.</p>
-              <label htmlFor="server-openai-key">Server OpenAI API key</label>
-              <input id="server-openai-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" />
+              <Field label="Server OpenAI API key" htmlFor="server-openai-key">
+                <Input id="server-openai-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" />
+              </Field>
               <div className="settings-actions">
-                <button type="button" className="settings-save" disabled={busy || apiKey.trim().length < 20} onClick={() => void enrollApiKey()}>Enroll API key</button>
-                <button type="button" className="settings-secondary" disabled={busy} onClick={() => void connectChatGpt()}>Connect ChatGPT</button>
-                <button type="button" className="settings-secondary" disabled={busy} onClick={() => void checkChatGpt()}>Check ChatGPT login</button>
+                <Button variant="primary" disabled={busy || apiKey.trim().length < 20} onClick={() => void enrollApiKey()}>Enroll API key</Button>
+                <Button disabled={busy} onClick={() => void connectChatGpt()}>Connect ChatGPT</Button>
+                <Button disabled={busy} onClick={() => void checkChatGpt()}>Check ChatGPT login</Button>
               </div>
               <p className="settings-hint">Credential: {credential?.status ?? 'not enrolled'}</p>
               {credential?.status === 'connected' && computeCredentialRef !== credential.id && (
-                <button type="button" className="settings-save" disabled={busy} onClick={() => void retryAgentSettingsSync()}>
+                <Button variant="primary" disabled={busy} onClick={() => void retryAgentSettingsSync()}>
                   Retry syncing agent settings
-                </button>
+                </Button>
               )}
             </>
           )}
 
           <div className="settings-actions compute-wizard-actions">
             {stepIndex > 0 && (
-              <button
-                type="button"
-                className="settings-secondary"
+              <Button
                 disabled={busy}
                 onClick={() => setStep(WIZARD_STEPS[stepIndex - 1]!.id)}
               >
                 Back
-              </button>
+              </Button>
             )}
             {step === 'connect' && (
-              <button
-                type="button"
-                className="settings-save"
+              <Button
+                variant="primary"
                 disabled={busy || !isLoaded || !origin.trim() || !deviceToken.trim()}
                 onClick={() => void enrollServer()}
               >
                 Connect server
-              </button>
+              </Button>
             )}
             {step === 'verify' && (
-              <button type="button" className="settings-save" disabled={busy || !verified} onClick={() => setStep('credential')}>Next</button>
+              <Button variant="primary" disabled={busy || !verified} onClick={() => setStep('credential')}>Next</Button>
             )}
             {step === 'credential' && (
-              <button type="button" className="settings-secondary" disabled={busy} onClick={() => void skipServerCompute()}>Skip server compute</button>
+              <Button disabled={busy} onClick={() => void skipServerCompute()}>Skip server compute</Button>
             )}
-            <button type="button" className="settings-secondary" disabled={busy} onClick={cancelWizard}>Cancel</button>
+            <Button disabled={busy} onClick={cancelWizard}>Cancel</Button>
           </div>
         </div>
       )}

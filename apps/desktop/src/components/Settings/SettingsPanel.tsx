@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { ChevronDown } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { AgentSettings } from './AgentSettings'
 import { ConfirmButton } from './ConfirmButton'
 import { PiRuntimeSettings } from './PiRuntimeSettings'
@@ -33,6 +33,10 @@ import {
   extensionToolOptions,
   useExtensionStore,
 } from '../../store/extensionStore'
+import { Button } from '../ui/Button'
+import { CountBadge } from '../ui/CountBadge'
+import { ListRow } from '../ui/ListRow'
+import { Field, Input, Select } from '../ui/Field'
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -245,23 +249,31 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="secondary-view t-panel-slide" data-open="true">
-      <SecondaryViewHeader title="Settings" onBack={onBack} />
-      <div className="settings-panel">
-        <SegmentedControl
-          ariaLabel="Settings sections"
-          className="mb-7 w-full"
-          value={activeView}
-          options={SETTINGS_VIEWS.map((settingsView) => ({
-            value: settingsView.id,
-            label: settingsView.id === 'extensions' && attentionCount > 0
-              ? `${settingsView.label} (${attentionCount})`
-              : settingsView.label,
-          }))}
-          onValueChange={(nextView) => {
-            setActionError(null)
-            setActiveView(nextView)
-          }}
-        />
+      <SecondaryViewHeader onBack={onBack} />
+      <div className="settings-panel settings-layout">
+        <nav className="settings-sidebar" aria-label="Settings sections">
+          <h1 className="secondary-page-title">Settings</h1>
+          <div className="settings-nav-list">
+            {SETTINGS_VIEWS.map((settingsView) => (
+              <button
+                key={settingsView.id}
+                type="button"
+                className={activeView === settingsView.id ? 'is-active' : undefined}
+                aria-current={activeView === settingsView.id ? 'page' : undefined}
+                onClick={() => {
+                  setActionError(null)
+                  setActiveView(settingsView.id)
+                }}
+              >
+                <span>{settingsView.label}</span>
+                {settingsView.id === 'extensions' && attentionCount > 0 && (
+                  <CountBadge tone="attention" className="ml-auto" aria-label={`${attentionCount} need attention`}>{attentionCount}</CountBadge>
+                )}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <div className="settings-content">
 
         <section hidden={activeView !== 'connection'} className="settings-section" aria-labelledby="connection-heading">
         <h2 id="connection-heading">Compute</h2>
@@ -299,44 +311,44 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
                 </div>
                 <div className="device-login-actions">
                   <button type="button" onClick={() => void reopenLoginPage()}>Open browser again</button>
-                  <button type="button" className="danger-action" onClick={cancelSubscriptionLogin}>Cancel</button>
+                  <Button variant="danger" onClick={cancelSubscriptionLogin}>Cancel</Button>
                 </div>
               </div>
             )}
             <div className="settings-actions">
-              <button
-                className="settings-save"
+              <Button variant="primary"
                 onClick={() => void connectSubscription()}
                 disabled={!isLoaded || loginBusy}
               >
                 {loginBusy ? 'Waiting for OpenAI…' : oauthCredential ? 'Reconnect' : 'Connect ChatGPT'}
-              </button>
+              </Button>
               {oauthCredential && (
-                <button className="settings-secondary" onClick={() => void disconnectSubscription()}>
+                <Button onClick={() => void disconnectSubscription()}>
                   Disconnect
-                </button>
+                </Button>
               )}
             </div>
           </div>
         ) : (
           <div className="auth-card">
-            <label htmlFor="openai-key">OpenAI API key</label>
-            <input
-              id="openai-key"
-              className="settings-monospace"
-              type="password"
-              placeholder={apiKeyConfigured ? 'API key stored securely — enter a new key to replace it' : 'sk-...'}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
+            <Field label="OpenAI API key" htmlFor="openai-key">
+              <Input
+                id="openai-key"
+                mono
+                type="password"
+                placeholder={apiKeyConfigured ? 'API key stored securely — enter a new key to replace it' : 'sk-...'}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
             <p className="settings-hint">
               Stored locally on this device and sent only to the OpenAI API. API usage is billed separately from ChatGPT.
             </p>
-            <button className="settings-save" onClick={() => void saveApiKey()} disabled={!isLoaded}>
+            <Button variant="primary" onClick={() => void saveApiKey()} disabled={!isLoaded}>
               {saved ? 'Saved ✓' : 'Save API key'}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -348,7 +360,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
             </p>
           </div>
           <div className="model-select">
-            <select
+            <Select
               id="codex-model"
               aria-describedby="codex-model-hint"
               value={modelOptions.some((option) => option.id === modelId) ? modelId : defaultCodexModel(authMode)}
@@ -358,8 +370,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
               {modelOptions.map((option) => (
                 <option key={option.id} value={option.id}>{option.name}</option>
               ))}
-            </select>
-            <ChevronDown size={16} aria-hidden="true" />
+            </Select>
           </div>
         </div>
       </section>
@@ -374,11 +385,11 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
           Globally enabled tools may be called through Pi only when the selected agent also allows them. Image generation is opt-in; subscription mode uses Codex limits and API-key mode uses API billing.
         </p>
         <h3>Built-in</h3>
-        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
+        <div className="overflow-hidden rounded-[10px] border border-rule-soft bg-paper-raised">
           {BUILTIN_TOOL_OPTIONS.map((tool) => (
             <SwitchFieldInput
               key={tool.id}
-              className="border-b border-neutral-100 last:border-b-0"
+             
               label={tool.name}
               hint={tool.description}
               checked={enabledToolIds.includes(tool.id)}
@@ -387,11 +398,11 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
             />
           ))}
         </div>
-        {customTools.length > 0 && <><h3>Custom HTTP</h3><div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
+        {customTools.length > 0 && <><h3>Custom HTTP</h3><div className="overflow-hidden rounded-[10px] border border-rule-soft bg-paper-raised">
           {customTools.map((tool) => (
             <SwitchFieldInput
               key={tool.id}
-              className="border-b border-neutral-100 last:border-b-0"
+             
               label={tool.name}
               hint={(
                 <>
@@ -407,7 +418,8 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
                 <ConfirmButton
                   label="Remove"
                   confirmLabel="Confirm remove"
-                  className="tool-remove"
+                  variant="danger"
+                  size="sm"
                   ariaLabel={`Remove ${tool.name}`}
                   confirmAriaLabel={`Confirm removing ${tool.name}`}
                   onConfirm={() => void deleteCustomTool(tool.id)}
@@ -416,71 +428,75 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
             />
           ))}
         </div></>}
-        {extensionToolGroups.length > 0 && <><h3>Extensions</h3>{extensionToolGroups.map(([sourceName, tools]) => <div key={sourceName} className="extension-tool-group"><h4>{sourceName}</h4><div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
-          {tools.map((tool) => <SwitchFieldInput key={`${tool.installationId}:${tool.id}`} className="border-b border-neutral-100 last:border-b-0" label={tool.name} hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason}`} checked={enabledToolIds.includes(tool.id)} onCheckedChange={(checked) => void toggleTool(tool.id, checked)} switchAriaLabel={`Enable ${tool.name}`} disabled={!isLoaded || !tool.available} />)}
+        {extensionToolGroups.length > 0 && <><h3>Extensions</h3>{extensionToolGroups.map(([sourceName, tools]) => <div key={sourceName} className="extension-tool-group"><h4>{sourceName}</h4><div className="overflow-hidden rounded-[10px] border border-rule-soft bg-paper-raised">
+          {tools.map((tool) => <SwitchFieldInput key={`${tool.installationId}:${tool.id}`} label={tool.name} hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason}`} checked={enabledToolIds.includes(tool.id)} onCheckedChange={(checked) => void toggleTool(tool.id, checked)} switchAriaLabel={`Enable ${tool.name}`} disabled={!isLoaded || !tool.available} />)}
         </div></div>)}</>}
         {unavailableEnabledToolIds.length > 0 && <><h3>Unavailable references</h3><div className="tool-list">
-          {unavailableEnabledToolIds.map((toolId) => <div key={toolId} className="tool-setting"><span><strong>{toolId}</strong><small>The configured provider is missing or unavailable. This reference is retained.</small></span><button type="button" className="settings-secondary" onClick={() => void toggleTool(toolId, false)}>Disable reference</button></div>)}
+          {unavailableEnabledToolIds.map((toolId) => <ListRow key={toolId} title={toolId} description="The configured provider is missing or unavailable. This reference is retained." actions={<Button size="sm" onClick={() => void toggleTool(toolId, false)}>Disable reference</Button>} />)}
         </div></>}
 
         {showToolForm ? (
           <div className="custom-tool-form">
             <strong>Add public GET tool</strong>
-            <label htmlFor="tool-name">Tool name</label>
-            <input
-              id="tool-name"
-              className="settings-monospace"
-              value={toolName}
-              onChange={(event) => setToolName(event.target.value)}
-              placeholder="github_issues"
-              spellCheck={false}
-            />
-            <label htmlFor="tool-description">Description for Codex</label>
-            <input
-              id="tool-description"
-              value={toolDescription}
-              onChange={(event) => setToolDescription(event.target.value)}
-              placeholder="List public GitHub issues for a repository"
-            />
-            <label htmlFor="tool-origin">Approved API</label>
-            <select
-              id="tool-origin"
-              value={toolOrigin}
-              onChange={(event) => {
-                const selected = APPROVED_TOOL_ORIGINS.find((item) => item.origin === event.target.value)
-                setToolOrigin(event.target.value)
-                if (selected) setToolPath(selected.examplePath)
-              }}
-            >
-              {APPROVED_TOOL_ORIGINS.map((item) => (
-                <option key={item.origin} value={item.origin}>{item.label}</option>
-              ))}
-            </select>
-            <label htmlFor="tool-path">Path and query template</label>
-            <input
-              id="tool-path"
-              className="settings-monospace"
-              value={toolPath}
-              onChange={(event) => setToolPath(event.target.value)}
-              placeholder="/repos/{{owner}}/{{repo}}/issues"
-              spellCheck={false}
-            />
+            <Field label="Tool name" htmlFor="tool-name">
+              <Input
+                id="tool-name"
+                mono
+                value={toolName}
+                onChange={(event) => setToolName(event.target.value)}
+                placeholder="github_issues"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label="Description for Codex" htmlFor="tool-description">
+              <Input
+                id="tool-description"
+                value={toolDescription}
+                onChange={(event) => setToolDescription(event.target.value)}
+                placeholder="List public GitHub issues for a repository"
+              />
+            </Field>
+            <Field label="Approved API" htmlFor="tool-origin">
+              <Select
+                id="tool-origin"
+                value={toolOrigin}
+                onChange={(event) => {
+                  const selected = APPROVED_TOOL_ORIGINS.find((item) => item.origin === event.target.value)
+                  setToolOrigin(event.target.value)
+                  if (selected) setToolPath(selected.examplePath)
+                }}
+              >
+                {APPROVED_TOOL_ORIGINS.map((item) => (
+                  <option key={item.origin} value={item.origin}>{item.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Path and query template" htmlFor="tool-path">
+              <Input
+                id="tool-path"
+                mono
+                value={toolPath}
+                onChange={(event) => setToolPath(event.target.value)}
+                placeholder="/repos/{{owner}}/{{repo}}/issues"
+                spellCheck={false}
+              />
+            </Field>
             <p className="settings-hint">
               Each {'{{parameter}}'} becomes a required string argument available to Codex. Only public GET endpoints are supported.
             </p>
             <div className="settings-actions">
-              <button className="settings-save" onClick={() => void createCustomTool()}>
+              <Button variant="primary" onClick={() => void createCustomTool()}>
                 Add tool
-              </button>
-              <button className="settings-secondary" onClick={() => setShowToolForm(false)}>
+              </Button>
+              <Button onClick={() => setShowToolForm(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <button className="settings-secondary add-tool" onClick={() => setShowToolForm(true)}>
-            + Add custom tool
-          </button>
+          <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setShowToolForm(true)}>
+            Add custom tool
+          </Button>
         )}
 
         <p className="settings-hint tool-privacy">
@@ -505,6 +521,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         {(actionError || storeError) && (
           <p className="settings-error" role="alert">{actionError || storeError}</p>
         )}
+        </div>
       </div>
     </div>
   )

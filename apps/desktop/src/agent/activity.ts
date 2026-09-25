@@ -14,6 +14,7 @@ export interface ActivityEvent {
   status?: ActivityStatus
   placementPending?: boolean
   durationMs?: number
+  note?: string
 }
 
 export type ActivityReporter = (event: ActivityEvent) => void

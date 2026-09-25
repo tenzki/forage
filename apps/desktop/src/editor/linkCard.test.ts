@@ -91,15 +91,39 @@ describe('link hover cards', () => {
     expect(editor.view.dom.querySelector('.link-card')).toBeNull()
   })
 
-  it('leaves internal links alone', async () => {
-    const editor = editorWith([bullet('a', { href: 'https://example.com', internalId: 'x' })])
+  it('previews the target bullet of an internal link without fetching', async () => {
+    const editor = editorWith([
+      bullet('x', { text: 'Target bullet' }),
+      bullet('a', { href: 'https://example.com', internalId: 'x' }),
+    ])
     // The mark renders the attribute, which is what the anchor test looks at.
     const anchor = editor.view.dom.querySelector('a')
     if (anchor) anchor.dataset.internalNodeId = 'x'
 
     hover(editor, 'Example')
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    expect(cardInBody()).toBeNull()
+    await vi.waitFor(() => expect(cardInBody()?.classList.contains('is-internal')).toBe(true))
+    expect(cardInBody()?.querySelector('.link-card-heading')?.textContent).toBe('Target bullet')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('explains an internal link whose bullet was deleted', async () => {
+    const editor = editorWith([bullet('a', { href: 'https://example.com', internalId: 'gone' })])
+    const anchor = editor.view.dom.querySelector('a')
+    if (anchor) anchor.dataset.internalNodeId = 'gone'
+
+    hover(editor, 'Example')
+    await vi.waitFor(() => expect(cardInBody()?.classList.contains('is-missing')).toBe(true))
+    expect(cardInBody()?.textContent).toContain('Linked bullet no longer exists')
+  })
+
+  it('offers a retry when the site does not respond', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503, text: () => Promise.resolve('') })
+    const editor = editorWith([bullet('a', { href: 'https://example.com' })])
+
+    hover(editor, 'Example')
+    await vi.waitFor(() => expect(cardInBody()?.classList.contains('is-error')).toBe(true))
+    expect(cardInBody()?.textContent).toContain('No preview')
+    expect(cardInBody()?.textContent).toContain('Retry')
   })
 
   it('fills in the fetched title once the preview settles', async () => {

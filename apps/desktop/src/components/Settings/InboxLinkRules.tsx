@@ -8,6 +8,8 @@ import { DropdownMenu, DropdownMenuItem } from '../ui/DropdownMenu'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { Switch } from '../ui/Switch'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Field'
 
 type AutomationPolicy = AutomationPolicySet['policies'][number]
 type SkillOption = { id: string; label: string }
@@ -388,7 +390,7 @@ export function InboxLinkRules({ skills, transport, canPublish }: InboxLinkRules
           {isExpanded && <div id={editorId} className="inbox-link-rule-editor">
             <label className="inbox-link-rule-field">
               <span>Name</span>
-              <input
+              <Input
                 aria-label={`Rule name ${index + 1}`}
                 value={name}
                 maxLength={100}
@@ -478,7 +480,7 @@ export function InboxLinkRules({ skills, transport, canPublish }: InboxLinkRules
       {menu && createPortal(<DropdownMenu ref={menuRef} role="menu" aria-label="Rule actions" style={{ top: menu.top, left: menu.left }}>
         <DropdownMenuItem icon={Trash2} danger onClick={() => deleteRule(menu.id)}>Delete rule</DropdownMenuItem>
       </DropdownMenu>, document.body)}
-      <button className="settings-secondary" disabled={!ready || rows.length >= MAX_RULES} onClick={addRule}>Add rule</button>
+      <Button disabled={!ready || rows.length >= MAX_RULES} onClick={addRule}>Add rule</Button>
       <SwitchFieldInput
         checked={enabled}
         disabled={!ready}
@@ -489,10 +491,10 @@ export function InboxLinkRules({ skills, transport, canPublish }: InboxLinkRules
       {errors.map((error) => <p key={error} role="alert" className="settings-error">{error}</p>)}
       {conflict && <div role="alert" className="settings-error">
         <p>Rules changed on the server. Reload to continue.</p>
-        <button className="settings-secondary" onClick={() => void load()}>Reload rules</button>
+        <Button onClick={() => void load()}>Reload rules</Button>
       </div>}
       {status && <p className="settings-hint">{status}</p>}
-      <button className="settings-save" disabled={!canPublish || !ready || busy} onClick={() => void publish()}>Publish link rules</button>
+      <Button variant="primary" disabled={!canPublish || !ready || busy} onClick={() => void publish()}>Publish link rules</Button>
     </div>
   )
 }

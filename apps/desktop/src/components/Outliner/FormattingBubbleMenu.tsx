@@ -4,12 +4,16 @@ import {
   Code,
   Italic,
   Link as LinkIcon,
+  Sparkles,
   Strikethrough,
   Underline,
   Unlink,
 } from 'lucide-react'
 import { useEditorState, type Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
+import { appendChildBullet, currentBulletId } from '../../editor/outlineModel'
+import { isExtensionSkill } from '../../agent/definitions'
+import { useSettingsStore } from '../../store/settingsStore'
 
 export function normalizedUrl(input: string): string {
   const trimmed = input.trim()
@@ -44,6 +48,13 @@ function MarkButton({ label, active, onClick, children }: MarkButtonProps) {
 }
 
 const bubbleOptions = { placement: 'top' as const, offset: 7 }
+/** Longest selection quoted into an Ask prompt; the rest is elided. */
+const ASK_QUOTE_LIMIT = 240
+
+function quoteSelection(text: string): string {
+  const flat = text.replace(/\s+/gu, ' ').trim()
+  return flat.length > ASK_QUOTE_LIMIT ? `${flat.slice(0, ASK_QUOTE_LIMIT - 1).trimEnd()}…` : flat
+}
 const showForSelection = ({ state }: { state: Editor['state'] }) => !state.selection.empty
 
 export function FormattingBubbleMenu({ editor }: { editor: Editor | null }) {
@@ -58,6 +69,9 @@ export function FormattingBubbleMenu({ editor }: { editor: Editor | null }) {
       link: current.isActive('link'),
     } : null,
   })
+  const skills = useSettingsStore((state) => state.skills)
+  const askSkill = skills.find((skill) => skill.label === 'ask' && !isExtensionSkill(skill))
+    ?? skills.find((skill) => !isExtensionSkill(skill))
   const [editingLink, setEditingLink] = useState(false)
   const [href, setHref] = useState('')
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -68,6 +82,19 @@ export function FormattingBubbleMenu({ editor }: { editor: Editor | null }) {
     setHref(editor?.getAttributes('link').href ?? '')
     setLinkError(null)
     setEditingLink(true)
+  }
+
+  /**
+   * Start a slash command about the selection: a new child bullet holding
+   * `/ask “selection” `, with the cursor after it so the question comes next.
+   */
+  function askAgent() {
+    if (!editor || !askSkill) return
+    const { from, to } = editor.state.selection
+    const quote = quoteSelection(editor.state.doc.textBetween(from, to, ' '))
+    const parentId = currentBulletId(editor)
+    if (!parentId) return
+    appendChildBullet(editor, parentId, `/${askSkill.label} “${quote}” `)
   }
 
   function applyLink(event: React.FormEvent) {
@@ -114,6 +141,21 @@ export function FormattingBubbleMenu({ editor }: { editor: Editor | null }) {
           <MarkButton label="Set link" active={activeMarks.link} onClick={openLinkEditor}><LinkIcon size={15} /></MarkButton>
           {activeMarks.link && (
             <MarkButton label="Remove link" active={false} onClick={() => editor.chain().focus().unsetLink().run()}><Unlink size={15} /></MarkButton>
+          )}
+          {askSkill && (
+            <>
+              <span className="formatting-divider" />
+              <button
+                type="button"
+                className="formatting-ask"
+                aria-label={`Ask the agent about the selection with /${askSkill.label}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={askAgent}
+              >
+                <Sparkles size={13} aria-hidden="true" />
+                Ask
+              </button>
+            </>
           )}
         </>
       )}

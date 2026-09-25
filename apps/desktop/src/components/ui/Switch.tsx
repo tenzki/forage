@@ -14,7 +14,7 @@ export function Switch({ checked, onCheckedChange, disabled = false, className, 
 
   return (
     <label className={cn(
-      'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-forage-600',
+      'relative inline-flex h-5 w-[34px] shrink-0 cursor-pointer rounded-full focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-forage-600',
       disabled && 'cursor-not-allowed opacity-50',
       className,
     )}>
@@ -33,12 +33,12 @@ export function Switch({ checked, onCheckedChange, disabled = false, className, 
         aria-hidden="true"
         data-on={String(checked)}
         className={cn(
-          't-toggle absolute inset-0 rounded-full border-2 transition-[background-color,border-color] duration-200 peer-checked:border-neutral-900 peer-checked:bg-neutral-900 [--toggle-travel:20px]',
+          't-toggle absolute inset-0 rounded-full transition-[background-color] duration-200 peer-checked:bg-neutral-900 [--toggle-travel:14px]',
           hasInteracted.current && 'is-init',
-          checked ? 'border-neutral-900 bg-neutral-900' : 'border-neutral-200 bg-neutral-100',
+          checked ? 'bg-neutral-900' : 'bg-neutral-300',
         )}
       >
-        <span className="t-toggle-thumb pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-xs" />
+        <span className="t-toggle-thumb pointer-events-none absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(32,61,50,0.18)]" />
       </span>
     </label>
   )

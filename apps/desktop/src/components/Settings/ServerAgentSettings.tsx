@@ -5,6 +5,7 @@ import { republishLocalAgentConfiguration, usePublishedServerConfiguration } fro
 import type { ServerConnectionInfo } from '../../persistence/eventStore'
 import { invoke } from '@tauri-apps/api/core'
 import { InboxLinkRules } from './InboxLinkRules'
+import { Button } from '../ui/Button'
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
@@ -53,8 +54,8 @@ export function ServerAgentSettings() {
         <p className="settings-hint">Configuration revision: {revision || 'not published'} · Credential: {credential?.status ?? 'not enrolled'}</p>
         <p className="settings-hint">Agent and skill changes publish to the server when you save them.</p>
         <div className="settings-actions">
-          <button className="settings-save" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>Republish agents and skills</button>
-          {credential?.status === 'connected' && <button className="settings-secondary" disabled={busy} onClick={() => void disconnectCredential()}>Disconnect credential</button>}
+          <Button variant="primary" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>Republish agents and skills</Button>
+          {credential?.status === 'connected' && <Button disabled={busy} onClick={() => void disconnectCredential()}>Disconnect credential</Button>}
         </div>
         <hr />
         <InboxLinkRules skills={published?.skills ?? []} transport={transport} canPublish={revision > 0} />

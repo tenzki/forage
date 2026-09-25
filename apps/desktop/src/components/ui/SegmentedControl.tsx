@@ -37,7 +37,7 @@ export const SegmentedControl = forwardRef(function SegmentedControl<Value exten
       aria-label={ariaLabel}
       data-slot="segmented-control"
       className={cn(
-        'relative inline-grid w-fit gap-1 rounded-xl bg-neutral-100 p-1 font-sans text-sm font-medium shadow-[inset_0_1px_2px_rgba(0,0,0,0.08),inset_0_-1px_2px_rgba(0,0,0,0.05)]',
+        'relative inline-grid w-fit gap-0.5 rounded-md bg-neutral-100 p-[3px] font-sans text-xs font-normal',
         className,
       )}
       style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
@@ -45,10 +45,10 @@ export const SegmentedControl = forwardRef(function SegmentedControl<Value exten
     >
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute top-1 bottom-1 left-1 rounded-lg border border-neutral-200/70 bg-white shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+        className="pointer-events-none absolute top-[3px] bottom-[3px] left-[3px] rounded-sm bg-white shadow-[0_1px_2px_rgba(32,61,50,0.1)] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
         style={{
-          width: `calc((100% - ${(count + 1) * 0.25}rem) / ${count})`,
-          transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 0.25}rem))`,
+          width: `calc((100% - ${6 + (count - 1) * 2}px) / ${count})`,
+          transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 2}px))`,
         }}
       />
       {options.map((option) => {
@@ -60,8 +60,8 @@ export const SegmentedControl = forwardRef(function SegmentedControl<Value exten
             aria-pressed={active}
             onClick={() => onValueChange(option.value)}
             className={cn(
-              'relative z-1 min-w-18 cursor-pointer rounded-lg px-4 py-2 text-center whitespace-nowrap outline-none transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900',
-              active ? 'text-neutral-900' : 'text-neutral-500 hover:text-neutral-800',
+              'relative z-1 min-w-14 cursor-pointer rounded-sm px-3 py-[5px] text-center whitespace-nowrap outline-none transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-neutral-900',
+              active ? 'text-neutral-900' : 'text-neutral-500 hover:text-neutral-900',
             )}
           >
             {option.label}

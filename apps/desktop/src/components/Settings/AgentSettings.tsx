@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import { useId, useState } from 'react'
 import { validateExtensionSkillConfiguration } from '@forage/agent-runtime'
 import {
@@ -20,6 +21,9 @@ import {
   ExtensionSkillConfigurationForm,
   type ConfigurationIssue,
 } from './ExtensionSkillConfigurationForm'
+import { Button } from '../ui/Button'
+import { ListRow } from '../ui/ListRow'
+import { Field, Input, Select, Textarea } from '../ui/Field'
 
 interface SelectorTool extends ToolOption {
   group: string
@@ -49,16 +53,16 @@ function AgentForm({ initial, tools, onSave, onCancel }: {
   const { error, save } = useInlineSave(onSave)
   const update = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => setDraft((before) => ({ ...before, [key]: value }))
   return <div className="custom-tool-form agent-form" role="group" aria-label="Agent editor">
-    <label>Agent name<input aria-label="Agent name" value={draft.name} onChange={(event) => update('name', event.target.value)} /></label>
-    <label>Description<input aria-label="Agent description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></label>
-    <label>Instructions<textarea aria-label="Agent instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></label>
+    <Field label="Agent name"><Input aria-label="Agent name" value={draft.name} onChange={(event) => update('name', event.target.value)} /></Field>
+    <Field label="Description"><Input aria-label="Agent description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></Field>
+    <Field label="Instructions"><Textarea aria-label="Agent instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></Field>
     <fieldset className="agent-tool-list"><legend>Allowed tools</legend>{groupTools(tools).map(([group, entries]) => <div className="agent-tool-group" key={group}><strong>{group}</strong>{entries.map((tool) => <SwitchFieldInput
       key={tool.id} checked={draft.toolIds.includes(tool.id)} label={tool.name}
       hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason ?? 'provider missing'}`}
       disabled={!tool.available} onCheckedChange={(checked) => update('toolIds', checked ? [...draft.toolIds, tool.id] : draft.toolIds.filter((id) => id !== tool.id))}
     />)}</div>)}</fieldset>
     {error && <p className="settings-error" role="alert">{error}</p>}
-    <div className="settings-actions"><button type="button" className="settings-save" onClick={() => void save(draft)}>Save agent</button><button type="button" className="settings-secondary" onClick={onCancel}>Cancel</button></div>
+    <div className="settings-actions"><Button variant="primary" onClick={() => void save(draft)}>Save agent</Button><Button onClick={onCancel}>Cancel</Button></div>
   </div>
 }
 
@@ -124,14 +128,14 @@ function SkillForm({ initial, agents, tools, executors, onSave, onCancel }: {
     }))
   }
   return <div className="custom-tool-form agent-form" role="group" aria-label="Skill editor">
-    <label>Slash command<input className="settings-monospace" aria-label="Slash command" value={draft.label} onChange={(event) => updateCommon('label', event.target.value)} /></label>
-    <label>Description<input aria-label="Skill description" value={draft.description} onChange={(event) => updateCommon('description', event.target.value)} /></label>
-    <label>Execution<select aria-label="Skill execution" value={draft.execution === 'extension' ? executorValue(draft.executor) : 'llm'} onChange={(event) => chooseExecution(event.target.value)}>
+    <Field label="Slash command"><Input mono aria-label="Slash command" value={draft.label} onChange={(event) => updateCommon('label', event.target.value)} /></Field>
+    <Field label="Description"><Input aria-label="Skill description" value={draft.description} onChange={(event) => updateCommon('description', event.target.value)} /></Field>
+    <Field label="Execution"><Select aria-label="Skill execution" value={draft.execution === 'extension' ? executorValue(draft.executor) : 'llm'} onChange={(event) => chooseExecution(event.target.value)}>
       <option value="llm">LLM agent</option>
       {executionOptions.map((executor) => <option key={executorValue(executor)} value={executorValue(executor)} disabled={!executor.available}>
         {executor.sourceName} · {executor.name}{executor.available ? '' : ' (unavailable)'}
       </option>)}
-    </select></label>
+    </Select></Field>
     {draft.execution === 'extension' ? <>
       {selectedExecutor?.description && <p className="settings-hint">{selectedExecutor.description}</p>}
       {(selectedExecutor ?? retainedExecutor) && <ExtensionSkillConfigurationForm
@@ -142,25 +146,25 @@ function SkillForm({ initial, agents, tools, executors, onSave, onCancel }: {
       />}
       {!selectedExecutor?.available && <p className="settings-error" role="alert">{selectedExecutor?.unavailableReason ?? retainedExecutor?.unavailableReason}</p>}
     </> : <>
-      <label>Agent<select aria-label="Skill agent" value={draft.agentId} onChange={(event) => chooseAgent(event.target.value)}>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
-      <label>Workflow instructions<textarea aria-label="Skill instructions" value={draft.systemPrompt} onChange={(event) => setDraft((before) => before.execution === 'extension' ? before : { ...before, systemPrompt: event.target.value })} /></label>
+      <Field label="Agent"><Select aria-label="Skill agent" value={draft.agentId} onChange={(event) => chooseAgent(event.target.value)}>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</Select></Field>
+      <Field label="Workflow instructions"><Textarea aria-label="Skill instructions" value={draft.systemPrompt} onChange={(event) => setDraft((before) => before.execution === 'extension' ? before : { ...before, systemPrompt: event.target.value })} /></Field>
       <fieldset className="agent-tool-list"><legend>Required tools</legend>{agentTools.map((tool) => <SwitchFieldInput
       key={tool.id} checked={requiredToolIds.includes(tool.id)} label={tool.name} hint={tool.description} disabled={!tool.available}
       onCheckedChange={(checked) => setDraft((before) => before.execution === 'extension' ? before : { ...before, requiredToolIds: checked ? [...requiredToolIds, tool.id] : requiredToolIds.filter((id) => id !== tool.id) })}
       />)}</fieldset>
     </>}
     {error && <p className="settings-error" role="alert">{error}</p>}
-    <div className="settings-actions"><button type="button" className="settings-save" onClick={() => void save(draft)}>Save skill</button><button type="button" className="settings-secondary" onClick={onCancel}>Cancel</button></div>
+    <div className="settings-actions"><Button variant="primary" onClick={() => void save(draft)}>Save skill</Button><Button onClick={onCancel}>Cancel</Button></div>
   </div>
 }
 
 function SkillRow({ skill, agentName, onEdit, onRemove }: {
   skill: SkillDefinition; agentName: string; onEdit?: () => void; onRemove: () => void
 }) {
-  return <div className="tool-setting"><span><strong>/{skill.label}</strong><small>{skill.description}</small><code>{agentName}</code></span><div className="tool-setting-actions">
-    {onEdit && <button type="button" onClick={onEdit}>Edit</button>}
-    <ConfirmButton label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove /${skill.label}`} confirmAriaLabel={`Confirm removing /${skill.label}`} onConfirm={onRemove} />
-  </div></div>
+  return <ListRow title={`/${skill.label}`} description={skill.description} meta={agentName} actions={<>
+    {onEdit && <Button size="sm" onClick={onEdit}>Edit</Button>}
+    <ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove /${skill.label}`} confirmAriaLabel={`Confirm removing /${skill.label}`} onConfirm={onRemove} />
+  </>} />
 }
 
 export function AgentSettings({ extensionTools = [], extensionExecutors = [], reportError }: {
@@ -199,9 +203,9 @@ export function AgentSettings({ extensionTools = [], extensionExecutors = [], re
     await done?.()
   }
   return <>
-    <section className="settings-section" aria-labelledby={agentsHeadingId}><h2 id={agentsHeadingId}>Agents</h2><div className="tool-list">{agents.map((agent) => <div className="tool-setting" key={agent.id}><span><strong>{agent.name}</strong><small>{agent.description}</small><code>{agent.toolIds.length} tool(s)</code></span><div className="tool-setting-actions"><button type="button" onClick={() => setAgentDraft({ ...agent, toolIds: [...agent.toolIds] })}>Edit</button><ConfirmButton label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove ${agent.name}`} confirmAriaLabel={`Confirm removing ${agent.name}`} onConfirm={() => void perform(() => removeAgent(agent.id), () => publish('agents'))} /></div></div>)}</div>
+    <section className="settings-section" aria-labelledby={agentsHeadingId}><h2 id={agentsHeadingId}>Agents</h2><div className="tool-list">{agents.map((agent) => <ListRow key={agent.id} title={agent.name} description={agent.description} meta={`${agent.toolIds.length} tool(s)`} actions={<><Button size="sm" onClick={() => setAgentDraft({ ...agent, toolIds: [...agent.toolIds] })}>Edit</Button><ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove ${agent.name}`} confirmAriaLabel={`Confirm removing ${agent.name}`} onConfirm={() => void perform(() => removeAgent(agent.id), () => publish('agents'))} /></>} />)}</div>
       {syncError?.section === 'agents' && <p className="settings-error" role="alert">{syncError.message}</p>}
-      {agentDraft ? <AgentForm initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} /> : <button type="button" className="settings-secondary add-tool" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.filter((tool) => tool.available && !tool.isExtension).map((tool) => tool.id) })}>+ Add agent</button>}
+      {agentDraft ? <AgentForm initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} /> : <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.filter((tool) => tool.available && !tool.isExtension).map((tool) => tool.id) })}>Add agent</Button>}
     </section>
     <section className="settings-section" aria-labelledby={skillsHeadingId}><h2 id={skillsHeadingId}>Skills</h2><p className="settings-hint">Choose an LLM agent or an installed extension executor. Extensions provide declarative fields but never install commands or skills.</p><div className="tool-list">{skills.map((skill) => <SkillRow
       key={skill.id} skill={skill}
@@ -210,8 +214,8 @@ export function AgentSettings({ extensionTools = [], extensionExecutors = [], re
       onRemove={() => void perform(() => removeSkill(skill.id), () => publish('skills'))}
     />)}</div>
       {syncError?.section === 'skills' && <p className="settings-error" role="alert">{syncError.message}</p>}
-      {skillDraft ? <SkillForm initial={skillDraft} agents={agents} tools={tools} executors={extensionExecutors} onSave={async (draft) => { await saveSkill(draft); setSkillDraft(null); await publish('skills') }} onCancel={() => setSkillDraft(null)} /> : <button type="button" className="settings-secondary add-tool" onClick={() => setSkillDraft({ label: '', description: '', execution: 'llm', systemPrompt: '', agentId: agents[0]?.id ?? '', requiredToolIds: [] })}>+ Add skill</button>}
-      <ConfirmButton label="Restore built-in agents and skills" confirmLabel="Confirm restore built-ins" className="settings-secondary reset-agents" onConfirm={() => void perform(reset, () => publish('skills'))} />
+      {skillDraft ? <SkillForm initial={skillDraft} agents={agents} tools={tools} executors={extensionExecutors} onSave={async (draft) => { await saveSkill(draft); setSkillDraft(null); await publish('skills') }} onCancel={() => setSkillDraft(null)} /> : <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setSkillDraft({ label: '', description: '', execution: 'llm', systemPrompt: '', agentId: agents[0]?.id ?? '', requiredToolIds: [] })}>Add skill</Button>}
+      <ConfirmButton label="Restore built-in agents and skills" confirmLabel="Confirm restore built-ins" className="reset-agents" onConfirm={() => void perform(reset, () => publish('skills'))} />
     </section>
   </>
 }

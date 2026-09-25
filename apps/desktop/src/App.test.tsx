@@ -74,11 +74,11 @@ describe('App view switching', () => {
     ))
   })
 
-  it('shows local storage in a dedicated backend widget', async () => {
+  it('shows local storage in the sidebar status', async () => {
     const { container } = await renderApp()
 
     expect(screen.queryByRole('status', { name: 'Storage backend: local' })).not.toBeNull()
-    expect(container.querySelector('.storage-backend-widget')?.textContent).toBe('local')
+    expect(container.querySelector('.sidebar-storage-label')?.textContent).toBe('local')
   })
 
   it('opens the permanent Tasks destination without storing it as a shortcut', async () => {
@@ -324,8 +324,7 @@ describe('App view switching', () => {
     expect(screen.queryByRole('status', {
       name: 'Storage backend: server: https://notes.example.com',
     })).not.toBeNull()
-    expect(container.querySelector('.storage-backend-widget')?.textContent)
-      .toBe('server: https://notes.example.com')
+    expect(container.querySelector('.sidebar-storage-label')?.textContent).toBe('server')
   })
 
   it('persists undo as a compensating event targeting the durable typing event', async () => {
@@ -570,10 +569,10 @@ describe('App view switching', () => {
     await user.click(editor)
     await user.keyboard('/todo{Enter}')
 
-    // An outline command is a single activity: one call header, no sub-events.
+    // An outline command is a single activity row with no steps of its own.
     expect(screen.getAllByText('/todo')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: 'Collapse execution for /todo' })).toBeTruthy()
-    expect(screen.queryByRole('list', { name: 'Execution timeline for /todo' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Open /todo' }))
+    expect(screen.getByText('No steps were recorded for this call.')).toBeTruthy()
   })
 
   it('fully hides the activity sidebar from the header toggle', async () => {

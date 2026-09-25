@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import type {
   ExtensionJsonObject,
   ExtensionJsonValue,
@@ -5,6 +6,8 @@ import type {
   ExtensionSkillConfigurationForm as ExtensionSkillConfigurationFormDefinition,
 } from '@forage/agent-runtime'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { Button } from '../ui/Button'
+import { Input, Select, Textarea } from '../ui/Field'
 
 export interface ConfigurationIssue {
   path: Array<string | number>
@@ -164,16 +167,16 @@ function Fields({ fields, path, configuration, issues, onChange }: {
     </div>
     if (field.type === 'choice') return <label key={field.key} className="extension-skill-field">
       <FieldLabel field={field} />
-      <select aria-label={field.label} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value || undefined))}>
+      <Select aria-label={field.label} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value || undefined))}>
         {!field.required && <option value="">Not set</option>}
         {field.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
+      </Select>
       <FieldHints description={field.description} error={error} />
     </label>
     if (field.type === 'text' || field.type === 'multiline') {
       const control = field.type === 'multiline'
-        ? <textarea aria-label={field.label} rows={3} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
-        : <input aria-label={field.label} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
+        ? <Textarea aria-label={field.label} rows={3} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
+        : <Input aria-label={field.label} value={typeof value === 'string' ? value : ''} maxLength={field.maxLength} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value))} />
       return <label key={field.key} className={field.type === 'multiline' ? 'extension-skill-field is-wide' : 'extension-skill-field'}>
         <FieldLabel field={field} />
         {control}
@@ -182,7 +185,7 @@ function Fields({ fields, path, configuration, issues, onChange }: {
     }
     if (field.type === 'number') return <label key={field.key} className="extension-skill-field">
       <FieldLabel field={field} />
-      <input aria-label={field.label} type="number" value={typeof value === 'number' ? value : ''} min={field.minimum} max={field.maximum} step={field.integer ? 1 : 'any'} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value === '' ? undefined : event.target.valueAsNumber))} />
+      <Input aria-label={field.label} type="number" value={typeof value === 'number' ? value : ''} min={field.minimum} max={field.maximum} step={field.integer ? 1 : 'any'} onChange={(event) => onChange(updateAt(configuration, fieldPath, event.target.value === '' ? undefined : event.target.valueAsNumber))} />
       <FieldHints description={field.description} error={error} />
     </label>
     if (field.type === 'object') return <fieldset key={field.key} className="extension-skill-group is-wide">
@@ -209,11 +212,11 @@ function Fields({ fields, path, configuration, issues, onChange }: {
           </div>
         </li>)}
       </ol>
-      <button type="button" className="settings-secondary extension-skill-add" aria-label={`Add ${field.label}`} disabled={items.length >= field.maximumItems} onClick={() => {
+      <Button variant="add" icon={<Plus aria-hidden="true" />} className="extension-skill-add" aria-label={`Add ${field.label}`} disabled={items.length >= field.maximumItems} onClick={() => {
         const item: ExtensionJsonObject = {}
         applyDefaults(field.fields, item)
         onChange(updateAt(configuration, fieldPath, [...items, item]))
-      }}>+ Add another</button>
+      }}>Add another</Button>
       <FieldHints error={error} />
     </fieldset>
   })}</>
