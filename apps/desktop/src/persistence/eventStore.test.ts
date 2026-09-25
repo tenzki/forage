@@ -101,4 +101,68 @@ describe('native event repository', () => {
       'agent_run_place_result', 'agent_run_retry', 'agent_run_interrupt_unfinished',
     ])
   })
+
+  it('loads mixed legacy, threaded, and answered run history', async () => {
+    const snapshot = {
+      version: 1 as const, runId: 'run-legacy', executionMode: 'local' as const, outlineId: 'outline-1',
+      source: { nodeId: 'source-1' }, target: { parentId: 'source-1' },
+      baseRevision: 0, configurationRevision: 1, credentialRef: 'local-openai',
+      agent: {
+        id: 'agent-1', name: 'Agent', description: 'Research agent', systemPrompt: 'Research.',
+        modelId: 'gpt-5', toolIds: [],
+      },
+      skill: {
+        id: 'research', label: 'research', description: 'Research', systemPrompt: 'Summarize.',
+        agentId: 'agent-1', requiredToolIds: [],
+      },
+      effectiveToolIds: [], prompt: 'Research this.', context: [],
+    }
+    const outline = { version: 1, nodes: [{ type: 'text', text: 'Finding' }], sources: [] }
+    const answer = { version: 1, type: 'answer', text: 'Because the source is primary.' }
+    const run = (id: string, runSnapshot: object, result: object | null) => ({
+      run: {
+        id, outlineId: 'outline-1', snapshot: runSnapshot, status: 'completed', attemptCount: 1,
+        resultIdentity: `result:${id}`, result, retryOfRunId: null, cancelRequestedAt: null, errorCode: null,
+        createdAt: '2026-09-25T10:00:00.000Z', updatedAt: '2026-09-25T10:00:01.000Z',
+      },
+      activity: [],
+    })
+    invoke.mockResolvedValueOnce([
+      run('run-legacy', snapshot, outline),
+      run('run-1', { ...snapshot, runId: 'run-1', thread: { callId: 'run-1', turn: 1 } }, outline),
+      run('run-2', { ...snapshot, runId: 'run-2', prompt: 'Why?', thread: { callId: 'run-1', turn: 2 } }, answer),
+    ])
+
+    const history = await new NativeEventRepository().recentAgentRuns('outline-1')
+
+    expect(history.map(({ run: loaded }) => loaded.snapshot.version === 1 ? loaded.snapshot.thread : null)).toEqual([
+      undefined, { callId: 'run-1', turn: 1 }, { callId: 'run-1', turn: 2 },
+    ])
+    expect(history.map(({ run: loaded }) => loaded.result)).toEqual([outline, outline, answer])
+  })
+
+  it('rejects an inline answer stored on a run without a conversation turn', async () => {
+    invoke.mockResolvedValueOnce({
+      id: 'run-1', outlineId: 'outline-1', status: 'completed', attemptCount: 1,
+      resultIdentity: 'result:run-1', retryOfRunId: null, cancelRequestedAt: null, errorCode: null,
+      createdAt: '2026-09-25T10:00:00.000Z', updatedAt: '2026-09-25T10:00:01.000Z',
+      result: { version: 1, type: 'answer', text: 'Answer.' },
+      snapshot: {
+        version: 1, runId: 'run-1', executionMode: 'local', outlineId: 'outline-1',
+        source: { nodeId: 'source-1' }, target: { parentId: 'source-1' },
+        baseRevision: 0, configurationRevision: 1, credentialRef: 'local-openai',
+        agent: {
+          id: 'agent-1', name: 'Agent', description: 'Research agent', systemPrompt: 'Research.',
+          modelId: 'gpt-5', toolIds: [],
+        },
+        skill: {
+          id: 'research', label: 'research', description: 'Research', systemPrompt: 'Summarize.',
+          agentId: 'agent-1', requiredToolIds: [],
+        },
+        effectiveToolIds: [], prompt: 'Research this.', context: [],
+      },
+    })
+
+    await expect(new NativeEventRepository().agentRun('run-1')).rejects.toThrow(/conversation turns/i)
+  })
 })

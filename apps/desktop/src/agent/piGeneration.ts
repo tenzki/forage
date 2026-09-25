@@ -2,7 +2,7 @@ import { resolveCodexAuth, type CodexAuthConfig, type GenerateInput, type Genera
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
 import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
 import { safeToolDetail, type ActivityReporter } from './activity'
-import type { LocalExtensionSnapshot } from '@forage/agent-runtime'
+import type { LocalExtensionSnapshot, RunThread } from '@forage/agent-runtime'
 
 export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
@@ -25,6 +25,9 @@ interface RunPayload {
   outlineSnapshot?: string
   extensionSnapshot?: LocalExtensionSnapshot
   extensionSecrets?: Record<string, Record<string, string>>
+  /** The call conversation turn; replies resume the call's stored session. */
+  thread?: RunThread
+  invocationOutline?: string[]
 }
 
 export async function generateWithPi(
@@ -34,6 +37,8 @@ export async function generateWithPi(
     outlineSnapshot?: string
     extensionSnapshot?: LocalExtensionSnapshot
     extensionSecrets?: Record<string, Record<string, string>>
+    thread?: RunThread
+    invocationOutline?: string[]
   },
   options: PiGenerateOptions,
 ): Promise<string> {
@@ -162,6 +167,8 @@ export async function generateWithPi(
       outlineSnapshot: input.outlineSnapshot,
       extensionSnapshot: input.extensionSnapshot,
       extensionSecrets: input.extensionSecrets,
+      ...(input.thread ? { thread: input.thread } : {}),
+      ...(input.invocationOutline ? { invocationOutline: input.invocationOutline } : {}),
     })
     for (let attempt = 0; attempt < 2 && !outline && !text; attempt += 1) {
       const settled = client.waitForSettled()

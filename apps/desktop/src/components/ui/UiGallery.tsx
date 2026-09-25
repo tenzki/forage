@@ -58,6 +58,25 @@ const SAMPLE_CALLS: ActivityCall[] = [
     status: 'error', timestamp: minutes(90), durationMs: 3_000, events: [],
   },
   { id: 'cmd-1', kind: 'command', label: '/todo', nodeId: 'garden', status: 'complete', timestamp: minutes(24 * 60 + 5), events: [] },
+  {
+    id: 'run-4', kind: 'skill', label: 'Run /research note-taking methods', detail: 'note-taking methods', nodeId: 'garden',
+    thread: { callId: 'run-4', turn: 1 }, status: 'complete', timestamp: minutes(30), durationMs: 9_800,
+    events: [
+      { id: 's4', kind: 'tool', label: 'web_search', detail: 'query: zettelkasten vs PARA', status: 'complete', timestamp: minutes(30), durationMs: 800 },
+      { id: 'o4', kind: 'output', label: 'Open result', nodeId: 'garden', status: 'complete', timestamp: minutes(29) },
+    ],
+  },
+  {
+    id: 'run-5', kind: 'skill', label: 'Run /research note-taking methods', detail: 'note-taking methods', nodeId: 'garden',
+    thread: { callId: 'run-4', turn: 2 }, note: 'Which source compared them directly?', status: 'complete',
+    answer: 'The zettelkasten.de introduction compares both methods directly.\n\nThe PARA write-up only mentions zettelkasten in passing.',
+    timestamp: minutes(12), durationMs: 2_100, events: [],
+  },
+  {
+    id: 'run-6', kind: 'skill', label: 'Run /research note-taking methods', detail: 'note-taking methods', nodeId: 'garden',
+    thread: { callId: 'run-4', turn: 3 }, note: 'Add a comparison bullet for them.', status: 'running',
+    answer: 'I will add a comparison', timestamp: minutes(1), events: [],
+  },
 ]
 
 const SAMPLE_NODES: Record<string, { title: string; bulletCount: number }> = {

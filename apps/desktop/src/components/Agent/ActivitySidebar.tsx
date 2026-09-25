@@ -1,11 +1,11 @@
 // Agent activity panel (Screens 07A/07B in docs/desktop.pen).
 //
-// The list shows one row per skill call — a skill run on a bullet, plus its
-// steered follow-ups as later versions. Opening a row shows the call's thread:
-// the searches it ran, the pages it read, one write entry per version and the
-// user's steering notes, with a composer that starts the next version.
+// The list shows one row per skill call — a skill run on a bullet, plus the
+// replies to it. Opening a row shows the call's thread: the searches it ran, the
+// pages it read, the user's replies, the agent's inline answers and one write
+// entry per outline version, with a composer for the next reply.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
   ArrowUp,
@@ -29,6 +29,7 @@ import {
   User,
   Wrench,
 } from 'lucide-react'
+import type { RunThread } from '@forage/agent-runtime'
 import { replacedOutput } from '../../agent/skillRuns'
 import {
   groupSkillCalls,
@@ -71,6 +72,10 @@ export interface ActivityCall {
   placementPending?: boolean
   /** The user's steering note that started this iteration, if it was one. */
   note?: string
+  /** Conversation turn, for local calls that keep an agent conversation. */
+  thread?: RunThread
+  /** Inline answer of a conversation reply, streamed while it runs. */
+  answer?: string
   events: ActivityEntry[]
 }
 
@@ -132,9 +137,8 @@ function CallStatusPill({ status }: { status: ActivityStatus }) {
 function versionSummary(group: SkillCallGroup): string | null {
   if (group.kind !== 'skill') return null
   const count = group.iterations.length
-  const produced = group.iterations.some(({ call }) => call.status === 'complete' || call.status === 'running')
-  if (!produced) return 'No output'
-  return `v${count}  ·  ${count} ${count === 1 ? 'iteration' : 'iterations'}`
+  if (!group.versions) return group.iterations.some(({ call }) => call.answer) ? `${count} ${count === 1 ? 'iteration' : 'iterations'}` : 'No output'
+  return `v${group.versions}  ·  ${count} ${count === 1 ? 'iteration' : 'iterations'}`
 }
 
 function activitySummary(groups: SkillCallGroup[]): string {
@@ -335,6 +339,21 @@ function OutputEntry({ item, group, describeNode, onOpenNode }: {
   )
 }
 
+function AnswerEntry({ item }: { item: Extract<ThreadItem, { type: 'answer' }> }) {
+  const paragraphs = item.text.split(/\n{2,}/u).filter((paragraph) => paragraph.trim())
+  return (
+    <div className={`activity-agent-note is-answer${item.streaming ? ' is-streaming' : ''}`}>
+      <span className="activity-avatar is-agent">{item.streaming ? <LoaderCircle className="is-spinning" /> : <Sparkles />}</span>
+      <div>
+        <span className="activity-note-meta">Agent  ·  {clockTime(item.call.timestamp)}</span>
+        {paragraphs.length
+          ? paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)
+          : <p className="activity-note-detail">Thinking…</p>}
+      </div>
+    </div>
+  )
+}
+
 function ThreadEvent({ entry }: { entry: Extract<ThreadItem, { type: 'event' }>['entry'] }) {
   return (
     <div className={`activity-agent-note is-${entry.status}`}>
@@ -360,11 +379,19 @@ function Composer({ group, running, onSteer }: {
     onSteer(trimmed)
     setNote('')
   }
+  // A conversational call answers inline or revises; others always write a new version.
+  const { conversational, versions } = group
+  const placeholder = running
+    ? conversational ? 'Wait for the agent to finish, or stop it.' : `Wait for v${versions} to finish, or stop it.`
+    : conversational ? 'Ask a question or request a change…' : 'Steer this call…'
+  const hint = conversational
+    ? versions ? `Answers here, or replaces v${versions} with v${versions + 1}` : 'Answers here, or writes a new version'
+    : `Replaces v${versions} with v${versions + 1}`
   return (
     <div className="activity-composer">
       <textarea
-        aria-label={`Steer ${group.title}`}
-        placeholder={running ? `Wait for v${group.iterations.length} to finish, or stop it.` : 'Steer this call…'}
+        aria-label={`${conversational ? 'Reply to' : 'Steer'} ${group.title}`}
+        placeholder={placeholder}
         value={note}
         disabled={running}
         rows={2}
@@ -377,15 +404,18 @@ function Composer({ group, running, onSteer }: {
         }}
       />
       <div className="activity-composer-bar">
-        <span className="activity-composer-hint">Replaces v{group.iterations.length} with v{group.iterations.length + 1}</span>
+        <span className="activity-composer-hint">{hint}</span>
         <span className="activity-composer-key">⌘ Enter</span>
-        <button type="button" className="activity-composer-send" aria-label="Send steering note" disabled={!note.trim() || running} onClick={send}>
+        <button type="button" className="activity-composer-send" aria-label={conversational ? 'Send reply' : 'Send steering note'} disabled={!note.trim() || running} onClick={send}>
           <ArrowUp aria-hidden="true" />
         </button>
       </div>
     </div>
   )
 }
+
+/** Distance from the bottom within which the thread keeps following new steps. */
+const FOLLOW_THRESHOLD_PX = 32
 
 function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, onCancel, canCancel, canSteer, onSteer, onPlaceResult }: {
   group: SkillCallGroup
@@ -410,6 +440,18 @@ function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, 
   const goTo = resultNodeId ?? group.nodeId
   const stoppable = running && onCancel && canCancel?.(group.latest.id)
   const steerable = Boolean(onSteer && canSteer?.(group))
+
+  // Follow new steps while the reader is at the bottom of the thread. Scrolling up
+  // to read stops following; opening a call or sending a reply starts it again.
+  const threadRef = useRef<HTMLDivElement>(null)
+  const followRef = useRef(true)
+  useLayoutEffect(() => {
+    followRef.current = true
+  }, [group.id])
+  useLayoutEffect(() => {
+    const element = threadRef.current
+    if (element && followRef.current) element.scrollTop = element.scrollHeight
+  }, [group.id, thread, group.status, group.latest.detail])
 
   return (
     <div className="activity-detail">
@@ -451,7 +493,15 @@ function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, 
         )}
       </div>
 
-      <div className="activity-thread" aria-label={`Steps for ${group.title}`}>
+      <div
+        ref={threadRef}
+        className="activity-thread"
+        aria-label={`Steps for ${group.title}`}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_THRESHOLD_PX
+        }}
+      >
         {thread.map((item, index) => {
           if (item.type === 'note') {
             return (
@@ -466,6 +516,7 @@ function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, 
           }
           if (item.type === 'tools') return <ToolGroup key={index} item={item} />
           if (item.type === 'output') return <OutputEntry key={index} item={item} group={group} describeNode={describeNode} onOpenNode={onOpenNode} />
+          if (item.type === 'answer') return <AnswerEntry key={index} item={item} />
           return <ThreadEvent key={index} entry={item.entry} />
         })}
         {!thread.length && (
@@ -482,7 +533,16 @@ function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, 
         )}
       </div>
 
-      {steerable && onSteer && <Composer group={group} running={running} onSteer={(note) => onSteer(group, note)} />}
+      {steerable && onSteer && (
+        <Composer
+          group={group}
+          running={running}
+          onSteer={(note) => {
+            followRef.current = true
+            onSteer(group, note)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -510,9 +570,9 @@ export function ActivitySidebar({
   canCancel?: (runId: string) => boolean
   /** Title and size of an outline bullet, for call context and write summaries. */
   describeNode?: (nodeId: string) => ActivityNodeInfo | null
-  /** Whether a skill call can take a steering note. */
+  /** Whether a skill call can take a reply. */
   canSteer?: (group: SkillCallGroup) => boolean
-  /** Start the next version of a skill call from the user's note. */
+  /** Reply to a skill call: continue its conversation, or start its next version. */
   onSteer?: (group: SkillCallGroup, note: string) => void
   collapsed?: boolean
 }) {
@@ -591,7 +651,7 @@ export function ActivitySidebar({
             ))}
           </div>
           {groups.some((group) => group.kind === 'skill') && (
-            <p className="activity-footer-hint"><Info aria-hidden="true" /> Open a call to see its steps and steer it.</p>
+            <p className="activity-footer-hint"><Info aria-hidden="true" /> Open a call to see its steps and reply to it.</p>
           )}
         </>
       )}

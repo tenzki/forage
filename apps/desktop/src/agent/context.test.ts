@@ -3,7 +3,12 @@ import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes } from '../editor/extensions'
 import { InternalLink } from '../editor/internalLinks'
-import { AGENT_CONTEXT_MAX_CHARACTERS, resolveAgentContext, resolveExtensionSkillContext } from './context'
+import {
+  AGENT_CONTEXT_MAX_CHARACTERS,
+  resolveAgentContext,
+  resolveExtensionSkillContext,
+  resolveFollowUpContext,
+} from './context'
 
 type TextPart = { text: string; targetId?: string }
 
@@ -89,6 +94,36 @@ describe('agent branch and reference context', () => {
   it('blocks oversized context instead of truncating it', () => {
     editor = makeEditor([item('large', 'x'.repeat(AGENT_CONTEXT_MAX_CHARACTERS), [item('command', '/ask')])])
     expect(() => resolveAgentContext(editor!.state.doc, 'command')).toThrow(/safety limit/)
+  })
+
+  it('adds the invocation subtree to reply context, marking agent and user bullets', () => {
+    editor = makeEditor([item('a', 'A', [
+      item('a1', 'A1'),
+      item('command', '/research tides', [
+        item('out-1', 'Tides follow the moon.', [item('out-1a', 'Source: NOAA', [], { nodeType: 'ai' })], { nodeType: 'ai' }),
+        item('note', 'My own note', [item('note-1', '')]),
+      ]),
+    ])])
+    const followUp = resolveFollowUpContext(editor.state.doc, 'command')
+
+    expect(followUp.context).toEqual(resolveAgentContext(editor.state.doc, 'command'))
+    expect(followUp.invocationOutline).toEqual([
+      '- [agent] Tides follow the moon.',
+      '  - [agent] Source: NOAA',
+      '- [user] My own note',
+      '  - [user] (empty)',
+    ])
+    expect(resolveFollowUpContext(editor.state.doc, 'a1').invocationOutline).toEqual([])
+  })
+
+  it('counts the invocation subtree against the reply context budget', () => {
+    const half = 'x'.repeat(AGENT_CONTEXT_MAX_CHARACTERS / 2)
+    editor = makeEditor([item('a', half, [item('command', '/ask', [item('out', half, [], { nodeType: 'ai' })])])])
+    expect(() => resolveAgentContext(editor!.state.doc, 'command')).not.toThrow()
+    expect(() => resolveFollowUpContext(editor!.state.doc, 'command')).toThrow(/safety limit/)
+    editor.destroy()
+    editor = makeEditor([item('a', 'A', [item('command', '/ask', Array.from({ length: 100 }, (_, index) => item(`n${index}`, `N${index}`)))])])
+    expect(() => resolveFollowUpContext(editor!.state.doc, 'command')).toThrow(/safety limit/)
   })
 
   it('builds one hierarchy-preserving generic snapshot with stable provenance and no invocation subtree', () => {

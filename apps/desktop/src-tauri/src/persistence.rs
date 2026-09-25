@@ -2,6 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -1027,6 +1028,20 @@ impl EventStore {
         )?;
         transaction.commit()?;
         Ok(removed)
+    }
+
+    /// Call identities of every remaining conversation turn, across all outlines.
+    /// A call's agent session file is kept only while one of its runs remains.
+    pub fn agent_conversation_ids(&self) -> StoreResult<HashSet<String>> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT json_extract(snapshot_json, '$.thread.callId')
+             FROM local_agent_runs
+             WHERE json_type(snapshot_json, '$.thread.callId') = 'text'",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<Result<HashSet<_>, _>>()
+            .map_err(StoreError::from)
     }
 
     pub fn cancel_agent_run(&self, run_id: &str, cancelled_at: &str) -> StoreResult<()> {

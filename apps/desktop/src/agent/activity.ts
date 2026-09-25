@@ -1,3 +1,4 @@
+import type { RunThread } from '@forage/agent-runtime'
 import type { ActivityKind, ActivityStatus } from '../components/Agent/ActivitySidebar'
 
 export type ActivityPhase = 'start' | 'complete' | 'error' | 'cancelled'
@@ -15,6 +16,10 @@ export interface ActivityEvent {
   placementPending?: boolean
   durationMs?: number
   note?: string
+  /** Conversation turn of a local call run; set on the call-level event. */
+  thread?: RunThread
+  /** Inline answer text of a conversation reply, streamed or final. An empty string clears it. */
+  answer?: string
 }
 
 export type ActivityReporter = (event: ActivityEvent) => void

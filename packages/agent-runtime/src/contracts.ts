@@ -288,6 +288,20 @@ const runSourceSchema = z.object({
 }).strict()
 const runTargetSchema = z.object({ parentId: runtimeIdSchema }).strict()
 
+/**
+ * Call identity names a local conversation's session file, so it is limited to a
+ * path-safe charset rather than the general runtime ID shape.
+ */
+export const callIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, 'Call IDs must be 1-128 letters, digits, underscores, or hyphens')
+
+/** A skill call's conversation turn. The first run of a call uses its own run ID as the call ID and turn 1. */
+export const runThreadSchema = z.object({
+  callId: callIdSchema,
+  turn: z.number().int().positive(),
+}).strict()
+
+export type RunThread = z.infer<typeof runThreadSchema>
+
 export const runInputSchema = z.object({
   version: z.literal(1),
   runId: runtimeIdSchema,
@@ -306,6 +320,8 @@ export const runInputSchema = z.object({
   customTools: z.array(customToolDefinitionSchema).max(100).optional(),
   outlineSnapshot: z.string().max(500_000).optional(),
   localExtensionSnapshot: localExtensionSnapshotSchema.optional(),
+  thread: runThreadSchema.optional(),
+  invocationOutline: z.array(z.string().max(40_000)).max(100).optional(),
 }).strict().superRefine((input, context) => {
   if (input.skill.agentId !== input.agent.id) {
     context.addIssue({ code: 'custom', path: ['skill', 'agentId'], message: 'Skill does not reference the snapshotted agent' })
@@ -319,6 +335,13 @@ export const runInputSchema = z.object({
         message: `Required tool is unavailable: ${requiredToolId}`,
       })
     }
+  }
+  if (input.invocationOutline && (input.thread?.turn ?? 1) < 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['invocationOutline'],
+      message: 'Only conversation replies carry the invocation outline',
+    })
   }
   if (input.executionMode === 'server' && input.localExtensionSnapshot) {
     context.addIssue({
@@ -572,6 +595,26 @@ export const structuredResultV2Schema = z.object({
 
 export const structuredResultSchema = z.union([structuredResultV1Schema, structuredResultV2Schema])
 
+export const MAX_ANSWER_CHARS = 20_000
+
+/**
+ * A local follow-up turn that answered inline instead of emitting an outline. It is
+ * stored as the run's result and never placed, so it stays out of the server's
+ * structured result union.
+ */
+export const localAnswerResultSchema = z.object({
+  version: z.literal(1),
+  type: z.literal('answer'),
+  text: z.string().trim().min(1).max(MAX_ANSWER_CHARS),
+}).strict()
+
+export type LocalAnswerResult = z.infer<typeof localAnswerResultSchema>
+export type LocalRunResult = StructuredResult | LocalAnswerResult
+
+export function isLocalAnswerResult(result: LocalRunResult): result is LocalAnswerResult {
+  return 'type' in result && result.type === 'answer'
+}
+
 export type StructuredResultV1 = z.infer<typeof structuredResultV1Schema>
 export type StructuredResultV2 = z.infer<typeof structuredResultV2Schema>
 export type StructuredResult = z.infer<typeof structuredResultSchema>
@@ -638,6 +681,16 @@ export function parseStructuredResult(
   if (measurement.text > MAX_RESULT_TEXT_CHARS) throw new Error(`Structured result exceeds maximum text size of ${MAX_RESULT_TEXT_CHARS}`)
   if (measurement.segments > MAX_RESULT_SEGMENTS) throw new Error(`Structured result exceeds maximum segment count of ${MAX_RESULT_SEGMENTS}`)
   return result
+}
+
+export function parseLocalRunResult(
+  value: unknown,
+  options: StructuredResultParseOptions = {},
+): LocalRunResult {
+  if (value && typeof value === 'object' && (value as { type?: unknown }).type === 'answer') {
+    return localAnswerResultSchema.parse(value)
+  }
+  return parseStructuredResult(value, options)
 }
 
 export function requireStructuredResultV1(result: StructuredResult): StructuredResultV1 {

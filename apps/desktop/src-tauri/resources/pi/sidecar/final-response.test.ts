@@ -33,7 +33,7 @@ describe('FinalResponseTracker', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'Queued continuation' }] },
     ], false)
 
-    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled', text: 'Queued continuation' })
+    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled', outcome: 'text', text: 'Queued continuation' })
   })
 
   it('does not retain the response from a run that Pi will retry', () => {
@@ -43,7 +43,7 @@ describe('FinalResponseTracker', () => {
       { role: 'assistant', content: [{ type: 'text', text: 'Incomplete retry response' }] },
     ], true)
 
-    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled' })
+    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled', outcome: 'text' })
   })
 
   it('clears earlier text when the final continuation has no assistant response', () => {
@@ -56,7 +56,7 @@ describe('FinalResponseTracker', () => {
       { role: 'assistant', content: [{ type: 'toolCall' }] },
     ], false)
 
-    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled' })
+    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled', outcome: 'text' })
   })
 
   it('preserves the final provider error instead of reporting an empty response', () => {
@@ -74,6 +74,31 @@ describe('FinalResponseTracker', () => {
     expect(tracker.settledEvent()).toEqual({
       type: 'process_error',
       error: 'Your ChatGPT session has expired.',
+    })
+  })
+
+  it('reports an outline outcome once emit_outline completes', () => {
+    const tracker = new FinalResponseTracker()
+
+    tracker.recordToolEnd('web_search', false)
+    tracker.recordToolEnd('emit_outline', false)
+    tracker.recordAgentEnd([
+      { role: 'assistant', content: [{ type: 'toolCall' }] },
+    ], false)
+
+    expect(tracker.settledEvent()).toEqual({ type: 'agent_settled', outcome: 'outline' })
+  })
+
+  it('reports a text outcome when the turn answers without emitting an outline', () => {
+    const tracker = new FinalResponseTracker()
+
+    tracker.recordToolEnd('emit_outline', true)
+    tracker.recordAgentEnd([
+      { role: 'assistant', content: [{ type: 'text', text: 'The second source said so.' }] },
+    ], false)
+
+    expect(tracker.settledEvent()).toEqual({
+      type: 'agent_settled', outcome: 'text', text: 'The second source said so.',
     })
   })
 })

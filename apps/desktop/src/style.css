@@ -7211,6 +7211,15 @@ body.is-dragging-rule * {
     font-size: 10px;
   }
 
+  .activity-agent-note.is-answer p {
+    color: var(--ink);
+    white-space: pre-wrap;
+  }
+
+  .activity-agent-note.is-answer .activity-note-detail {
+    white-space: normal;
+  }
+
   .activity-composer {
     display: flex;
     flex: none;

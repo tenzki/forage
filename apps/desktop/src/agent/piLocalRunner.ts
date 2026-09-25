@@ -1,5 +1,7 @@
 import {
   activityEventSchema,
+  MAX_ANSWER_CHARS,
+  parseLocalRunResult,
   parseStructuredResult,
   type ActivityEvent as RuntimeActivityEvent,
   type RunInput,
@@ -63,6 +65,8 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
       outlineSnapshot: input.outlineSnapshot,
       extensionSnapshot: input.localExtensionSnapshot,
       extensionSecrets,
+      ...(input.thread ? { thread: input.thread } : {}),
+      ...(input.invocationOutline ? { invocationOutline: input.invocationOutline } : {}),
     }, {
       signal: options.signal,
       onDelta: (nextText) => {
@@ -74,11 +78,20 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
     })
     await Promise.all(activityWrites)
     if (options.signal.aborted) throw new DOMException('Agent run cancelled.', 'AbortError')
+    // A reply that ends without an outline answers inline; it never becomes bullets.
+    if (!outline && (input.thread?.turn ?? 1) > 1) {
+      return parseLocalRunResult({ version: 1, type: 'answer', text: answerText(text || finalText) })
+    }
     const nodes = outline
       ? await materializeNodes(outline, assets)
       : textNodes(text || finalText)
     return parseStructuredResult({ version: 1, nodes, sources: [] })
   }
+}
+
+function answerText(text: string): string {
+  const trimmed = text.trim()
+  return trimmed.length > MAX_ANSWER_CHARS ? `${trimmed.slice(0, MAX_ANSWER_CHARS - 1).trimEnd()}…` : trimmed
 }
 
 function textNodes(text: string): StructuredResultNode[] {

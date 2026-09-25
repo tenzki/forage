@@ -160,4 +160,40 @@ describe('activity calls', () => {
       id: 'extension-run', label: 'Run /label', status: 'complete', placementPending: true,
     })
   })
+
+  it('rehydrates conversation turns with their reply, thread, and inline answer', () => {
+    const run = (id: string, runSnapshot: object, result: LocalAgentRunHistory['run']['result'], createdAt: string) => ({
+      run: {
+        id, outlineId: 'outline-1', snapshot: runSnapshot as LocalAgentRunHistory['run']['snapshot'], status: 'completed' as const,
+        attemptCount: 1, resultIdentity: `result:${id}`, result, retryOfRunId: null, cancelRequestedAt: null,
+        errorCode: null, createdAt, updatedAt: createdAt,
+      },
+      activity: [],
+    })
+    const calls = callsFromHistory([
+      run('run-1', { ...snapshot, thread: { callId: 'run-1', turn: 1 } },
+        { version: 1, nodes: [{ type: 'text', text: 'Finding' }], sources: [] }, '2026-09-25T10:00:00.000Z'),
+      run('run-2', {
+        ...snapshot, runId: 'run-2', prompt: 'Which source said that?', thread: { callId: 'run-1', turn: 2 },
+        invocationOutline: ['- [agent] Finding'],
+      }, { version: 1, type: 'answer', text: 'The Tauri docs.' }, '2026-09-25T10:01:00.000Z'),
+    ])
+
+    expect(calls[0]).toMatchObject({ label: 'Run /research research tauri', thread: { callId: 'run-1', turn: 1 } })
+    expect(calls[0].answer).toBeUndefined()
+    expect(calls[1]).toMatchObject({
+      label: 'Run /research research tauri', detail: 'research tauri', note: 'Which source said that?',
+      thread: { callId: 'run-1', turn: 2 }, answer: 'The Tauri docs.',
+    })
+  })
+
+  it('streams a reply answer into its call and clears it when the turn ends without one', () => {
+    let calls: ActivityCall[] = []
+    calls = applyActivityEvent(calls, { id: 'run-2', phase: 'start', kind: 'skill', label: 'Run /research x', thread: { callId: 'run-1', turn: 2 } }, 1)
+    calls = applyActivityEvent(calls, { id: 'run-2', phase: 'start', kind: 'skill', label: 'Run /research x', answer: 'Partial' }, 2)
+    expect(calls[0]).toMatchObject({ thread: { callId: 'run-1', turn: 2 }, answer: 'Partial', status: 'running' })
+    calls = applyActivityEvent(calls, { id: 'run-2', phase: 'cancelled', kind: 'skill', label: 'Run /research x', answer: '' }, 3)
+    expect(calls[0].answer).toBeUndefined()
+    expect(calls[0].thread).toEqual({ callId: 'run-1', turn: 2 })
+  })
 })

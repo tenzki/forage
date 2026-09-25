@@ -9,6 +9,7 @@ use tauri::State;
 pub struct NativeState {
     pub event_store: EventStore,
     pub asset_store: AssetStore,
+    pub agent_sessions_dir: std::path::PathBuf,
     pub http_client: reqwest::Client,
 }
 
@@ -477,10 +478,17 @@ pub fn agent_run_recent(
 
 #[tauri::command]
 pub fn agent_runs_clear(state: State<'_, NativeState>, outline_id: String) -> Result<usize, String> {
-    state
+    let removed = state
         .event_store
         .clear_agent_runs(&outline_id)
-        .map_err(command_error)
+        .map_err(command_error)?;
+    // The history is already gone; a file left behind is pruned at next startup.
+    if let Err(error) =
+        crate::agent_sessions::prune_orphaned(&state.event_store, &state.agent_sessions_dir)
+    {
+        eprintln!("failed to delete cleared agent session files: {error}");
+    }
+    Ok(removed)
 }
 
 #[tauri::command]

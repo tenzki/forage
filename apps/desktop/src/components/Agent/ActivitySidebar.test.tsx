@@ -89,6 +89,84 @@ describe('activity sidebar', () => {
     expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'skill-1' }), 'Add a todo for a weekly review.')
   })
 
+  it('shows a conversation with inline answers and a reply composer', () => {
+    const onSteer = vi.fn()
+    const first: ActivityCall = { ...researchRun, thread: { callId: 'skill-1', turn: 1 } }
+    const reply: ActivityCall = {
+      id: 'skill-2', kind: 'skill', label: 'Run /research tauri', detail: 'tauri', nodeId: 'bullet-1',
+      thread: { callId: 'skill-1', turn: 2 }, note: 'Which page covers permissions?',
+      answer: 'The shell plugin page.\n\nIt lists the scopes.', status: 'complete', timestamp: 10, events: [],
+    }
+    render(<ActivitySidebar
+      calls={[first, reply]}
+      onClear={() => undefined}
+      describeNode={describeNode}
+      canSteer={() => true}
+      onSteer={onSteer}
+    />)
+
+    expect(screen.getByText(/v1\s+·\s+2 iterations/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+    expect(screen.getByText('Which page covers permissions?')).toBeTruthy()
+    expect(screen.getByText('The shell plugin page.')).toBeTruthy()
+    expect(screen.getByText('It lists the scopes.')).toBeTruthy()
+    expect(screen.queryByText('replaced by v2')).toBeNull()
+    expect(screen.getByText('Answers here, or replaces v1 with v2')).toBeTruthy()
+
+    const composer = screen.getByRole('textbox', { name: 'Reply to /research tauri' })
+    fireEvent.change(composer, { target: { value: 'Add the scopes as bullets.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
+    expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'skill-1' }), 'Add the scopes as bullets.')
+  })
+
+  it('shows a running reply as a pending answer', () => {
+    const first: ActivityCall = { ...researchRun, thread: { callId: 'skill-1', turn: 1 } }
+    const reply: ActivityCall = {
+      id: 'skill-2', kind: 'skill', label: 'Run /research tauri', detail: 'tauri', nodeId: 'bullet-1',
+      thread: { callId: 'skill-1', turn: 2 }, note: 'More detail', status: 'running', timestamp: 10, events: [],
+    }
+    render(<ActivitySidebar calls={[first, reply]} onClear={() => undefined} canSteer={() => true} onSteer={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+
+    expect(screen.getByText('Thinking…')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Reply to /research tauri' })).toHaveProperty('disabled', true)
+  })
+
+  it('follows new steps at the bottom of the thread unless the reader scrolled up', () => {
+    const running = (count: number): ActivityCall => ({
+      ...researchRun,
+      status: 'running',
+      events: Array.from({ length: count }, (_, index) => ({
+        id: `thinking-${index}`, kind: 'thinking', label: `Step ${index}`, status: 'complete', timestamp: index,
+      })),
+    })
+    const { rerender } = render(<ActivitySidebar calls={[running(1)]} onClear={() => undefined} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+    const thread = screen.getByLabelText('Steps for /research tauri')
+    let scrollHeight = 500
+    let scrollTop = 0
+    Object.defineProperties(thread, {
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, get: () => 200 },
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value } },
+    })
+
+    rerender(<ActivitySidebar calls={[running(2)]} onClear={() => undefined} />)
+    expect(scrollTop).toBe(500)
+
+    scrollTop = 100
+    fireEvent.scroll(thread)
+    scrollHeight = 700
+    rerender(<ActivitySidebar calls={[running(3)]} onClear={() => undefined} />)
+    expect(scrollTop).toBe(100)
+
+    scrollTop = 500
+    fireEvent.scroll(thread)
+    scrollHeight = 900
+    rerender(<ActivitySidebar calls={[running(4)]} onClear={() => undefined} />)
+    expect(scrollTop).toBe(900)
+  })
+
   it('offers explicit recovery for a retained unplaced result', () => {
     const onPlaceResult = vi.fn()
     render(<ActivitySidebar calls={[{

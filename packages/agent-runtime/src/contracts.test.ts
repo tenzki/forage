@@ -8,12 +8,15 @@ import {
   extensionSkillDefinitionSchema,
   extensionSkillRunInputSchema,
   migrateAgentConfiguration,
+  localAnswerResultSchema,
+  parseLocalRunResult,
   parseRunSnapshot,
   parseStructuredResult,
   portableAgentConfigurationV2Schema,
   portableAgentConfigurationSchema,
   runInputSchema,
   skillDefinitionSchema,
+  structuredResultSchema,
 } from './contracts'
 
 const agent = {
@@ -101,6 +104,48 @@ describe('agent runtime contracts', () => {
     expect(runInputSchema.parse(input)).toEqual(input)
     expect(parseRunSnapshot(JSON.stringify(input))).toEqual(input)
     expect(() => parseRunSnapshot(JSON.stringify({ ...input, accessToken: 'secret' }))).toThrow(/secret/i)
+  })
+
+  it('accepts call conversation identity on first-turn and reply snapshots', () => {
+    const input = {
+      version: 1 as const, runId: 'run-1', executionMode: 'local' as const, outlineId: 'outline-1',
+      source: { nodeId: 'source-1' }, target: { parentId: 'source-1' }, baseRevision: 1,
+      configurationRevision: 3, credentialRef: 'credential-1', agent, skill: legacySkill,
+      effectiveToolIds: ['web_fetch'], prompt: 'Research this.', context: ['Inbox'],
+    }
+    const first = { ...input, thread: { callId: 'run-1', turn: 1 } }
+    const reply = { ...input, runId: 'run-2', prompt: 'Why this source?', thread: { callId: 'run-1', turn: 2 } }
+    expect(runInputSchema.parse(first)).toEqual(first)
+    expect(parseRunSnapshot(JSON.stringify(reply))).toEqual(reply)
+    expect(runInputSchema.parse(input).thread).toBeUndefined()
+
+    for (const callId of ['', '../escape', 'a/b', 'call id', 'x'.repeat(129)]) {
+      expect(() => runInputSchema.parse({ ...input, thread: { callId, turn: 1 } })).toThrow()
+    }
+    for (const turn of [0, -1, 1.5]) {
+      expect(() => runInputSchema.parse({ ...input, thread: { callId: 'run-1', turn } })).toThrow()
+    }
+    expect(() => runInputSchema.parse({ ...input, thread: { callId: 'run-1', turn: 2, extra: true } })).toThrow()
+
+    const withOutline = { ...reply, invocationOutline: ['- [agent] Finding', '- [user] Note'] }
+    expect(runInputSchema.parse(withOutline)).toEqual(withOutline)
+    expect(() => runInputSchema.parse({ ...first, invocationOutline: [] })).toThrow(/conversation replies/)
+    expect(() => runInputSchema.parse({ ...input, invocationOutline: [] })).toThrow(/conversation replies/)
+  })
+
+  it('parses local inline answers separately from the structured result union', () => {
+    const answer = { version: 1 as const, type: 'answer' as const, text: 'It is the primary source.' }
+    expect(localAnswerResultSchema.parse(answer)).toEqual(answer)
+    expect(parseLocalRunResult(answer)).toEqual(answer)
+    expect(parseLocalRunResult({ version: 1, nodes: [{ type: 'text', text: 'Note' }], sources: [] }))
+      .toEqual({ version: 1, nodes: [{ type: 'text', text: 'Note' }], sources: [] })
+    expect(() => structuredResultSchema.parse(answer)).toThrow()
+    expect(() => parseStructuredResult(answer)).toThrow()
+    expect(() => parseLocalRunResult({ ...answer, text: '   ' })).toThrow()
+    expect(() => parseLocalRunResult({ ...answer, text: 'x'.repeat(20_001) })).toThrow()
+    expect(parseLocalRunResult({ ...answer, text: 'x'.repeat(20_000) })).toBeDefined()
+    expect(() => parseLocalRunResult({ ...answer, version: 2 })).toThrow()
+    expect(() => parseLocalRunResult({ ...answer, nodes: [] })).toThrow()
   })
 
   it('validates and pins host-confined plans without accepting a self-authorized reference', () => {

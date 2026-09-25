@@ -18,9 +18,21 @@ export function finalAssistantText(messages: unknown): string {
   return ''
 }
 
+/** How a turn ended: with an emitted outline result, or with assistant text only. */
+export type TurnOutcome = 'outline' | 'text'
+
+export type SettledEvent =
+  | { type: 'agent_settled'; outcome: TurnOutcome; text?: string }
+  | { type: 'process_error'; error: string }
+
 export class FinalResponseTracker {
   private text = ''
   private error = ''
+  private outlineEmitted = false
+
+  recordToolEnd(toolName: string, isError: boolean | undefined): void {
+    if (toolName === 'emit_outline' && !isError) this.outlineEmitted = true
+  }
 
   recordAgentEnd(messages: unknown, willRetry: boolean): void {
     if (willRetry) return
@@ -28,9 +40,13 @@ export class FinalResponseTracker {
     this.error = finalAssistantError(messages)
   }
 
-  settledEvent(): { type: 'agent_settled'; text?: string } | { type: 'process_error'; error: string } {
+  settledEvent(): SettledEvent {
     if (this.error) return { type: 'process_error', error: this.error }
-    return { type: 'agent_settled', ...(this.text ? { text: this.text } : {}) }
+    return {
+      type: 'agent_settled',
+      outcome: this.outlineEmitted ? 'outline' : 'text',
+      ...(this.text ? { text: this.text } : {}),
+    }
   }
 }
 

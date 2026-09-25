@@ -1,4 +1,4 @@
-import type { ActivityEvent as RuntimeActivityEvent } from '@forage/agent-runtime'
+import { isLocalAnswerResult, type ActivityEvent as RuntimeActivityEvent } from '@forage/agent-runtime'
 import type { ActivityCall, ActivityEntry, ActivityStatus } from '../components/Agent/ActivitySidebar'
 import type { ActivityEvent } from './activity'
 import type { LocalAgentRunHistory } from '../persistence/eventStore'
@@ -52,6 +52,8 @@ export function applyActivityEvent(
       nodeId: isCallEvent ? event.nodeId : undefined,
       placementPending: event.placementPending,
       ...(isCallEvent && event.note ? { note: event.note } : {}),
+      ...(isCallEvent && event.thread ? { thread: event.thread } : {}),
+      ...(isCallEvent && event.answer ? { answer: event.answer } : {}),
       events: isCallEvent ? [] : [nextEvent],
     }].slice(-MAX_ACTIVITY_CALLS)
   }
@@ -70,6 +72,8 @@ export function applyActivityEvent(
         durationMs: isCallEvent ? event.durationMs ?? call.durationMs : call.durationMs,
         nodeId: isCallEvent ? event.nodeId ?? call.nodeId : call.nodeId,
         placementPending: event.placementPending ?? call.placementPending,
+        ...(isCallEvent && event.thread ? { thread: event.thread } : {}),
+        ...(isCallEvent && event.answer !== undefined ? { answer: event.answer || undefined } : {}),
         events,
       }
     : call)
@@ -125,18 +129,25 @@ export function callsFromHistory(history: LocalAgentRunHistory[], now: number = 
     const startedAt = timestamp(entry.run.createdAt, now)
     const settledAt = timestamp(entry.run.updatedAt, startedAt)
     const status = runStatus(entry.run)
-    const storedPrompt = entry.run.snapshot.version === 2
-      ? entry.run.snapshot.context.prompt
-      : entry.run.snapshot.prompt
-    // A steered iteration stores the revision request inside its prompt.
-    const { basePrompt: prompt, note } = parseSteeredPrompt(storedPrompt)
+    const snapshot = entry.run.snapshot
+    const thread = snapshot.version === 1 ? snapshot.thread : undefined
+    const storedPrompt = snapshot.version === 2 ? snapshot.context.prompt : snapshot.prompt
+    // A conversation reply stores the reply as its prompt and the call's first
+    // prompt as its source text; a legacy steered iteration stores the revision
+    // request inside its prompt.
+    const { basePrompt: prompt, note } = thread && thread.turn > 1
+      ? { basePrompt: snapshot.source.text ?? '', note: storedPrompt }
+      : parseSteeredPrompt(storedPrompt)
+    const answer = entry.run.result && isLocalAnswerResult(entry.run.result) ? entry.run.result.text : undefined
     const withCall = applyActivityEvent(calls, {
       id: entry.run.id,
       phase: 'complete',
       kind: 'skill',
-      label: runActivityLabel(entry.run.snapshot.skill.label, prompt),
+      label: runActivityLabel(snapshot.skill.label, prompt),
       detail: prompt || undefined,
       ...(note ? { note } : {}),
+      ...(thread ? { thread } : {}),
+      ...(answer ? { answer } : {}),
       status,
       nodeId: entry.run.snapshot.source.nodeId,
       placementPending: entry.run.status === 'completed_unplaced',

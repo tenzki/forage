@@ -267,6 +267,87 @@ export function takeAiOutput(editor: Editor, invocationNodeId: string): string[]
   return lines
 }
 
+function isAgentOutputItem(node: ProseMirrorNode): boolean {
+  return node.type.name === 'generatedImageItem'
+    || (node.type.name === 'listItem' && node.attrs.nodeType === 'ai')
+}
+
+function outputLines(item: ProseMirrorNode, depth: number, lines: string[]): void {
+  const text = item.type.name === 'generatedImageItem' ? '(image)' : item.firstChild?.textContent ?? ''
+  lines.push(`${'  '.repeat(depth)}- ${text}`)
+  item.forEach((child) => {
+    if (child.type.name === 'bulletList') child.forEach((grandchild) => outputLines(grandchild, depth + 1, lines))
+  })
+}
+
+/**
+ * Replace the agent output under an invocation bullet with a revised result in one
+ * undoable transaction. The new bullets take the place of the first previous agent
+ * bullet (or go last), and the user's own bullets under the invocation are kept.
+ * Returns the new top-level bullet ids and the replaced output as indented lines.
+ */
+export function replaceAiOutput(
+  editor: Editor,
+  invocationNodeId: string,
+  runId: string,
+  result: StructuredResult,
+): { nodeIds: string[]; replaced: string[] } {
+  const materializable = requireStructuredResultV1(result)
+  const target = findListItemIn(editor.state.doc, invocationNodeId)
+  if (!target) throw new Error('The bullet this call ran on no longer exists.')
+  const items = materializable.nodes.flatMap((node) => createAiOutlineItem(editor, structuredToStored(node), newNodeId()))
+  if (!items.length) throw new Error('The agent returned no outline nodes.')
+
+  const replaced: string[] = []
+  const content: ProseMirrorNode[] = []
+  let placed = false
+  target.node.forEach((child, _offset, index) => {
+    if (index === 0) return
+    if (child.type.name !== 'bulletList') {
+      content.push(child)
+      return
+    }
+    const kept: ProseMirrorNode[] = []
+    child.forEach((item) => {
+      if (!isAgentOutputItem(item)) {
+        kept.push(item)
+        return
+      }
+      outputLines(item, 0, replaced)
+      if (!placed) {
+        kept.push(...items)
+        placed = true
+      }
+    })
+    if (kept.length) content.push(child.type.create(child.attrs, kept))
+  })
+  if (!placed) {
+    const lastList = content.length - 1
+    if (lastList >= 0 && content[lastList]!.type.name === 'bulletList') {
+      const list = content[lastList]!
+      const children: ProseMirrorNode[] = []
+      list.forEach((item) => { children.push(item) })
+      content[lastList] = list.type.create(list.attrs, [...children, ...items])
+    } else {
+      content.push(editor.schema.nodes.bulletList.create(null, items))
+    }
+  }
+
+  const from = target.pos + 1 + (target.node.firstChild?.nodeSize ?? 0)
+  const transaction = editor.state.tr.replaceWith(from, target.pos + target.node.nodeSize - 1, content)
+  // A revision is its own undo step, so one undo restores the previous version.
+  closeHistory(transaction)
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', runId)
+  editor.view.dispatch(transaction)
+
+  const nodeIds = items
+    .map((item) => item.attrs.nodeId)
+    .filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0)
+  revealAgentResult(editor, nodeIds)
+  return { nodeIds, replaced }
+}
+
 /** Split streamed text into the lines that should become bullets. */
 function toLines(text: string): string[] {
   // Models often separate ideas with blank lines. Empty list items create

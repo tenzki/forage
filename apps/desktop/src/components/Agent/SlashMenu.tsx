@@ -5,13 +5,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { isExtensionSkill, type SkillDefinition } from '../../agent/definitions'
-import { resolveAgentContext, resolveExtensionSkillContext } from '../../agent/context'
+import { resolveAgentContext, resolveExtensionSkillContext, resolveFollowUpContext } from '../../agent/context'
 import {
   commitExtensionSkillResult,
   commitStructuredAgentResultInto,
   currentListItemId,
   insertAiChildUnder,
   removeAiList,
+  replaceAiOutput,
   setCurrentBulletText,
   writeAiText,
 } from '../../agent/insertIntoEditor'
@@ -30,7 +31,13 @@ import {
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ActivityReporter } from '../../agent/activity'
 import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
-import { OUTLINE_RUN_SKILL_EVENT, type SkillRunRequest, type SkillRunSteering } from '../../agent/skillRuns'
+import {
+  OUTLINE_RUN_SKILL_EVENT,
+  recordReplacedOutput,
+  type SkillRunConversation,
+  type SkillRunRequest,
+  type SkillRunSteering,
+} from '../../agent/skillRuns'
 import {
   nativeLocalCredentialVault,
   resolveExtensionExecutorSecretValues,
@@ -52,6 +59,7 @@ import {
 } from '../../agent/extensionSkillInvocation'
 import {
   createLocalExtensionSnapshotFromCatalog,
+  isLocalAnswerResult,
   resolveEffectiveToolIds,
   type ActivityEvent as RuntimeActivityEvent,
   type RunInput,
@@ -366,8 +374,16 @@ export function SlashMenu({
   /**
    * Run `skill` for the bullet `invocationNodeId`. `steering` marks a follow-up
    * iteration: the call keeps its original label and records the user's note.
+   * `conversation` continues a local call's agent conversation; without it, a
+   * local run starts a new conversation of its own.
    */
-  function runSkill(skill: SkillDefinition, prompt: string, invocationNodeId: string, steering?: SkillRunSteering): void {
+  function runSkill(
+    skill: SkillDefinition,
+    prompt: string,
+    invocationNodeId: string,
+    steering?: SkillRunSteering,
+    conversation?: SkillRunConversation,
+  ): void {
     if (!editor) return
     if (isExtensionSkill(skill)) {
       const runId = crypto.randomUUID()
@@ -523,7 +539,9 @@ export function SlashMenu({
       return
     }
     onError(null)
-    const contextSnapshot = resolveAgentContext(editor.state.doc, invocationNodeId)
+    // A reply resumes the call's conversation; its outline changes only if it ends with a revision.
+    const followUp = Boolean(conversation && conversation.turn > 1)
+    const contextSnapshot = followUp ? null : resolveAgentContext(editor.state.doc, invocationNodeId)
     const repository = new NativeEventRepository()
     // One call id per run keeps every event of this invocation in a single sidebar group.
     const runId = crypto.randomUUID()
@@ -540,7 +558,12 @@ export function SlashMenu({
       ...(steering ? { note: steering.note } : {}),
     })
     void (async () => {
+      const followUpContext = followUp ? resolveFollowUpContext(editor.state.doc, invocationNodeId) : null
+      const context = followUpContext?.context ?? contextSnapshot!
       const mode = await repository.storageMode()
+      if (mode === 'server' && conversation) {
+        throw new Error('This conversation is stored on this device. Switch back to local mode to reply to it.')
+      }
       if (mode === 'server') {
         await onBeforeServerRun?.()
         const connection = await repository.serverConnection()
@@ -601,14 +624,22 @@ export function SlashMenu({
         currentExtensionState.configuration.revision,
         effectiveToolIds,
       )
+      const thread = conversation
+        ? { callId: conversation.callId, turn: conversation.turn }
+        : { callId: runId, turn: 1 }
       const input: RunInput = {
         version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
-        source: { nodeId: invocationNodeId, text: prompt }, target: { parentId: invocationNodeId },
+        // A reply's prompt is the reply; its source text keeps the call's first prompt.
+        source: { nodeId: invocationNodeId, text: followUp ? steering?.basePrompt ?? '' : prompt },
+        target: { parentId: invocationNodeId },
         baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
-        agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: contextSnapshot.lines,
+        agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: context.lines,
         customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
         ...(localExtensionSnapshot ? { localExtensionSnapshot } : {}),
+        thread,
+        ...(followUpContext ? { invocationOutline: followUpContext.invocationOutline } : {}),
       }
+      onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, thread })
       const runner = createPiLocalRunner({
         resolveCredential: async (reference) => {
           if (reference !== credential.id) throw new Error('The local credential reference changed before execution.')
@@ -621,13 +652,20 @@ export function SlashMenu({
           return resolveExtensionSecretValues(snapshot, configuration, nativeLocalCredentialVault)
         },
       })
-      localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)
-      if (!localOutputNodeId) throw new Error('Could not create live agent output.')
-      setAgentActivity(editor, localOutputNodeId, ['Thinking…'])
+      if (!followUp) {
+        localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)
+        if (!localOutputNodeId) throw new Error('Could not create live agent output.')
+        setAgentActivity(editor, localOutputNodeId, ['Thinking…'])
+      }
       let streamedText = ''
       const handle = await new LocalAgentExecutor(repository, runner).invoke(input, {
         onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
         onDelta: (nextText) => {
+          // A reply streams into the call's thread until its outcome is known.
+          if (followUp) {
+            onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, answer: nextText })
+            return
+          }
           if (!localOutputNodeId) return
           setAgentActivity(editor, localOutputNodeId, [])
           writeAiText(editor, localOutputNodeId, nextText, streamedText)
@@ -636,25 +674,48 @@ export function SlashMenu({
       })
       onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
       const result = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
-      setAgentActivity(editor, localOutputNodeId, null)
-      const [resultNodeId] = commitStructuredAgentResultInto(
-        editor,
-        invocationNodeId,
-        localOutputNodeId,
-        skill.label,
-        result,
-      )
-      localOutputNodeId = null
+      if (isLocalAnswerResult(result)) {
+        onActivity?.({
+          id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
+          answer: result.text, durationMs: Date.now() - startedAt,
+        })
+        return
+      }
+      let resultNodeId: string | undefined
+      if (followUp) {
+        // The revision replaces the previous agent output in one undoable step.
+        const { nodeIds, replaced } = replaceAiOutput(editor, invocationNodeId, runId, result)
+        if (conversation?.replacesRunId) recordReplacedOutput(conversation.replacesRunId, replaced)
+        resultNodeId = nodeIds[0]
+      } else {
+        setAgentActivity(editor, localOutputNodeId!, null)
+        ;[resultNodeId] = commitStructuredAgentResultInto(
+          editor,
+          invocationNodeId,
+          localOutputNodeId!,
+          skill.label,
+          result,
+        )
+        localOutputNodeId = null
+      }
       if (resultNodeId) await recordResultActivity(repository, runId, resultNodeId, onActivity)
-      onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
+      onActivity?.({
+        id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
+        durationMs: Date.now() - startedAt, ...(followUp ? { answer: '' } : {}),
+      })
     })().catch((error: unknown) => {
       const detail = error instanceof Error ? error.message : String(error)
       if (localOutputNodeId) {
         setAgentActivity(editor, localOutputNodeId, null)
         removeAiList(editor, localOutputNodeId)
       }
+      // A failed or cancelled reply keeps no partial answer; the outline was never touched.
+      const clearAnswer = followUp ? { answer: '' } : {}
       if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') {
-        onActivity?.({ id: runId, phase: 'cancelled', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
+        onActivity?.({
+          id: runId, phase: 'cancelled', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
+          durationMs: Date.now() - startedAt, ...clearAnswer,
+        })
         onError(null)
         return
       }
@@ -666,6 +727,7 @@ export function SlashMenu({
         detail,
         nodeId: invocationNodeId,
         durationMs: Date.now() - startedAt,
+        ...clearAnswer,
       })
       onError(detail)
       showSkillContextError(editor, invocationNodeId, detail)
@@ -690,7 +752,7 @@ export function SlashMenu({
         onError(`/${request.skillLabel} no longer exists.`)
         return
       }
-      runSkillRef.current(skill, request.prompt, request.invocationNodeId, request.steering)
+      runSkillRef.current(skill, request.prompt, request.invocationNodeId, request.steering, request.conversation)
     }
     window.addEventListener(OUTLINE_RUN_SKILL_EVENT, onRunRequest)
     return () => window.removeEventListener(OUTLINE_RUN_SKILL_EVENT, onRunRequest)

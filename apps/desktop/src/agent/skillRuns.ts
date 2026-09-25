@@ -5,6 +5,8 @@
 // outline" and the activity panel's steering box — ask it to run a skill through
 // a window event instead of duplicating that plumbing.
 
+import type { SkillCallGroup } from './skillCalls'
+
 export const OUTLINE_RUN_SKILL_EVENT = 'outline:run-skill'
 
 /** A follow-up iteration of an earlier run of the same skill on the same bullet. */
@@ -17,11 +19,50 @@ export interface SkillRunSteering {
   iteration: number
 }
 
+/** A reply that continues a call's stored agent conversation. */
+export interface SkillRunConversation {
+  callId: string
+  /** Turn number of the run being started; turn 1 starts the conversation. */
+  turn: number
+  /** Run whose outline output a revision replaces, for superseded-version display. */
+  replacesRunId?: string
+}
+
 export interface SkillRunRequest {
   invocationNodeId: string
   skillLabel: string
   prompt: string
   steering?: SkillRunSteering
+  conversation?: SkillRunConversation
+}
+
+/**
+ * The run for a reply to a call that keeps an agent conversation, or null when
+ * the call has none (server mode, extension skills, older history) and the reply
+ * takes the legacy single-shot steering path.
+ */
+export function conversationReply(group: SkillCallGroup, note: string): SkillRunRequest | null {
+  const callId = group.latest.thread?.callId
+  if (!callId || !group.nodeId || !group.skillLabel) return null
+  const turns = group.iterations.map(({ call }) => call).filter((call) => call.thread?.callId === callId)
+  const steering = { note, basePrompt: group.prompt, iteration: group.iterations.length + 1 }
+  const request = { invocationNodeId: group.nodeId, skillLabel: group.skillLabel, steering }
+  // Only completed turns stay in the conversation. Without one there is nothing to
+  // resume, so the reply starts the conversation over with the note in its prompt.
+  if (!turns.some((call) => call.status === 'complete')) {
+    return {
+      ...request,
+      prompt: steeredPrompt(group.prompt || group.skillLabel, note, steering.iteration, []),
+      conversation: { callId, turn: 1 },
+    }
+  }
+  const turn = Math.max(...turns.map((call) => call.thread!.turn)) + 1
+  const replaced = [...turns].reverse().find((call) => call.status === 'complete' && !call.answer)
+  return {
+    ...request,
+    prompt: note,
+    conversation: { callId, turn, ...(replaced ? { replacesRunId: replaced.id } : {}) },
+  }
 }
 
 export function requestSkillRun(request: SkillRunRequest): void {

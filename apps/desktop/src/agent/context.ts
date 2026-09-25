@@ -148,6 +148,14 @@ function serializeContext(local: OutlineEntry[], groups: ReferencedContextGroup[
   return sections.join('\n\n')
 }
 
+function assertWithinContextBudget(nodeCount: number, characterCount: number): void {
+  if (nodeCount > AGENT_CONTEXT_MAX_NODES || characterCount > AGENT_CONTEXT_MAX_CHARACTERS) {
+    throw new Error(
+      `Agent context exceeds the safety limit of ${AGENT_CONTEXT_MAX_NODES} nodes or ${AGENT_CONTEXT_MAX_CHARACTERS.toLocaleString()} characters. Move the command into a smaller branch or remove references.`,
+    )
+  }
+}
+
 /** Resolve the ancestor path, parent branch, and stable internal-link references. */
 export function resolveAgentContext(
   doc: ProseMirrorNode,
@@ -164,11 +172,7 @@ export function resolveAgentContext(
   const nodeCount = local.entries.length + referencedNodeIds.length
   const characterCount = serialized.length
 
-  if (nodeCount > AGENT_CONTEXT_MAX_NODES || characterCount > AGENT_CONTEXT_MAX_CHARACTERS) {
-    throw new Error(
-      `Agent context exceeds the safety limit of ${AGENT_CONTEXT_MAX_NODES} nodes or ${AGENT_CONTEXT_MAX_CHARACTERS.toLocaleString()} characters. Move the command into a smaller branch or remove references.`,
-    )
-  }
+  assertWithinContextBudget(nodeCount, characterCount)
 
   return {
     invocationNodeId,
@@ -259,4 +263,31 @@ export function resolveExtensionSkillContext(
     referencedNodeIds: [...referencedIds],
     admittedReferenceIds,
   }
+}
+
+export interface ResolvedFollowUpContext {
+  context: ResolvedAgentContext
+  /** The bullets under the invocation, one line each, marking agent and user bullets. */
+  invocationOutline: string[]
+}
+
+/**
+ * Context for a conversation reply: the same scope as a first run, plus the
+ * invocation's current subtree, which a first run excludes. Both share one budget.
+ */
+export function resolveFollowUpContext(
+  doc: ProseMirrorNode,
+  invocationNodeId: string,
+): ResolvedFollowUpContext {
+  const context = resolveAgentContext(doc, invocationNodeId)
+  const invocation = outlineEntries(doc).byId.get(invocationNodeId)!
+  const entries = subtree(invocation).slice(1)
+  const invocationOutline = entries.map((entry) => (
+    `${'  '.repeat(Math.max(0, entry.depth - invocation.depth - 1))}- [${entry.node.attrs.nodeType === 'ai' ? 'agent' : 'user'}] ${entry.text || '(empty)'}`
+  ))
+  assertWithinContextBudget(
+    context.nodeCount + entries.length,
+    context.characterCount + invocationOutline.reduce((total, line) => total + line.length + 1, 0),
+  )
+  return { context, invocationOutline }
 }

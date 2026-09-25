@@ -1,10 +1,11 @@
 import {
-  parseStructuredResult,
+  isLocalAnswerResult,
+  parseLocalRunResult,
   runInputSchema,
   type ActivityEvent,
+  type LocalRunResult,
   type RunInput,
   type RunStatus,
-  type StructuredResult,
 } from '@forage/agent-runtime'
 import type { LocalAgentActivity, LocalAgentRun } from '../persistence/eventStore'
 
@@ -19,7 +20,7 @@ export interface LocalRunRepository {
     runId: string,
     status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>,
     resultIdentity: string | null,
-    result: StructuredResult | null,
+    result: LocalRunResult | null,
     errorCode: string | null,
     settledAt: string,
   ): Promise<void>
@@ -33,11 +34,12 @@ export type LocalRuntimeRunner = (
     onActivity: (event: ActivityEvent) => Promise<void>
     onDelta?: (textSoFar: string) => void
   },
-) => Promise<StructuredResult>
+) => Promise<LocalRunResult>
 
 export interface AgentExecutionHandle {
   runId: string
-  completion: Promise<StructuredResult>
+  /** An outline result, or an inline answer for a conversation reply. */
+  completion: Promise<LocalRunResult>
   cancel: () => Promise<void>
 }
 
@@ -123,10 +125,10 @@ export class LocalAgentExecutor {
     input: RunInput,
     controller: AbortController,
     options: AgentInvocationOptions,
-  ): Promise<StructuredResult> {
+  ): Promise<LocalRunResult> {
     await this.repository.beginAgentAttempt(input.runId, this.now())
     try {
-      const result = parseStructuredResult(await this.runner(input, {
+      const result = parseLocalRunResult(await this.runner(input, {
         signal: controller.signal,
         onActivity: async (event) => {
           await this.repository.appendAgentActivity(input.runId, event, this.now())
@@ -135,6 +137,9 @@ export class LocalAgentExecutor {
         onDelta: options.onDelta,
       }))
       if (controller.signal.aborted) throw new DOMException('Agent run cancelled.', 'AbortError')
+      if (isLocalAnswerResult(result) && (input.thread?.turn ?? 1) < 2) {
+        throw new Error('Only a conversation reply can end with an inline answer.')
+      }
       await this.repository.settleAgentRun(
         input.runId,
         'completed',

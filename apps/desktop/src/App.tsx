@@ -14,7 +14,7 @@ import { TasksPanel } from './components/Outliner/TasksPanel'
 import { TagMenu } from './components/Outliner/TagMenu'
 import { ActivitySidebar, type ActivityCall, type ActivityNodeInfo } from './components/Agent/ActivitySidebar'
 import type { SkillCallGroup } from './agent/skillCalls'
-import { recordReplacedOutput, requestSkillRun, steeredPrompt } from './agent/skillRuns'
+import { conversationReply, recordReplacedOutput, requestSkillRun, steeredPrompt } from './agent/skillRuns'
 import { takeAiOutput } from './agent/insertIntoEditor'
 import { isExtensionSkill } from './agent/definitions'
 import { LinkPeekPane } from './components/Outliner/LinkPeekPane'
@@ -207,13 +207,21 @@ export default function App() {
   }, [skills])
 
   /**
-   * Start the next version of a skill call: take the current output out of
-   * the outline, then rerun the skill with the note and that output as context.
+   * Reply to a skill call. A local call resumes its agent conversation. Other
+   * calls start the next version: take the current output out of the outline,
+   * then rerun the skill with the note and that output as context.
    */
   const steerCall = useCallback((group: SkillCallGroup, note: string) => {
     if (!editor || !group.nodeId || !group.skillLabel || group.status === 'running') return
     if (!findBullet(editor.state.doc, group.nodeId)) {
       setAgentError('The bullet this call ran on no longer exists.')
+      return
+    }
+    // A call with a stored conversation resumes it; the outline changes only when
+    // the reply ends with a revision.
+    const reply = conversationReply(group, note)
+    if (reply) {
+      requestSkillRun(reply)
       return
     }
     const iteration = group.iterations.length + 1

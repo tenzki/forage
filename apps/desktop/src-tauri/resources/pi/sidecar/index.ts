@@ -12,7 +12,7 @@
  *   {"type":"message_update","assistantMessageEvent":{"type":"text_delta",...}}
  *   {"type":"tool_execution_start","toolName":"...","args":{...},"toolCallId":"..."}
  *   {"type":"tool_execution_end","toolName":"...","result":{...},"toolCallId":"..."}
- *   {"type":"agent_settled","text":"optional final assistant text"}
+ *   {"type":"agent_settled","outcome":"outline|text","text":"optional final assistant text"}
  *   {"type":"process_error","error":"..."}
  */
 
@@ -23,10 +23,6 @@ import {
   SessionManager,
   type AgentSession,
 } from '@earendil-works/pi-coding-agent'
-import {
-  localExtensionSnapshotSchema,
-  type LocalExtensionSnapshot,
-} from '@forage/agent-runtime'
 import {
   ExtensionConfigurationStore,
   acquireManagedRevisionLeases,
@@ -46,10 +42,10 @@ import {
   createSearchOutlineTool,
   createWebFetchTool,
   createWebSearchTool,
-  validateCustomTool,
-  type CustomToolConfig,
   type OutlineSnapshotNode,
 } from './tools'
+import { decodePayload, isFollowUpTurn, systemPrompt, taskMessage, type RunPayload } from './payload'
+import { conversationDirectory, openConversationTurn, type ConversationTurn } from './conversation-store'
 import { createAuthenticatedModelRuntime } from './runtime-auth'
 import { FinalResponseTracker } from './final-response'
 import { adaptExtensionTools } from './extension-tools'
@@ -57,93 +53,9 @@ import { effectiveTools } from './tool-policy'
 
 // ── constants ───────────────────────────────────────────────────────────────
 
-const MAX_PAYLOAD_BYTES = 512_000
-const MAX_CONTEXT_CHARACTERS = 40_000
 const STDOUT_CHUNK_SIZE = 32_768
 
-interface RunPayload {
-  runId: string
-  instructions: string
-  prompt: string
-  context: string[]
-  enabledToolIds: string[]
-  requiredToolIds: string[]
-  customTools: CustomToolConfig[]
-  outlineSnapshot?: string
-  extensionSnapshot?: LocalExtensionSnapshot
-  extensionSecrets: Record<string, Record<string, string>>
-}
-
 // ── helpers ─────────────────────────────────────────────────────────────────
-
-function asStrings(value: unknown, limit: number): string[] {
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string').slice(0, limit)
-}
-
-function decodePayload(encoded: string): RunPayload {
-  if (!encoded || encoded.length > MAX_PAYLOAD_BYTES) throw new Error('Invalid agent invocation payload.')
-  const value = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as Partial<RunPayload>
-  if (typeof value.instructions !== 'string' || typeof value.prompt !== 'string') {
-    throw new Error('Agent invocation is missing instructions or a prompt.')
-  }
-  if (!Array.isArray(value.context) || value.context.some((item) => typeof item !== 'string')) {
-    throw new Error('Agent invocation has invalid outline context.')
-  }
-  const contextCharacters = value.context.reduce((total, item) => total + item.length, 0)
-  if (value.context.length > 500 || contextCharacters > MAX_CONTEXT_CHARACTERS) {
-    throw new Error('Agent invocation outline context exceeds the safety limit.')
-  }
-  const customTools = Array.isArray(value.customTools)
-    ? value.customTools.map(validateCustomTool).filter((tool): tool is CustomToolConfig => Boolean(tool)).slice(0, 25)
-    : []
-  const outlineSnapshot = typeof value.outlineSnapshot === 'string'
-    ? value.outlineSnapshot.slice(0, MAX_PAYLOAD_BYTES) : ''
-  const extensionSnapshot = value.extensionSnapshot === undefined
-    ? undefined
-    : localExtensionSnapshotSchema.parse(value.extensionSnapshot)
-  return {
-    runId: typeof value.runId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.runId)
-      ? value.runId : `run-${Date.now()}`,
-    instructions: value.instructions.slice(0, 20_000),
-    prompt: value.prompt.slice(0, 20_000),
-    context: value.context,
-    enabledToolIds: asStrings(value.enabledToolIds, 50),
-    requiredToolIds: asStrings(value.requiredToolIds, 50),
-    customTools,
-    outlineSnapshot,
-    extensionSnapshot,
-    extensionSecrets: parseExtensionSecrets(value.extensionSecrets),
-  }
-}
-
-function parseExtensionSecrets(value: unknown): Record<string, Record<string, string>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const output: Record<string, Record<string, string>> = {}
-  for (const [installationId, rawSecrets] of Object.entries(value as Record<string, unknown>).slice(0, 128)) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(installationId) || !rawSecrets || typeof rawSecrets !== 'object' || Array.isArray(rawSecrets)) continue
-    const secrets: Record<string, string> = {}
-    for (const [key, secret] of Object.entries(rawSecrets as Record<string, unknown>).slice(0, 64)) {
-      if (/^[a-z][a-z0-9_]{0,63}$/.test(key) && typeof secret === 'string' && secret.length <= 20_000) secrets[key] = secret
-    }
-    output[installationId] = secrets
-  }
-  return output
-}
-
-function taskMessage(payload: RunPayload): string {
-  const context = payload.context.length
-    ? `Selected outline context (hierarchy preserved by indentation):\n${payload.context.join('\n')}\n\n`
-    : ''
-  return `${context}Task: ${payload.prompt}`
-}
-
-function systemPrompt(instructions: string): string {
-  return [
-    instructions,
-    'Return the final answer by calling emit_outline. Do not edit files or run shell commands.',
-  ].join('\n\n')
-}
 
 /** Write a JSON object to stdout followed by a newline. */
 function emit(value: unknown): void {
@@ -250,6 +162,8 @@ async function main(): Promise<void> {
     let currentSecrets: string[] = [accessToken!]
     let finishExtensions: (() => Promise<void>) | undefined
     let extensionOutcome: 'completed' | 'failed' | 'cancelled' = 'failed'
+    let conversation: ConversationTurn | undefined
+    let turnSucceeded = false
 
     try {
       const payload = decodePayload(command.payload)
@@ -321,19 +235,25 @@ async function main(): Promise<void> {
       await runExtensionStartHooks(extensions, payload.runId, extensionExecution)
 
       // Build system prompt. Skip AGENTS.md — this is an outline agent.
+      const followUp = isFollowUpTurn(payload)
       const loader = new DefaultResourceLoader({
         cwd: process.cwd(),
         agentDir: process.env.PI_CODING_AGENT_DIR || '',
-        systemPromptOverride: () => systemPrompt(payload.instructions),
+        systemPromptOverride: () => systemPrompt(payload.instructions, followUp),
         agentsFilesOverride: () => ({ agentsFiles: [] }),
       })
       await loader.reload()
+
+      // Calls with a conversation keep their transcript in a per-call session file.
+      conversation = payload.thread
+        ? openConversationTurn(conversationDirectory(process.env.PI_CODING_AGENT_DIR || ''), payload.thread)
+        : undefined
 
       // Create session.
       const { session } = await createAgentSession({
         model: resolved.model,
         modelRuntime,
-        sessionManager: SessionManager.inMemory(),
+        sessionManager: conversation?.sessionManager ?? SessionManager.inMemory(),
         resourceLoader: loader,
         noTools: 'all',
         tools: allToolNames,
@@ -361,6 +281,7 @@ async function main(): Promise<void> {
             })
             break
           case 'tool_execution_end':
+            finalResponse.recordToolEnd(event.toolName, event.isError)
             const endOwner = extensionToolOwners.get(event.toolName)
             emit({
               type: 'tool_execution_end',
@@ -374,9 +295,16 @@ async function main(): Promise<void> {
           case 'agent_end':
             finalResponse.recordAgentEnd(event.messages, event.willRetry)
             break
-          case 'agent_settled':
-            emit(finalResponse.settledEvent())
+          case 'agent_settled': {
+            const settled = finalResponse.settledEvent()
+            // An empty turn is retried by the desktop, so it must not stay in the transcript.
+            turnSucceeded = settled.type === 'agent_settled' && !abortController.signal.aborted
+              && (settled.outcome === 'outline' || Boolean(settled.text))
+            // Roll back before reporting, so an immediate reply resumes from the last completed turn.
+            if (!turnSucceeded) conversation?.rollback()
+            emit(settled)
             break
+          }
           case 'turn_start':
           case 'turn_end':
           case 'message_start':
@@ -400,7 +328,8 @@ async function main(): Promise<void> {
         // Check if already aborted before we send the prompt.
         if (abortController.signal.aborted) {
           extensionOutcome = 'cancelled'
-          emit({ type: 'agent_settled' })
+          conversation?.rollback()
+          emit({ type: 'agent_settled', outcome: 'text' })
           return
         }
         await session.prompt(taskMessage(payload))
@@ -415,11 +344,13 @@ async function main(): Promise<void> {
         unsubscribe()
         currentSession = null
         try { session.dispose() } catch { /* ok */ }
+        if (!turnSucceeded || abortController.signal.aborted) conversation?.rollback()
       }
     } catch (error) {
+      conversation?.rollback()
       if (abortController.signal.aborted) {
         extensionOutcome = 'cancelled'
-        emit({ type: 'agent_settled' })
+        emit({ type: 'agent_settled', outcome: 'text' })
       } else {
         emit({ type: 'process_error', error: sanitizeExtensionText(errorMessage(error), currentSecrets) })
       }

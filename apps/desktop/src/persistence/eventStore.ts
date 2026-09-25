@@ -6,13 +6,14 @@ import {
 } from '@forage/domain'
 import {
   activityEventSchema,
-  parseStructuredResult,
+  isLocalAnswerResult,
+  parseLocalRunResult,
   runSnapshotSchema,
   runStatusSchema,
   type ActivityEvent,
+  type LocalRunResult,
   type RunSnapshot,
   type RunStatus,
-  type StructuredResult,
 } from '@forage/agent-runtime'
 
 export interface StoredEventRecord {
@@ -86,7 +87,7 @@ export interface LocalAgentRun {
   status: RunStatus
   attemptCount: number
   resultIdentity: string | null
-  result: StructuredResult | null
+  result: LocalRunResult | null
   retryOfRunId: string | null
   cancelRequestedAt: string | null
   errorCode: string | null
@@ -110,9 +111,12 @@ function parseLocalAgentRun(run: LocalAgentRun): LocalAgentRun {
   const snapshot = runSnapshotSchema.parse(run.snapshot)
   const result = run.result === null
     ? null
-    : parseStructuredResult(run.result, snapshot.version === 2
+    : parseLocalRunResult(run.result, snapshot.version === 2
       ? { allowedReferenceIds: snapshot.plan.admittedReferenceIds }
       : {})
+  if (result && isLocalAnswerResult(result) && (snapshot.version !== 1 || !snapshot.thread)) {
+    throw new Error('Only conversation turns can store an inline answer.')
+  }
   return { ...run, snapshot, status: runStatusSchema.parse(run.status), result }
 }
 
@@ -275,7 +279,7 @@ export class NativeEventRepository {
     runId: string,
     status: Extract<RunStatus, 'completed' | 'completed_unplaced' | 'failed' | 'cancelled' | 'interrupted'>,
     resultIdentity: string | null,
-    result: StructuredResult | null,
+    result: LocalRunResult | null,
     errorCode: string | null,
     settledAt: string,
   ): Promise<void> {

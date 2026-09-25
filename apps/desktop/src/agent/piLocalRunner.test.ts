@@ -77,6 +77,52 @@ describe('Pi local runtime adapter', () => {
     expect(deltas).toEqual(['First line', 'First line\n\nSecond line'])
   })
 
+  it('answers inline on a conversation reply that emits no outline', async () => {
+    const generate = vi.fn(async (_auth, _input, options) => {
+      options.onDelta('The second ')
+      options.onDelta('The second source.')
+      return 'The second source.'
+    })
+    const runner = createPiLocalRunner({
+      resolveCredential: async () => ({ mode: 'api_key', apiKey: 'secret', oauthCredential: null, modelId: '' }),
+      generate,
+      assets: { ingestGeneratedImage: async () => { throw new Error('unused') } },
+    })
+    const reply = { ...input(), runId: 'run-2', thread: { callId: 'run-1', turn: 2 }, invocationOutline: ['- [agent] Caption'] }
+
+    await expect(runner(reply, { signal: new AbortController().signal, onActivity: async () => undefined }))
+      .resolves.toEqual({ version: 1, type: 'answer', text: 'The second source.' })
+    expect(generate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ thread: { callId: 'run-1', turn: 2 }, invocationOutline: ['- [agent] Caption'] }),
+      expect.any(Object),
+    )
+  })
+
+  it('returns an outline on a reply that emits one, and keeps the text fallback on a first turn', async () => {
+    const outlineRunner = createPiLocalRunner({
+      resolveCredential: async () => ({ mode: 'api_key', apiKey: 'secret', oauthCredential: null, modelId: '' }),
+      generate: async (_auth, _input, options) => {
+        options.onDelta('Let me revise that.')
+        await options.onOutline?.([{ text: 'Revised' }])
+        return 'Let me revise that.'
+      },
+      assets: { ingestGeneratedImage: async () => { throw new Error('unused') } },
+    })
+    await expect(outlineRunner({ ...input(), thread: { callId: 'run-1', turn: 2 } }, {
+      signal: new AbortController().signal, onActivity: async () => undefined,
+    })).resolves.toEqual({ version: 1, nodes: [{ type: 'text', text: 'Revised' }], sources: [] })
+
+    const textRunner = createPiLocalRunner({
+      resolveCredential: async () => ({ mode: 'api_key', apiKey: 'secret', oauthCredential: null, modelId: '' }),
+      generate: async () => 'Plain answer',
+      assets: { ingestGeneratedImage: async () => { throw new Error('unused') } },
+    })
+    await expect(textRunner({ ...input(), thread: { callId: 'run-1', turn: 1 } }, {
+      signal: new AbortController().signal, onActivity: async () => undefined,
+    })).resolves.toEqual({ version: 1, nodes: [{ type: 'text', text: 'Plain answer' }], sources: [] })
+  })
+
   it('does not settle before emitted activity is durably handled', async () => {
     let release!: () => void
     const persisted = new Promise<void>((resolve) => { release = resolve })

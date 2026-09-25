@@ -1,3 +1,4 @@
+pub mod agent_sessions;
 pub mod assets;
 pub mod commands;
 pub mod page_peek;
@@ -30,6 +31,11 @@ pub fn run() {
             let event_store =
                 persistence::EventStore::open(app_data.join("outline-events.sqlite3"))?;
             let asset_store = assets::AssetStore::new(app_data.join("assets"))?;
+            // Nothing runs yet, so every session file without a run row is an orphan.
+            let agent_sessions_dir = agent_sessions::directory(&app_data);
+            if let Err(error) = agent_sessions::prune_orphaned(&event_store, &agent_sessions_dir) {
+                eprintln!("failed to prune agent session files: {error}");
+            }
             let http_client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(std::time::Duration::from_secs(5))
@@ -39,6 +45,7 @@ pub fn run() {
             app.manage(commands::NativeState {
                 event_store,
                 asset_store,
+                agent_sessions_dir,
                 http_client,
             });
             app.manage(server_stream::ServerStreamState::default());

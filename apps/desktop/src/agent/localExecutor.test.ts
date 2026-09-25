@@ -60,6 +60,24 @@ describe('LocalAgentExecutor', () => {
     )
   })
 
+  it('settles a conversation reply with an inline answer and refuses one outside a reply', async () => {
+    const answer = { version: 1 as const, type: 'answer' as const, text: 'Because of the moon.' }
+    const repo = repository()
+    const executor = new LocalAgentExecutor(repo, vi.fn(async () => answer), () => '2026-09-25T10:00:00.000Z')
+
+    const reply = await executor.invoke({ ...input('run-2'), thread: { callId: 'run-1', turn: 2 } })
+    await expect(reply.completion).resolves.toEqual(answer)
+    expect(repo.settleAgentRun).toHaveBeenCalledWith(
+      'run-2', 'completed', 'result:run-2', answer, null, '2026-09-25T10:00:00.000Z',
+    )
+
+    const first = await executor.invoke({ ...input('run-3'), thread: { callId: 'run-3', turn: 1 } })
+    await expect(first.completion).rejects.toThrow(/conversation reply/)
+    expect(repo.settleAgentRun).toHaveBeenLastCalledWith(
+      'run-3', 'failed', null, null, 'execution_failed', '2026-09-25T10:00:00.000Z',
+    )
+  })
+
   it('forwards live model text without storing it as activity', async () => {
     const repo = repository()
     const runner = vi.fn(async (_input: RunInput, options: { onDelta?: (text: string) => void }) => {
