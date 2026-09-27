@@ -8,7 +8,7 @@ This file provides guidance to coding agents working in this repository.
 
 ```bash
 pnpm install             # installs all workspaces + desktop sidecar deps
-pnpm dev                 # PostgreSQL + migrations, then API + real Tauri app via Turbo
+pnpm dev                 # PostgreSQL + migrations, then API + real Tauri app + website via Turbo
 pnpm dev:desktop         # Real local-only Tauri app; no PostgreSQL or API
 pnpm dev:server          # PostgreSQL + migrations + API only
 pnpm server:bootstrap    # One-time local owner, outline, and credential creation

@@ -31,7 +31,7 @@ Optional:
 
 ```bash
 pnpm install   # installs all workspace and agent-sidecar dependencies
-pnpm dev       # starts PostgreSQL, applies migrations, then runs the API and Tauri app
+pnpm dev       # starts PostgreSQL, applies migrations, then runs the API, Tauri app, and website
 ```
 
 On a fresh development database, run `pnpm server:bootstrap` once before connecting the desktop to the server. It prints the initial credentials exactly once; the first desktop then seeds the server with its outline. To work only on the local-first desktop app without PostgreSQL or the API, use `pnpm dev:desktop`. For server connection, tokens, and the Notes API, see [Optional Server Backend](docs/server-backend.md).
