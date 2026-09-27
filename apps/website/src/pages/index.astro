@@ -1,0 +1,85 @@
+---
+import lavender from '../assets/botanicals/lavender-square-dot-01.svg?url'
+import elderflower from '../assets/botanicals/elderflower-square-dot-01.svg?url'
+import Page from '../layouts/Page.astro'
+import Header from '../components/Header.astro'
+import DownloadLink from '../components/DownloadLink.astro'
+import ProductPreview from '../components/ProductPreview.astro'
+import SlashMenu from '../components/SlashMenu.astro'
+import AgentResult from '../components/AgentResult.astro'
+import Skills from '../components/Skills.astro'
+import Extensions from '../components/Extensions.astro'
+import Footer from '../components/Footer.astro'
+import Icon from '../components/Icon.astro'
+import { workflow, ownership } from '../data/site'
+---
+<Page>
+  <Header />
+  <main id="main">
+    <section class="page-shell grid items-center gap-6 pt-12 pb-8 md:grid-cols-[1.25fr_1fr] md:gap-8 md:pt-20 md:pb-[72px]" aria-labelledby="hero-heading">
+      <div>
+        <p class="eyebrow">An outliner with AI</p>
+        <h1 id="hero-heading" class="mt-6 text-[clamp(40px,5.55vw,80px)] leading-[1.02] tracking-[-.035em] md:mt-7">Your second brain.<br />Powered with AI.</h1>
+        <p class="mt-6 max-w-[640px] text-[20px] leading-[1.45] text-ink-soft md:mt-7 md:text-[23px]">Forage brings your notes, research, and ideas into one connected outline. Use AI to quickly find and process information as you build your own understanding.</p>
+        <div class="mt-6 flex flex-wrap items-center gap-6 md:mt-7"><DownloadLink class="w-full sm:w-auto" /><a href="#how-it-works" class="text-link hidden py-3 text-[17px] md:inline-block">See how it works <span aria-hidden="true">↓</span></a></div>
+        <p class="mt-6 font-mono text-[11px] leading-relaxed text-moss md:mt-7">A personal outliner for macOS. Local by default.</p>
+      </div>
+      <img src={lavender} width="1254" height="1254" alt="" loading="eager" fetchpriority="high" decoding="async" class="botanical mx-auto h-[300px] w-full max-w-[548px] md:h-[450px] xl:h-[510px]" />
+    </section>
+
+    <ProductPreview />
+
+    <section id="how-it-works" class="border-t border-rule py-11 md:pt-14 md:pb-20" aria-labelledby="workflow-heading">
+      <div class="page-shell">
+        <div class="flex flex-col items-center gap-6 md:flex-row md:gap-16">
+          <div class="w-full flex-1"><p class="eyebrow mb-7 hidden md:block">01 / From information to understanding</p><h2 id="workflow-heading" class="section-title">Gather information.<br />Build understanding.</h2></div>
+          <img src={elderflower} width="1254" height="1254" alt="" loading="lazy" decoding="async" class="botanical size-[164px] shrink-0 md:size-[280px]" />
+        </div>
+        <div class="mt-8 grid gap-8 md:mt-11 md:grid-cols-3 md:gap-10 xl:gap-14">
+          {workflow.map((step, index) => <article class="border-t border-rule pt-5 md:pt-[22px]"><p class="mb-3 font-mono text-[11px] text-moss md:mb-4 md:text-[12px]">0{index + 1}</p><h3 class="text-[26px] leading-[1.15] tracking-[-.02em] lg:text-[28px]">{step.title}</h3><p class="mt-3 text-[18px] leading-[1.4] text-ink-soft md:mt-4">{step.description}</p></article>)}
+        </div>
+      </div>
+    </section>
+
+    <section id="ai" class="section-space border-y border-rule bg-raised" aria-labelledby="ai-heading">
+      <div class="page-shell grid items-center gap-8 lg:grid-cols-[480fr_712fr] lg:gap-[88px]">
+        <div>
+          <p class="eyebrow text-violet!">02 / Support for your thinking</p>
+          <h2 id="ai-heading" class="section-title mt-6 lg:text-[48px]">Explore with AI.<br />Think it through.</h2>
+          <p class="body-copy mt-6">Run an AI skill right in your outline. Research a question, summarize what you’ve gathered, or look at a concept from another angle.</p>
+          <p class="body-copy mt-6 hidden md:block">Forage brings in the surrounding branch and the notes you link. The results stay in your outline, ready for you to question, connect, and rewrite.</p>
+          <div class="mt-6 hidden flex-wrap gap-5 font-mono text-[12px] text-violet md:flex"><span>Context you choose</span><span>Output you can edit</span></div>
+        </div>
+        <div class="hidden min-w-0 rounded-lg border border-rule-soft bg-paper p-6 md:block lg:p-9" role="img" aria-label="Example of running a research skill in the outline and receiving editable notes">
+          <p class="text-[13px] text-moss">Notes / A garden of ideas</p>
+          <p class="mt-6 text-[24px] leading-tight tracking-[-.02em]">What could a weekly review look like?</p>
+          <p class="my-6 rounded-sm bg-lilac px-3.5 py-3 font-mono text-[16px] text-violet">• &nbsp; /research</p>
+          <SlashMenu /><div class="mt-6"><AgentResult /></div>
+        </div>
+        <div class="md:hidden"><SlashMenu /><p class="body-copy mt-6">Forage uses your branch and the notes you link as context. The results stay in your outline, ready to question, connect, and rewrite.</p></div>
+      </div>
+    </section>
+
+    <Skills />
+    <Extensions />
+
+    <section id="your-space" class="section-space bg-ink text-paper" aria-labelledby="ownership-heading">
+      <div class="page-shell">
+        <div class="flex flex-wrap items-end justify-between gap-6"><h2 id="ownership-heading" class="section-title md:text-[60px]">A quiet space.<br />An open mind.</h2><p class="eyebrow hidden text-sage! md:block">Personal by design</p></div>
+        <div class="mt-8 grid gap-8 md:mt-14 md:grid-cols-3 md:gap-10 xl:gap-14">
+          {ownership.map(feature => <article class="border-t border-paper/25 pt-5 md:pt-6"><Icon name={feature.icon} class="mb-4 hidden text-sage md:block" /><h3 class="text-[25px] leading-tight tracking-[-.02em] md:text-[26px]">{feature.title}</h3><p class="mt-4 text-[18px] leading-[1.4] text-paper/85">{feature.description}</p></article>)}
+        </div>
+      </div>
+    </section>
+
+    <section class="page-shell py-[72px] pb-[88px] text-center md:py-[120px]" aria-labelledby="closing-heading">
+      <div class="mx-auto flex max-w-[800px] flex-col items-center gap-6">
+        <p class="eyebrow">Gather · Understand · Ideate</p>
+        <h2 id="closing-heading" class="text-[42px] leading-[1.04] tracking-[-.035em] md:text-[64px]">Make what you learn<br class="hidden md:block" /> your own.</h2>
+        <p class="body-copy">Gather the information. Work through the concepts. Find your next idea in Forage.</p>
+        <DownloadLink class="w-full sm:w-auto" />
+      </div>
+    </section>
+  </main>
+  <Footer />
+</Page>

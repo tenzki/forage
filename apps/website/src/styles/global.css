@@ -1,0 +1,59 @@
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Apfel Grotezk';
+  src: url('../../../../docs/ApfelGrotezk-Regular.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: 'Apfel Grotezk', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --color-paper: #f5f2e8;
+  --color-raised: #fcfbf7;
+  --color-ink: #203d32;
+  --color-ink-soft: #4a5e53;
+  --color-moss: #64735b;
+  --color-sage: #dce3d3;
+  --color-violet: #7057a3;
+  --color-lilac: #e9e1f0;
+  --color-rule: #cbcfc0;
+  --color-rule-soft: #e2e3d8;
+}
+
+@layer base {
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body { margin: 0; background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); }
+  h1, h2, h3, p { margin: 0; }
+  h1, h2, h3 { font-weight: 400; }
+  a, button, summary { -webkit-tap-highlight-color: transparent; }
+  a { text-underline-offset: 5px; }
+  button, summary { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--color-violet); outline-offset: 5px; }
+  ::selection { background: var(--color-lilac); color: var(--color-ink); }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer components {
+  .page-shell { width: min(100% - 48px, 1280px); margin-inline: auto; }
+  .section-space { padding-block: 44px; }
+  .eyebrow { font-family: var(--font-mono); font-size: 10px; line-height: 1.6; letter-spacing: .07em; text-transform: uppercase; color: var(--color-moss); }
+  .section-title { font-size: clamp(38px, 4.1vw, 56px); line-height: 1.06; letter-spacing: -.035em; }
+  .body-copy { font-size: 18px; line-height: 1.45; color: var(--color-ink-soft); }
+  .botanical { display: block; object-fit: contain; mix-blend-mode: multiply; }
+  .text-link { transition: color 150ms; }
+  .text-link:hover { color: var(--color-violet); text-decoration: underline; }
+  @media (min-width: 768px) {
+    .page-shell { width: min(100% - 96px, 1280px); }
+    .section-space { padding-block: 80px; }
+    .eyebrow { font-size: 12px; }
+    .body-copy { font-size: 20px; }
+  }
+  @media (min-width: 1280px) { .page-shell { width: min(100% - 160px, 1280px); } }
+}

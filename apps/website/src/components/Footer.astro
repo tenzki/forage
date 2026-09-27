@@ -1,0 +1,20 @@
+---
+import desktopBorder from '../assets/botanicals/footer-border-desktop-01.svg?url'
+import mobileBorder from '../assets/botanicals/footer-border-mobile-01.svg?url'
+import { footerLinks } from '../data/site'
+---
+<footer class="border-t border-rule">
+  <div class="relative isolate min-h-[624px] overflow-hidden px-8 pt-11 md:min-h-[600px] md:px-12 md:pt-16">
+    <picture class="pointer-events-none absolute inset-x-0 bottom-0 -z-10 mx-auto max-w-[440px] mix-blend-multiply md:max-w-[1440px]" aria-hidden="true">
+      <source media="(max-width: 767px)" srcset={mobileBorder} type="image/svg+xml" width="992" height="1586" />
+      <img src={desktopBorder} width="1944" height="809" alt="" loading="lazy" decoding="async" class="block h-auto max-h-[624px] w-full object-cover object-bottom md:max-h-none" />
+    </picture>
+    <div class="relative mx-auto flex max-w-[640px] flex-col items-center gap-[34px] md:gap-[38px]">
+      <div class="text-center"><a href="#top" class="text-[64px] leading-none tracking-[-.04em] md:text-[84px]" aria-label="Forage, back to top">forage</a><p class="mt-3.5 text-[16px] leading-[1.4] text-ink-soft md:text-[18px]">Your second brain. Your own thinking.</p></div>
+      <nav aria-label="Footer navigation" class="grid w-full max-w-[340px] grid-cols-2 gap-[30px] md:gap-12">
+        {footerLinks.map(group => <div><p class="mb-4 font-mono text-[11px] tracking-[.06em] text-moss uppercase">{group.title}</p><ul class="m-0 flex list-none flex-col gap-3 p-0">{group.links.map(link => <li><a href={link.href} class="text-link inline-block py-0.5 text-[16px] md:text-[17px]">{link.label}</a></li>)}</ul></div>)}
+      </nav>
+    </div>
+  </div>
+  <div class="border-t border-rule"><div class="page-shell flex flex-wrap items-center justify-between gap-4 py-[22px] font-mono text-[10px] text-moss md:text-[11px]"><p>© {new Date().getFullYear()} Forage</p><p>Made for macOS</p></div></div>
+</footer>

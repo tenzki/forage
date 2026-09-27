@@ -1,0 +1,7 @@
+# Elderflower — square-dot botanical
+
+Generated with the built-in image-generation tool. Style references: `fern-fuller-growth-eight-pairs.png` and `lavender-square-dot-01.png`. Used in `../marketing.pen`.
+
+## Prompt
+
+Use case: stylized-concept. Create a new botanical asset for the Forage brand: one flowering elderflower branch (Sambucus nigra). The two supplied images are STYLE REFERENCES ONLY: match their quiet square-dot mosaic / pixel-stipple botanical illustration language, small irregular rounded square marks with narrow gaps, restrained forest green #203D32 and moss #64735B foliage. Subject: graceful branching stem, recognizable compound serrated elder leaves, and three airy flat-topped umbels of tiny ivory-white elderflowers, with muted sage/olive centers and enough subdued green outline to remain legible on warm paper. Elegant upward growth, full plant in view, stem emerging near lower center and branching widely, generous separation between flower heads. Entire plant built from the same square-dot rhythm as reference fern and lavender, crisp detailed marks, no painterly wash, no continuous ink contours. Square composition. Background: uniform warm ivory #F5F2E8, matching the references, no cast shadow, no vignette, no texture outside plant. No text, no labels, no border, no vase, no other species, no photorealism. Produce a polished 1536px or higher square raster image.

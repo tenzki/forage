@@ -1,0 +1,26 @@
+---
+import { extensions, site } from '../data/site'
+---
+<section id="extensions" class="section-space border-t border-rule bg-raised" aria-labelledby="extensions-heading">
+  <div class="page-shell">
+    <p class="eyebrow">04 / Extensions — room to grow</p>
+    <div class="mt-7 grid items-end gap-6 lg:mt-10 lg:grid-cols-2 lg:gap-[88px]">
+      <h2 id="extensions-heading" class="section-title">Built to be<br />extended.</h2>
+      <p class="body-copy">Forage is extensible at its core. Add tools, connect services, and give your commands entirely new capabilities. Bring in specialist AI or build the workflow you’re missing.</p>
+    </div>
+    <div class:list={['mt-7 grid gap-6 md:mt-10', extensions.length === 1 ? 'lg:grid-cols-[1.88fr_1fr]' : 'lg:grid-cols-2']}>
+      {extensions.map(extension => <article class="flex min-w-0 flex-col gap-6 rounded-lg border border-rule bg-paper p-6 lg:p-9">
+        <div class="flex flex-wrap items-center justify-between gap-4"><h3 class="text-[40px] leading-none tracking-[-.03em] lg:text-[48px]">{extension.name}</h3><span class="rounded-sm bg-lilac px-2.5 py-2 font-mono text-[10px] tracking-[.06em] text-violet uppercase">{extension.label}</span></div>
+        <p class="body-copy">{extension.description}</p>
+        <dl class="grid gap-5 border-y border-rule py-6 sm:grid-cols-3 sm:gap-6">{extension.capabilities.map(capability => <div><dt class="text-[22px] leading-tight">{capability.title}</dt><dd class="mt-2 text-[17px] leading-[1.4] text-ink-soft">{capability.description}</dd></div>)}</dl>
+        <p class="mt-auto text-[17px] leading-[1.4] text-ink-soft">{extension.usage}</p>
+      </article>)}
+      <aside class="flex flex-col gap-6 rounded-lg bg-sage p-6 lg:p-9" aria-label="Future extensions">
+        <p class="eyebrow text-[11px]!">More to come</p><span class="text-[64px] leading-none text-moss" aria-hidden="true">+</span>
+        <h3 class="text-[30px] leading-[1.06] tracking-[-.025em] lg:text-[34px]">Room for<br />what’s next.</h3>
+        <p class="text-[18px] leading-[1.4] text-ink-soft">The collection will keep growing. Add the capabilities that fit the way you think and work.</p>
+      </aside>
+    </div>
+    <p class="body-copy mt-7 md:mt-10">Use an existing extension or build your own with the <a class="text-link underline decoration-rule" href={site.extensionDocs}>Forage extension API</a>.</p>
+  </div>
+</section>

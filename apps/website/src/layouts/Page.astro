@@ -1,0 +1,26 @@
+---
+import '../styles/global.css'
+import { site } from '../data/site'
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site) : undefined
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={site.description} />
+    <meta name="theme-color" content="#F5F2E8" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={site.title} />
+    <meta property="og:description" content={site.description} />
+    <meta property="og:site_name" content={site.name} />
+    <meta name="twitter:card" content="summary" />
+    {canonical && <><link rel="canonical" href={canonical} /><meta property="og:url" content={canonical} /></>}
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <title>{site.title}</title>
+  </head>
+  <body id="top">
+    <a href="#main" class="sr-only z-50 rounded-sm bg-ink px-5 py-3 text-paper focus:not-sr-only focus:fixed focus:top-4 focus:left-4">Skip to content</a>
+    <slot />
+  </body>
+</html>

@@ -1,0 +1,169 @@
+{
+  "measuredAt": "2026-09-27T07:03:38.406Z",
+  "environment": {
+    "node": "v26.8.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "sharp": {
+      "aom": "3.13.1",
+      "archive": "3.8.2",
+      "cairo": "1.18.4",
+      "cgif": "0.5.0",
+      "exif": "0.6.25",
+      "expat": "2.7.3",
+      "ffi": "3.5.2",
+      "fontconfig": "2.17.1",
+      "freetype": "2.14.1",
+      "fribidi": "1.0.16",
+      "glib": "2.86.1",
+      "harfbuzz": "12.1.0",
+      "heif": "1.20.2",
+      "highway": "1.3.0",
+      "imagequant": "2.4.1",
+      "lcms": "2.17",
+      "mozjpeg": "0826579",
+      "pango": "1.57.0",
+      "pixman": "0.46.4",
+      "png": "1.6.50",
+      "proxy-libintl": "0.5",
+      "rsvg": "2.61.2",
+      "spng": "0.7.4",
+      "tiff": "4.7.1",
+      "vips": "8.17.3",
+      "webp": "1.6.0",
+      "xml2": "2.15.1",
+      "zlib-ng": "2.2.5",
+      "sharp": "0.34.5"
+    }
+  },
+  "iterations": 20,
+  "results": [
+    {
+      "name": "lavender-square-dot-01",
+      "squares": 2331,
+      "svgBytes": 141248,
+      "gzipBytes": 22147,
+      "brotliBytes": 21450,
+      "variants": [
+        {
+          "width": 400,
+          "webpBytes": 14828,
+          "svgMs": 25.211332999999996,
+          "webpMs": 2.07974999999999
+        },
+        {
+          "width": 600,
+          "webpBytes": 29214,
+          "svgMs": 26.217124999999896,
+          "webpMs": 3.6627920000000813
+        },
+        {
+          "width": 1100,
+          "webpBytes": 78692,
+          "svgMs": 30.39825000000019,
+          "webpMs": 8.674207999999908
+        }
+      ]
+    },
+    {
+      "name": "elderflower-square-dot-01",
+      "squares": 5505,
+      "svgBytes": 333343,
+      "gzipBytes": 52504,
+      "brotliBytes": 50952,
+      "variants": [
+        {
+          "width": 164,
+          "webpBytes": 7624,
+          "svgMs": 57.26891700000033,
+          "webpMs": 0.8925420000000486
+        },
+        {
+          "width": 328,
+          "webpBytes": 26370,
+          "svgMs": 59.14183400000002,
+          "webpMs": 2.38799999999992
+        },
+        {
+          "width": 560,
+          "webpBytes": 66076,
+          "svgMs": 60.57600000000002,
+          "webpMs": 5.102207999999337
+        }
+      ]
+    },
+    {
+      "name": "footer-border-desktop-01",
+      "squares": 5593,
+      "svgBytes": 334723,
+      "gzipBytes": 45337,
+      "brotliBytes": 43712,
+      "variants": [
+        {
+          "width": 1440,
+          "webpBytes": 41256,
+          "svgMs": 63.60691700000007,
+          "webpMs": 5.934957999999824
+        },
+        {
+          "width": 1944,
+          "webpBytes": 66280,
+          "svgMs": 65.3384160000005,
+          "webpMs": 9.198583999999755
+        }
+      ]
+    },
+    {
+      "name": "footer-border-mobile-01",
+      "squares": 3324,
+      "svgBytes": 202513,
+      "gzipBytes": 28003,
+      "brotliBytes": 26876,
+      "variants": [
+        {
+          "width": 390,
+          "webpBytes": 16350,
+          "svgMs": 35.09137499999997,
+          "webpMs": 2.9665420000001177
+        },
+        {
+          "width": 780,
+          "webpBytes": 52078,
+          "svgMs": 40.441499999998996,
+          "webpMs": 8.330916000000798
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "label": "Mobile, 1×",
+      "webpBytes": 38802,
+      "svgBytes": 677104,
+      "gzipBytes": 102654,
+      "brotliBytes": 99278
+    },
+    {
+      "label": "Mobile, 2×",
+      "webpBytes": 157140,
+      "svgBytes": 677104,
+      "gzipBytes": 102654,
+      "brotliBytes": 99278
+    },
+    {
+      "label": "Desktop, 1×",
+      "webpBytes": 96840,
+      "svgBytes": 809314,
+      "gzipBytes": 119988,
+      "brotliBytes": 116114
+    },
+    {
+      "label": "Desktop, 2×",
+      "webpBytes": 211048,
+      "svgBytes": 809314,
+      "gzipBytes": 119988,
+      "brotliBytes": 116114
+    }
+  ]
+}

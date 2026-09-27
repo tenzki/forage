@@ -1,0 +1,14 @@
+---
+const commands = [
+  ['research', 'Investigate a topic and structure findings as notes · Enter or Tab'],
+  ['brainstorm', 'Generate ideas and options for the current note'],
+  ['ask', 'Ask the agent a question about this branch'],
+  ['image', 'Generate an image under the current note'],
+]
+---
+<ul class="m-0 list-none rounded-md border border-rule bg-raised p-1.5 text-[14px] shadow-[0_8px_24px_#203d3212]" aria-label="Example slash commands">
+  {commands.map(([name, description], i) => <li class:list={['rounded-sm px-3 py-2.5', i === 0 && 'bg-lilac']}>
+    <p class:list={['font-mono text-[13px]', i === 0 ? 'text-violet' : 'text-ink']}>/{name}</p>
+    <p class="mt-1 leading-[1.35] text-ink-soft">{description}</p>
+  </li>)}
+</ul>

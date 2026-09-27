@@ -1,0 +1,36 @@
+---
+import Brand from './Brand.astro'
+import DownloadLink from './DownloadLink.astro'
+import Icon from './Icon.astro'
+const links = [{ href: '#how-it-works', label: 'The way it works' }, { href: '#your-space', label: 'Made for your mind' }]
+---
+<header class="border-b border-rule">
+  <div class="page-shell relative flex min-h-[76px] items-center justify-between py-5 md:min-h-[100px] md:py-6">
+    <a href="#top" aria-label="Forage home"><Brand /></a>
+    <nav aria-label="Main navigation" class="hidden items-center gap-8 lg:flex">
+      {links.map(link => <a href={link.href} class="text-link text-base">{link.label}</a>)}
+      <DownloadLink small />
+    </nav>
+    <details class="mobile-menu lg:hidden">
+      <summary aria-label="Toggle navigation" class="flex size-11 list-none items-center justify-center rounded-sm hover:bg-sage [&::-webkit-details-marker]:hidden"><Icon name="menu" size={22} /></summary>
+      <nav aria-label="Mobile navigation" class="absolute top-[calc(100%-8px)] right-0 z-20 flex w-[min(320px,calc(100vw-48px))] flex-col gap-2 rounded-lg border border-rule bg-raised p-5 shadow-lg">
+        {links.map(link => <a href={link.href} class="text-link py-3">{link.label}</a>)}
+        <a href="#extensions" class="text-link py-3">Extensions</a>
+        <DownloadLink class="mt-2" />
+      </nav>
+    </details>
+  </div>
+</header>
+<script>
+  const menu = document.querySelector<HTMLDetailsElement>('.mobile-menu')
+  menu?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => { menu.open = false }))
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && menu?.open) {
+      menu.open = false
+      menu.querySelector('summary')?.focus()
+    }
+  })
+  document.addEventListener('click', event => {
+    if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false
+  })
+</script>

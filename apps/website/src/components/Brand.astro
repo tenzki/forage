@@ -1,0 +1,7 @@
+---
+interface Props { compact?: boolean }
+const { compact = false } = Astro.props
+---
+<span class:list={['inline-flex items-center gap-2 tracking-[-0.025em]', compact ? 'text-[17px]' : 'text-[26px]']}>
+  <img src="/mark.svg" width={compact ? 18 : 24} height={compact ? 18 : 24} alt="" />forage
+</span>

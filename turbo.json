@@ -19,6 +19,16 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@forage/website#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/branding-assets/**",
+        "$TURBO_ROOT$/docs/ApfelGrotezk-Regular.otf"
+      ],
+      "env": ["WEBSITE_URL"],
+      "outputs": ["dist/**"]
+    },
     "forage-sidecar#build": {
       "dependsOn": ["^build"],
       "outputs": []

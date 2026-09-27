@@ -1,0 +1,21 @@
+---
+import { skills } from '../data/site'
+---
+<section id="skills" class="section-space border-t border-rule" aria-labelledby="skills-heading">
+  <div class="page-shell">
+    <p class="eyebrow">03 / Commands you can make your own</p>
+    <div class="mt-7 grid items-end gap-6 lg:mt-10 lg:grid-cols-2 lg:gap-[88px]">
+      <h2 id="skills-heading" class="section-title">Your workflow.<br />Your commands.</h2>
+      <p class="body-copy">Turn the way you like to work into a slash command. Name it, write the instructions, and choose an agent with the tools it needs. Set the tone, the steps, and the kind of answer you want.</p>
+    </div>
+    <div class="mt-7 grid gap-5 md:mt-10 md:grid-cols-3 md:gap-6">
+      {skills.map(skill => <article class="flex min-w-0 flex-col gap-5 rounded-lg border border-rule bg-raised p-6 lg:p-7">
+        <h3 class="font-mono text-[24px] tracking-[-.02em] text-violet">{skill.command}</h3>
+        <p class="text-[24px] leading-[1.1] tracking-[-.02em] lg:text-[26px]">{skill.title}</p>
+        <p class="text-[18px] leading-[1.4] text-ink-soft">{skill.description}</p>
+        <div class="mt-auto rounded-sm bg-lilac p-4"><p class="mb-3 font-mono text-[10px] tracking-[.06em] text-violet">YOUR INSTRUCTIONS</p><p class="text-[17px] leading-[1.4]">{skill.instructions}</p></div>
+      </article>)}
+    </div>
+    <p class="body-copy mt-7 md:mt-10">Start with a built-in skill or create your own. Save your instructions once, then use your command wherever you need it in your outline.</p>
+  </div>
+</section>

@@ -1,0 +1,61 @@
+---
+import Brand from './Brand.astro'
+import Icon from './Icon.astro'
+import AgentResult from './AgentResult.astro'
+---
+<section class="page-shell pb-10 md:pb-14" aria-labelledby="preview-heading">
+  <h2 id="preview-heading" class="sr-only">A look inside Forage</h2>
+  <figure class="mx-auto max-w-[1200px]">
+    <div class="hidden overflow-hidden rounded-lg border border-rule bg-raised shadow-[0_14px_38px_#203d320c] md:block">
+      <div class="relative flex h-7 items-center justify-center border-b border-rule-soft bg-[#ecebdd] text-[11px] text-moss">
+        <div class="absolute left-3 flex gap-1.5" aria-hidden="true"><i class="size-2 rounded-full bg-[#c97b6c]"></i><i class="size-2 rounded-full bg-[#d1ad63]"></i><i class="size-2 rounded-full bg-[#8ca277]"></i></div>Forage
+      </div>
+      <div class="product-window grid min-h-[590px] grid-cols-[160px_minmax(0,1fr)] xl:min-h-[650px] xl:grid-cols-[180px_minmax(0,1fr)_220px]">
+        <aside class="flex flex-col border-r border-rule-soft bg-[#f0efe4] p-3 text-[13px] text-ink-soft" aria-label="Example outline sidebar">
+          <div class="mb-5 px-1 text-ink"><Brand compact /></div>
+          <div class="mb-2 flex items-center gap-2 rounded border border-rule bg-raised p-2"><Icon name="search" size={12} /><span>Search</span><span class="ml-auto text-[10px] text-moss">⌘K</span></div>
+          <div class="flex items-center gap-2 rounded bg-sage px-2 py-2 text-ink"><Icon name="home" size={13} /> Home</div>
+          {['Inbox', 'Daily Notes', 'Tasks'].map(label => <div class="flex items-center gap-2 px-2 py-2"><span class="text-moss" aria-hidden="true">▤</span>{label}</div>)}
+          <p class="mt-5 mb-2 px-2 font-mono text-[9px] tracking-[.12em] text-moss">SHORTCUTS</p>
+          {['Forage launch', 'Reading list', 'project', 'Open todos'].map(label => <p class="px-2 py-2"><span class="mr-2 text-moss">◇</span>{label}</p>)}
+          <div class="mt-auto space-y-3 border-t border-rule-soft pt-4 text-[11px]"><p>⌨ &nbsp; Keyboard shortcuts</p><p>⚙ &nbsp; Settings</p><p>♧ &nbsp; Trash</p><p class="pt-1 font-mono text-[9px] tracking-[.08em] text-moss">• LOCAL · SAVED</p></div>
+        </aside>
+        <div class="min-w-0">
+          <div class="flex h-10 items-center gap-3 border-b border-rule-soft px-5 text-[11px] text-moss"><span aria-hidden="true">▣ &nbsp; ‹ &nbsp; ›</span><span>Home &nbsp; › &nbsp; Notes &nbsp; ›</span><span class="truncate text-ink">A garden of ideas</span></div>
+          <div class="px-7 py-10 lg:px-11 xl:px-12">
+            <h3 class="text-[29px] leading-tight tracking-[-.025em] xl:text-[32px]">A garden of ideas</h3>
+            <p class="mt-2 text-[12px] leading-relaxed text-moss">What I want my thinking space to feel like — slow to clutter, quick to connect.</p>
+            <div class="mt-6 text-[14px] leading-[1.6]">
+              <p><span class="mr-2 text-moss">•</span> What makes a good thinking space?</p>
+              <div class="my-2 ml-2 space-y-2 border-l border-rule pl-5">
+                <p>• &nbsp; Room to collect unfinished thoughts</p>
+                <div><p>• &nbsp; Connections that stay easy to follow</p><p class="ml-5 text-[11px] text-moss">Links should read like footpaths, not wires.</p></div>
+                <p>• &nbsp; Tools that help when I ask <span class="ml-1 rounded-sm bg-sage px-1.5 text-[10px]">#reading</span> <span class="rounded-sm bg-sage px-1.5 text-[10px]">#agents</span></p>
+              </div>
+              <p class="my-2">• &nbsp; Reading notes from last spring</p>
+              <p>• &nbsp; Next steps</p>
+              <div class="mt-2 ml-2 space-y-2 border-l border-rule pl-5"><p>□ &nbsp; Collect references for the brand</p><p>□ &nbsp; Draft the onboarding outline</p><p>• &nbsp; /research spaced repetition for a weekly review</p><AgentResult /></div>
+            </div>
+            <div class="mt-9 border-t border-rule-soft pt-5 text-[11px] leading-relaxed">
+              <p class="mb-3 font-mono text-[9px] tracking-[.1em] text-moss">02 / LINKED REFERENCES</p>
+              <p class="text-moss">Weekly review</p><p>…pull open questions from <span class="underline decoration-rule">A garden of ideas</span> into Friday.</p>
+              <p class="mt-3 text-moss">Reading list</p><p>Notes on Ahrens tie back to <span class="underline decoration-rule">A garden of ideas</span>.</p>
+            </div>
+          </div>
+        </div>
+        <aside class="hidden border-l border-rule-soft bg-[#f3f2e9] p-4 text-[11px] xl:block" aria-label="Example agent activity">
+          <p class="text-[17px]">Activity</p><p class="mt-1 text-moss">2 calls</p>
+          <p class="my-4 font-mono text-[8px] tracking-[.1em] text-moss">OBSERVABLE EVENTS</p>
+          <div class="rounded-md border border-rule-soft bg-raised p-3"><p class="leading-relaxed">↗ &nbsp; /research spaced repetition</p><div class="mt-2 flex justify-between text-[9px] text-moss"><span>14:02:11</span><span class="rounded-full bg-lilac px-2 text-violet">Running</span></div><div class="mt-3 space-y-2 text-moss"><p>✓ Read branch context</p><p>✓ Searched 6 sources</p><p class="text-violet">↗ Structuring findings as notes…</p></div></div>
+          <div class="mt-3 rounded-md border border-rule-soft bg-raised p-3"><p>↗ &nbsp; /brainstorm onboarding</p><div class="mt-2 flex justify-between text-[9px] text-moss"><span>13:48:40 · 12.4s</span><span class="rounded-full bg-sage px-2">Done</span></div></div>
+        </aside>
+      </div>
+    </div>
+    <div class="rounded-md border border-rule bg-raised p-5 md:hidden">
+      <p class="text-[26px] tracking-[-.02em]">A garden of ideas</p>
+      <div class="my-5 space-y-3 text-[15px] text-ink-soft"><p>• &nbsp; Collect unfinished thoughts</p><p>• &nbsp; Follow a new connection</p><p>• &nbsp; Find a little room to grow</p></div>
+      <AgentResult />
+    </div>
+    <figcaption class="mt-6 font-mono text-[10px] leading-relaxed tracking-[.08em] text-moss md:text-[11px]">NOTES, RESEARCH, AND IDEAS — IN ONE CONNECTED OUTLINE.</figcaption>
+  </figure>
+</section>
