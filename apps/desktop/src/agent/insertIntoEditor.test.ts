@@ -6,9 +6,10 @@
 //   - starting a generation must not steal the caret from the user
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { Editor } from '@tiptap/core'
+import { Editor, type JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
-import { BulletAttributes, OutlinerKeymap } from '../editor/extensions'
+import { BulletAttributes, OutlinerKeymap, setEditorMutationLocked } from '../editor/extensions'
+import { collectBullets } from '../editor/outlineModel'
 import { BulletNote } from '../editor/bulletNote'
 import { InternalLink } from '../editor/internalLinks'
 import { AgentStreamingText } from '../editor/agentStreamingText'
@@ -27,6 +28,7 @@ import {
   insertAiChild,
   insertAiChildUnder,
   insertExtensionSkillResult,
+  removeAiList,
   removeCurrentSlashCommand,
   runSkillIntoEditor,
   skillActivityLabel,
@@ -649,6 +651,77 @@ describe('agent output insertion', () => {
 
     expect(resultNodeId).toBe(outputNodeId)
     expect(bulletTexts(editor)).toEqual(['topic', 'Final response'])
+  })
+
+  it.each([0, 2])('runs under a bullet with existing children at depth %s without replacing their content', (depth) => {
+    setCurrentBulletText(editor, '/research topic')
+    const document: JSONContent = editor.getJSON()
+    for (let level = 0; level < depth; level += 1) {
+      document.content = [{ type: 'bulletList', content: [{
+        type: 'listItem', attrs: { nodeId: `ancestor-${level}` }, content: [
+          { type: 'paragraph', content: [{ type: 'text', text: `Ancestor ${level}` }] },
+          ...document.content!,
+        ],
+      }] }]
+    }
+    editor.commands.setContent(document)
+    const invocation = collectBullets(editor.state.doc).find((entry) => entry.text === '/research topic')!
+    editor.commands.setTextSelection(invocation.pos + 2)
+    const invocationNodeId = currentListItemId(editor)!
+    const ancestors = Array.from({ length: depth }, (_, index) => `Ancestor ${depth - index - 1}`)
+    const previous = insertAiChildUnder(editor, invocationNodeId)!
+    writeAiText(editor, previous, 'Previous answer\nPrevious detail')
+    const outputNodeId = insertAiChildUnder(editor, invocationNodeId)!
+    expect(outputNodeId).toBeTruthy()
+    expect(() => editor.state.doc.check()).not.toThrow()
+    expect(collectBullets(editor.state.doc).find((entry) => entry.id === outputNodeId)?.ancestorIds)
+      .toEqual([...invocation.ancestorIds, invocationNodeId])
+    writeAiText(editor, outputNodeId, 'Partial response\nMore response')
+    expect(bulletTexts(editor)).toEqual([...ancestors, '/research topic', 'Previous answer', 'Previous detail', 'Partial response', 'More response'])
+
+    commitStructuredAgentResultInto(editor, invocationNodeId, outputNodeId, 'research', {
+      version: 1, nodes: [{ type: 'text', text: 'Final response' }], sources: [],
+    })
+    expect(bulletTexts(editor)).toEqual([...ancestors, 'topic', 'Previous answer', 'Previous detail', 'Final response'])
+  })
+
+  it('keeps concurrent outputs separate when streaming and cleaning up a failed run', () => {
+    const invocationNodeId = currentListItemId(editor)!
+    const first = insertAiChildUnder(editor, invocationNodeId)!
+    const second = insertAiChildUnder(editor, invocationNodeId)!
+    expect(() => editor.state.doc.check()).not.toThrow()
+    writeAiText(editor, first, 'First answer\nFirst detail')
+    writeAiText(editor, second, 'Second answer\nSecond detail')
+    writeAiText(editor, first, 'Updated first answer')
+    expect(bulletTexts(editor)).toEqual(['Research topic', 'Updated first answer', 'Second answer', 'Second detail'])
+    removeAiList(editor, first)
+    expect(bulletTexts(editor)).toEqual(['Research topic', 'Second answer', 'Second detail'])
+    removeAiList(editor, second)
+    expect(bulletTexts(editor)).toEqual(['Research topic'])
+  })
+
+  it('preserves user bullets inserted among streaming output when the result replaces it', () => {
+    const invocationNodeId = currentListItemId(editor)!
+    const outputNodeId = insertAiChildUnder(editor, invocationNodeId)!
+    writeAiText(editor, outputNodeId, 'First line\nSecond line')
+    const output = collectBullets(editor.state.doc).find((entry) => entry.id === outputNodeId)!
+    editor.view.dispatch(editor.state.tr.insert(output.pos + output.node.nodeSize,
+      editor.schema.nodes.listItem.create({ nodeId: 'user-note' },
+        editor.schema.nodes.paragraph.create(null, editor.schema.text('My note')))))
+
+    commitStructuredAgentResultInto(editor, invocationNodeId, outputNodeId, 'research', {
+      version: 1, nodes: [{ type: 'text', text: 'Final answer' }], sources: [],
+    })
+    expect(bulletTexts(editor)).toEqual(['Research topic', 'Final answer', 'My note'])
+    expect(() => editor.state.doc.check()).not.toThrow()
+  })
+
+  it('reports a rejected placeholder insertion before starting generation', () => {
+    const invocationNodeId = currentListItemId(editor)!
+    const before = editor.getJSON()
+    setEditorMutationLocked(editor, true)
+    expect(insertAiChildUnder(editor, invocationNodeId)).toBeNull()
+    expect(editor.getJSON()).toEqual(before)
   })
 
   it('does not move the caret while text streams in', () => {

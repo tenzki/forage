@@ -143,6 +143,16 @@ describe('settings panel', () => {
     expect(screen.queryByText('ABCD-EFGH')).toBeNull()
   })
 
+  it('omits removed extension tools from the global tools list', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.setState({ enabledToolIds: ['web_search', 'generate_image'] })
+    render(<SettingsPanel onBack={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: 'Agents' }))
+    expect(screen.queryByText('Unavailable references')).toBeNull()
+    expect(screen.queryByText('generate_image')).toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'Web search' })).toBeTruthy()
+  })
+
   it('requires confirmation before removing a custom tool', async () => {
     const user = userEvent.setup()
     const removeCustomTool = vi.mocked(useSettingsStore.getState().removeCustomTool)

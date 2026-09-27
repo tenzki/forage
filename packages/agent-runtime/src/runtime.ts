@@ -104,7 +104,7 @@ export async function runAgent(
   options: { signal?: AbortSignal; maxToolRounds?: number } = {},
 ): Promise<StructuredResult> {
   const input = runInputSchema.parse(rawInput)
-  const maxToolRounds = Math.max(1, Math.min(options.maxToolRounds ?? 8, 20))
+  const maxToolRounds = Math.max(1, Math.min(options.maxToolRounds ?? 20, 40))
   const controller = new AbortController()
   const abort = () => controller.abort(options.signal?.reason)
   options.signal?.addEventListener('abort', abort, { once: true })

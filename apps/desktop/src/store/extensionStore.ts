@@ -8,6 +8,8 @@ import type {
   ExtensionSourceRequest,
 } from '@forage/agent-runtime'
 import { ExtensionManagementClient, type ExtensionManagementCommand } from '../agent/extensionManagementClient'
+import { useSettingsStore } from './settingsStore'
+import { BUILTIN_TOOL_OPTIONS } from '../agent/tools'
 
 interface ExtensionManagementTransport {
   start(): Promise<void>
@@ -89,7 +91,7 @@ async function request(command: ExtensionManagementCommand) {
   return response
 }
 
-export const useExtensionStore = create<ExtensionState>((set) => {
+export const useExtensionStore = create<ExtensionState>((set, get) => {
   const refresh = async () => {
     set({ isLoading: true, error: null })
     try {
@@ -111,11 +113,15 @@ export const useExtensionStore = create<ExtensionState>((set) => {
     }
   }
 
-  const perform = async (installationId: string | null, command: ExtensionManagementCommand) => {
+  const perform = async (installationId: string | null, command: ExtensionManagementCommand, afterSuccess?: () => Promise<void>) => {
     set({ busyInstallationId: installationId, error: null })
     try {
       await request(command)
-      await refresh()
+      try {
+        await afterSuccess?.()
+      } finally {
+        await refresh()
+      }
     } catch (error) {
       set({ error: message(error) })
       throw error
@@ -171,7 +177,17 @@ export const useExtensionStore = create<ExtensionState>((set) => {
       set((state) => ({ updateAvailability: { ...state.updateAvailability, [installationId]: { available: false } } }))
     },
     remove: async (installationId) => {
-      await perform(installationId, { operation: 'remove', installationId })
+      const entries = get().catalog?.entries ?? []
+      const retainedToolIds = new Set([
+        ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
+        ...useSettingsStore.getState().customTools.map((tool) => tool.id),
+        ...entries.filter((entry) => entry.source.installationId !== installationId).flatMap((entry) => entry.tools.map((tool) => tool.id)),
+      ])
+      const removedToolIds = entries.filter((entry) => entry.source.installationId === installationId)
+        .flatMap((entry) => entry.tools.map((tool) => tool.id)).filter((id) => !retainedToolIds.has(id))
+      await perform(installationId, { operation: 'remove', installationId }, async () => {
+        if (removedToolIds.length) await useSettingsStore.getState().removeToolReferences(removedToolIds)
+      })
       set((state) => {
         const updateAvailability = { ...state.updateAvailability }
         delete updateAvailability[installationId]

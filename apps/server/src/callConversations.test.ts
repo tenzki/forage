@@ -168,7 +168,16 @@ describe('server call conversations', () => {
     expect(await server.repository.currentRevision(OUTLINE_ID)).toBe(revisionAfterFirst)
 
     await server.admit('Make it one line about gravity.', { callId: first, turn: 3 })
-    const revised = await server.work([emitOutline([{ text: 'Version 2' }])])
+    const revised = await server.work([(context) => {
+      // Each worker rehydrates from stored entries. Turn three must retain both
+      // the first tool-produced result and the second turn's inline answer.
+      expect(userTexts(context)).toHaveLength(3)
+      expect(JSON.stringify(context.messages.filter((message) => message.role === 'assistant')))
+        .toContain('The moon section.')
+      expect(JSON.stringify(context.messages.filter((message) => message.role === 'toolResult')))
+        .toContain('Version 1')
+      return emitOutline([{ text: 'Version 2' }])
+    }])
     expect(revised).toMatchObject({ status: 'completed', callId: first, turn: 3 })
     const events = await server.repository.eventsAfter(OUTLINE_ID, revisionAfterFirst, 10)
     expect(events).toHaveLength(1)

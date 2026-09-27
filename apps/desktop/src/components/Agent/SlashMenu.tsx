@@ -171,6 +171,13 @@ export function SlashMenu({
   const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
   const [contextError, setContextError] = useState<string | null>(null)
   const completedCommandRef = useRef<CommandChoice | null>(null)
+  const dismissedInvocationRef = useRef<{ nodeId: string; query: string; prompt: string } | null>(null)
+  const isDismissed = (state: MenuState | null) => {
+    const dismissed = dismissedInvocationRef.current
+    return Boolean(editor && state && dismissed
+      && currentListItemId(editor) === dismissed.nodeId
+      && state.query === dismissed.query && state.prompt === dismissed.prompt)
+  }
   const choices = commandChoices(skills)
   const matches = menu
     ? choices.filter((command) => command.label.startsWith(menu.query))
@@ -180,6 +187,11 @@ export function SlashMenu({
     if (!editor) return
     const update = () => {
       const state = readSlashState(editor)
+      if (isDismissed(state)) {
+        setMenu(null)
+        return
+      }
+      dismissedInvocationRef.current = null
       const completed = completedCommandRef.current
       if (completed && state?.query === completed.label) {
         setMenu(null)
@@ -211,7 +223,7 @@ export function SlashMenu({
       previewTimer = null
       const state = readSlashState(editor)
       const invocationNodeId = currentListItemId(editor)
-      if (!editor.isFocused || !state || !invocationNodeId) {
+      if (!editor.isFocused || !state || !invocationNodeId || isDismissed(state)) {
         setContextError(null)
         clearSkillContext(editor)
         return
@@ -386,6 +398,15 @@ export function SlashMenu({
     conversation?: SkillRunConversation,
   ): void {
     if (!editor) return
+    // The invocation keeps its slash prefix until result placement. Streaming and
+    // selection transactions must not reopen its menu or context preview.
+    const slashState = readSlashState(editor)
+    if (slashState && currentListItemId(editor) === invocationNodeId) {
+      dismissedInvocationRef.current = { nodeId: invocationNodeId, query: slashState.query, prompt: slashState.prompt }
+      completedCommandRef.current = null
+      setCompletedCommand(null)
+      setMenu(null)
+    }
     if (isExtensionSkill(skill)) {
       const runId = crypto.randomUUID()
       const controller = new AbortController()

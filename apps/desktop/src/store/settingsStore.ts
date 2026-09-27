@@ -12,6 +12,7 @@ import {
   copyDefaultAgents,
   copyDefaultSkills,
   DEFAULT_AGENT_ID,
+  isExtensionSkill,
   validateAgentDraft,
   validateSkillDraft,
   type AgentDefinition,
@@ -74,6 +75,7 @@ interface SettingsState {
   setToolEnabled: (toolId: string, enabled: boolean) => Promise<void>
   addCustomTool: (draft: CustomHttpToolDraft) => Promise<void>
   removeCustomTool: (toolId: string) => Promise<void>
+  removeToolReferences: (toolIds: string[]) => Promise<void>
   saveAgent: (draft: AgentDraft) => Promise<void>
   removeAgent: (agentId: string) => Promise<void>
   saveSkill: (draft: SkillDraft) => Promise<void>
@@ -344,6 +346,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await store.save()
     } catch (error) {
       set({ customTools: previousTools, enabledToolIds: previousEnabled, agents: previousAgents, error: message(error) })
+      throw error
+    }
+  },
+
+  removeToolReferences: async (toolIds) => {
+    const removed = new Set(toolIds)
+    const previous = { enabledToolIds: get().enabledToolIds, agents: get().agents, skills: get().skills }
+    const enabledToolIds = previous.enabledToolIds.filter((id) => !removed.has(id))
+    const agents = previous.agents.map((agent) => ({ ...agent, toolIds: agent.toolIds.filter((id) => !removed.has(id)) }))
+    const skills = previous.skills.map((skill) => isExtensionSkill(skill) ? skill : {
+      ...skill, requiredToolIds: (skill.requiredToolIds ?? []).filter((id) => !removed.has(id)),
+    })
+    set({ enabledToolIds, agents, skills, error: null })
+    try {
+      const store = await getStore()
+      await store.set(ENABLED_TOOLS_FIELD, enabledToolIds)
+      await store.set(AGENTS_FIELD, agents)
+      await store.set(SKILLS_FIELD, skills)
+      await store.save()
+    } catch (error) {
+      set({ ...previous, error: message(error) })
       throw error
     }
   },

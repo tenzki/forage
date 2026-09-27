@@ -86,7 +86,7 @@ export interface PiTurnAdapters {
 
 export interface PiTurnOptions {
   signal?: AbortSignal
-  /** Tool rounds before the turn fails; 8 by default and never more than 20. */
+  /** Tool rounds before the turn fails; 20 by default and never more than 20. */
   maxToolRounds?: number
   cwd?: string
   agentDir?: string

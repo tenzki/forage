@@ -1,8 +1,8 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent'
 import { UNAUTHORIZED_TOOL_MESSAGE } from './tool-policy'
 
-export const DEFAULT_MAX_TOOL_ROUNDS = 8
-export const MAX_TOOL_ROUNDS = 20
+export const DEFAULT_MAX_TOOL_ROUNDS = 20
+export const MAX_TOOL_ROUNDS = 40
 export const MAX_CALLS_PER_RESPONSE = 16
 export const CALL_LIMIT_MESSAGE = `Tool call not run: at most ${MAX_CALLS_PER_RESPONSE} tool calls run per response.`
 export const ROUND_LIMIT_MESSAGE = 'Tool call not run: the tool round limit was reached.'

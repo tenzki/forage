@@ -167,6 +167,17 @@ describe('runPiTurn', () => {
     expect(scripted.faux.state.callCount).toBeLessThanOrEqual(3)
   })
 
+  it('allows 20 tool rounds by default and blocks the next round', async () => {
+    const read: string[] = []
+    const keepReading = () => fauxAssistantMessage(fauxToolCall('web_read', { url: 'https://example.com/tides' }))
+    const { adapters: turnAdapters } = await adapters(
+      Array.from({ length: 21 }, () => keepReading),
+      { runtimeTools: [webRead(read)] },
+    )
+    await expect(runPiTurn(request(), turnAdapters)).rejects.toMatchObject({ code: 'tool_round_limit' })
+    expect(read).toHaveLength(20)
+  })
+
   it('requires an outline from a first server turn but lets a local first turn fall back to text', async () => {
     const server = await adapters([fauxAssistantMessage(fauxText('Plain prose.'))])
     await expect(runPiTurn(request(), server.adapters)).rejects.toMatchObject({ code: 'structured_result_required' })

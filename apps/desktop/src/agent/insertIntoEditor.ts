@@ -154,46 +154,58 @@ export function insertAiChildUnder(editor: Editor, parentNodeId: string): string
   return insertAiChildAt(editor, target.pos, target.node)
 }
 
-function insertAiChildAt(editor: Editor, parentPos: number, parentNode: ProseMirrorNode): string {
+function insertAiChildAt(editor: Editor, parentPos: number, parentNode: ProseMirrorNode): string | null {
   const nodeId = newNodeId()
-  // Position just inside the end of the current listItem (after its paragraph).
-  const insertPos = parentPos + parentNode.nodeSize - 1
-  editor
-    .chain()
-    .setMeta('forageOrigin', 'agent')
-    .setMeta('forageChangeGroup', nodeId)
-    .insertContentAt(
-      insertPos,
-      {
-        type: 'bulletList',
-        content: [
-          {
-            type: 'listItem',
-            attrs: { nodeId, nodeType: 'ai' },
-            content: [{ type: 'paragraph' }],
-          },
-        ],
-      },
-      { updateSelection: false },
-    )
-    .run()
-  return nodeId
+  const item = editor.schema.nodes.listItem.create(
+    { nodeId, nodeType: 'ai' }, editor.schema.nodes.paragraph.create(),
+  )
+  // A bullet has at most one child list. Append to that list on reruns.
+  const hasChildList = parentNode.lastChild?.type.name === 'bulletList'
+  const insertPos = parentPos + parentNode.nodeSize - (hasChildList ? 2 : 1)
+  const transaction = editor.state.tr.insert(insertPos,
+    hasChildList ? item : editor.schema.nodes.bulletList.create(null, item))
+  transaction.setMeta('forageOrigin', 'agent')
+  transaction.setMeta('forageChangeGroup', nodeId)
+  editor.view.dispatch(transaction)
+  // A locked editor can reject the transaction. Do not start a paid run against
+  // an output placeholder that was never inserted.
+  return findAiList(editor, nodeId) ? nodeId : null
 }
 
-/** Locate the bulletList whose first child carries `rootNodeId`. */
+// Streaming output can share a child list with user notes and other runs. Track
+// only this run's roots, so updates and failure cleanup never replace that list.
+const liveOutputIds = new WeakMap<Editor, Map<string, Set<string>>>()
+
+interface AiList {
+  rootNodeId: string
+  node: ProseMirrorNode
+  ranges: Array<{ from: number; to: number }>
+  wholeList: boolean
+}
+
+/** Locate just the roots belonging to this output, within their current list. */
 function findAiList(
   editor: Editor,
   rootNodeId: string,
-): { pos: number; node: ProseMirrorNode } | null {
-  let found: { pos: number; node: ProseMirrorNode } | null = null
+): AiList | null {
+  let found: AiList | null = null
+  const ids = liveOutputIds.get(editor)?.get(rootNodeId) ?? new Set([rootNodeId])
   editor.state.doc.descendants((node, pos) => {
     if (found) return false
     if (node.type.name !== 'bulletList') return undefined
-    node.forEach((child) => {
-      if (child.type.name === 'listItem' && child.attrs.nodeId === rootNodeId) {
-        found = { pos, node }
-      }
+    const items: ProseMirrorNode[] = []
+    const ranges: AiList['ranges'] = []
+    node.forEach((child, offset) => {
+      if (!ids.has(child.attrs.nodeId)) return
+      items.push(child)
+      ranges.push({ from: pos + 1 + offset, to: pos + 1 + offset + child.nodeSize })
     })
+    if (!items.length) return undefined
+    const wholeList = items.length === node.childCount
+    found = {
+      rootNodeId, node: node.type.create(node.attrs, items), wholeList,
+      ranges: wholeList ? [{ from: pos, to: pos + node.nodeSize }] : ranges,
+    }
     return undefined
   })
   return found
@@ -203,11 +215,13 @@ function findAiList(
 export function removeAiList(editor: Editor, rootNodeId: string): void {
   const list = findAiList(editor, rootNodeId)
   if (!list) return
-  const transaction = editor.state.tr.delete(list.pos, list.pos + list.node.nodeSize)
+  const transaction = editor.state.tr
+  for (const { from, to } of [...list.ranges].reverse()) transaction.delete(from, to)
   transaction.setMeta('addToHistory', false)
   transaction.setMeta('forageOrigin', 'agent')
   transaction.setMeta('forageChangeGroup', rootNodeId)
   editor.view.dispatch(transaction)
+  liveOutputIds.get(editor)?.delete(rootNodeId)
 }
 
 /**
@@ -502,14 +516,16 @@ function streamingRanges(editor: Editor, rootNodeId: string, previousText: strin
   if (!list) return []
   const previousLines = toLines(previousText)
   const ranges: StreamingTextRange[] = []
-  list.node.forEach((child, offset, index) => {
+  list.node.forEach((child, _offset, index) => {
     if (child.type.name !== 'listItem') return
     const paragraph = child.firstChild
     const currentText = paragraph?.textContent ?? ''
     const priorText = previousLines[index] ?? ''
     const startOffset = commonPrefixLength(currentText, priorText)
     if (startOffset >= currentText.length) return
-    const paragraphStart = list.pos + 1 + offset + 2
+    const entry = findListItem(editor, child.attrs.nodeId)
+    if (!entry) return
+    const paragraphStart = entry.pos + 2
     ranges.push({ from: paragraphStart + startOffset, to: paragraphStart + currentText.length })
   })
   return ranges
@@ -924,9 +940,7 @@ export function commitStructuredAgentResultInto(
   while (/\s/.test(text[prefixLength] ?? '')) prefixLength += 1
   const transaction = editor.state.tr
   if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
-  const mappedFrom = transaction.mapping.map(list.pos, -1)
-  const mappedTo = transaction.mapping.map(list.pos + list.node.nodeSize, 1)
-  transaction.replaceWith(mappedFrom, mappedTo, editor.schema.nodes.bulletList.create(list.node.attrs, items))
+  replaceAiListContent(transaction, list, items)
   transaction.setMeta('forageOrigin', 'agent')
   transaction.setMeta('forageChangeGroup', rootNodeId)
   editor.view.dispatch(transaction)
@@ -973,19 +987,29 @@ function structuredToStored(node: StructuredResultNode): StoredOutlineNode {
 
 function replaceAiList(
   editor: Editor,
-  list: { pos: number; node: ProseMirrorNode },
+  list: AiList,
   items: ProseMirrorNode[],
 ): void {
   const tr = editor.state.tr
-  tr.replaceWith(
-    list.pos,
-    list.pos + list.node.nodeSize,
-    editor.schema.nodes.bulletList.create(list.node.attrs, items),
-  )
+  replaceAiListContent(tr, list, items)
   tr.setMeta('addToHistory', false)
   tr.setMeta('forageOrigin', 'agent')
-  tr.setMeta('forageChangeGroup', String(list.node.firstChild?.attrs.nodeId ?? 'unscoped'))
+  tr.setMeta('forageChangeGroup', list.rootNodeId)
   editor.view.dispatch(tr)
+  let outputs = liveOutputIds.get(editor)
+  if (!outputs) liveOutputIds.set(editor, outputs = new Map())
+  outputs.set(list.rootNodeId, new Set(items.map((item) => String(item.attrs.nodeId))))
+}
+
+function replaceAiListContent(transaction: Transaction, list: AiList, items: ProseMirrorNode[]): void {
+  // Delete later owned roots first; any user bullets inserted between them stay.
+  for (let index = list.ranges.length - 1; index >= 0; index -= 1) {
+    const range = list.ranges[index]!
+    const from = transaction.mapping.map(range.from, 1)
+    const to = transaction.mapping.map(range.to, -1)
+    if (index > 0) transaction.delete(from, to)
+    else transaction.replaceWith(from, to, list.wholeList ? list.node.type.create(list.node.attrs, items) : items)
+  }
 }
 
 export interface Generation {

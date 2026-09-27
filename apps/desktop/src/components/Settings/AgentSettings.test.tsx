@@ -50,6 +50,40 @@ async function fillSkill(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('AgentSettings skill form', () => {
+  it('opens the editor beside its skill and switches to the newly selected skill', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.setState({ skills: [
+      { id: 'ask', label: 'ask', description: 'Ask', agentId: 'general-agent', systemPrompt: 'Answer.', requiredToolIds: [] },
+      { id: 'write', label: 'write', description: 'Write', agentId: 'writer', systemPrompt: 'Write notes.', requiredToolIds: [] },
+    ] })
+    render(<AgentSettings reportError={vi.fn()} />)
+    const askRow = screen.getByText('/ask').closest('[data-slot="list-row"]')!
+    const writeRow = screen.getByText('/write').closest('[data-slot="list-row"]')!
+
+    await user.click(within(askRow as HTMLElement).getByRole('button', { name: 'Edit' }))
+    expect(askRow.nextElementSibling).toBe(screen.getByRole('group', { name: 'Skill editor' }))
+    expect(document.activeElement).toBe(screen.getByLabelText('Slash command'))
+    await user.clear(screen.getByLabelText('Skill instructions'))
+    await user.type(screen.getByLabelText('Skill instructions'), 'Unsaved draft.')
+
+    await user.click(within(writeRow as HTMLElement).getByRole('button', { name: 'Edit' }))
+    expect(writeRow.nextElementSibling).toBe(screen.getByRole('group', { name: 'Skill editor' }))
+    expect((screen.getByLabelText('Slash command') as HTMLInputElement).value).toBe('write')
+    expect((screen.getByLabelText('Skill instructions') as HTMLTextAreaElement).value).toBe('Write notes.')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'write', systemPrompt: 'Write notes.' }))
+  })
+
+  it('does not list tools whose extension is no longer installed', async () => {
+    const user = userEvent.setup()
+    useSettingsStore.setState({ agents: [{ id: 'general', name: 'General', description: '', systemPrompt: 'Help.', toolIds: ['web_search', 'generate_image'] }] })
+    render(<AgentSettings reportError={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(screen.queryByText('Unavailable references')).toBeNull()
+    expect(screen.queryByText('generate_image')).toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'Web search' })).toBeTruthy()
+  })
+
   it('shows a failed skill save next to the form instead of only at the bottom of Settings', async () => {
     const user = userEvent.setup()
     const reportError = vi.fn()

@@ -127,6 +127,32 @@ describe('sidecar run on the shared Pi turn', () => {
     expect(settled(events)).toEqual({ type: 'agent_settled', outcome: 'text' })
   })
 
+  it('restores earlier prompts, tool results, and answers across three separate runs', async () => {
+    const first = await run([
+      fauxAssistantMessage(fauxToolCall('web_fetch', { url: 'https://example.com/tides' })),
+      fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: [{ text: 'A short outline.' }], sources: [] })),
+    ], { ...payload, prompt: 'Research tides; remember the code word kelp.', thread: { callId: 'durable-call', turn: 1 } })
+    expect(settled(first)).toEqual({ type: 'agent_settled', outcome: 'outline' })
+
+    const second = await run([fauxAssistantMessage(fauxText('The follow-up answer is gravity.'))], {
+      ...payload, prompt: 'Why do tides happen?', thread: { callId: 'durable-call', turn: 2 },
+    })
+    expect(settled(second)).toMatchObject({ type: 'agent_settled', outcome: 'text' })
+
+    let resumed: Context | undefined
+    await run([(context) => {
+      resumed = context
+      return fauxAssistantMessage(fauxText('Kelp; gravity.'))
+    }], { ...payload, prompt: 'What did we discuss?', thread: { callId: 'durable-call', turn: 3 } })
+
+    expect(resumed?.messages.filter((message) => message.role === 'user')).toHaveLength(3)
+    expect(JSON.stringify(resumed?.messages)).toContain('remember the code word kelp')
+    expect(JSON.stringify(resumed?.messages.filter((message) => message.role === 'toolResult')))
+      .toContain('Tides follow the moon.')
+    expect(JSON.stringify(resumed?.messages.filter((message) => message.role === 'assistant')))
+      .toContain('The follow-up answer is gravity.')
+  })
+
   it('settles a cancelled turn as text', async () => {
     const controller = new AbortController()
     transport.fetch.mockImplementation(async () => {

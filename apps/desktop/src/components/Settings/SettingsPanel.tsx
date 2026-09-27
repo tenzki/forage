@@ -35,7 +35,6 @@ import {
 } from '../../store/extensionStore'
 import { Button } from '../ui/Button'
 import { CountBadge } from '../ui/CountBadge'
-import { ListRow } from '../ui/ListRow'
 import { Field, Input, Select } from '../ui/Field'
 
 function describeError(error: unknown): string {
@@ -93,12 +92,6 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
     return [...groups.entries()]
   }, [extensionTools])
   const attentionCount = extensionAttentionCount(extensionCatalog)
-  const knownToolIds = new Set([
-    ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
-    ...customTools.map((tool) => tool.id),
-    ...extensionTools.map((tool) => tool.id),
-  ])
-  const unavailableEnabledToolIds = enabledToolIds.filter((toolId) => !knownToolIds.has(toolId))
 
   useEffect(() => {
     if (!isLoaded) void loadSettings()
@@ -431,9 +424,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         {extensionToolGroups.length > 0 && <><h3>Extensions</h3>{extensionToolGroups.map(([sourceName, tools]) => <div key={sourceName} className="extension-tool-group"><h4>{sourceName}</h4><div className="overflow-hidden rounded-[10px] border border-rule-soft bg-paper-raised">
           {tools.map((tool) => <SwitchFieldInput key={`${tool.installationId}:${tool.id}`} label={tool.name} hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason}`} checked={enabledToolIds.includes(tool.id)} onCheckedChange={(checked) => void toggleTool(tool.id, checked)} switchAriaLabel={`Enable ${tool.name}`} disabled={!isLoaded || !tool.available} />)}
         </div></div>)}</>}
-        {unavailableEnabledToolIds.length > 0 && <><h3>Unavailable references</h3><div className="tool-list">
-          {unavailableEnabledToolIds.map((toolId) => <ListRow key={toolId} title={toolId} description="The configured provider is missing or unavailable. This reference is retained." actions={<Button size="sm" onClick={() => void toggleTool(toolId, false)}>Disable reference</Button>} />)}
-        </div></>}
+
 
         {showToolForm ? (
           <div className="custom-tool-form">
