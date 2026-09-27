@@ -7,7 +7,6 @@ const TOOL_TIMEOUT_MS = 20_000
 
 export const WEB_SEARCH_TOOL_ID = 'web_search'
 export const WEB_FETCH_TOOL_ID = 'web_fetch'
-export const IMAGE_GENERATION_TOOL_ID = 'generate_image'
 export const SEARCH_OUTLINE_TOOL_ID = 'search_outline'
 
 export interface ExecutableTool {
@@ -64,11 +63,6 @@ export const BUILTIN_TOOL_OPTIONS: ToolOption[] = [
     id: WEB_FETCH_TOOL_ID,
     name: 'Read webpages',
     description: 'Extract readable Markdown from a public webpage through Jina Reader.',
-  },
-  {
-    id: IMAGE_GENERATION_TOOL_ID,
-    name: 'Generate images',
-    description: 'Generate a bounded image with OpenAI GPT Image 2 through Codex subscription limits or API billing.',
   },
   {
     id: SEARCH_OUTLINE_TOOL_ID,
@@ -201,7 +195,7 @@ export function validateCustomToolDraft(draft: CustomHttpToolDraft): CustomHttpT
   if (!/^[a-z][a-z0-9_]{1,63}$/.test(name)) {
     throw new Error('Tool names must use 2–64 lowercase letters, numbers, or underscores.')
   }
-  if ([WEB_SEARCH_TOOL_ID, WEB_FETCH_TOOL_ID, IMAGE_GENERATION_TOOL_ID, SEARCH_OUTLINE_TOOL_ID].includes(name)) throw new Error('That tool name is reserved.')
+  if ([WEB_SEARCH_TOOL_ID, WEB_FETCH_TOOL_ID, SEARCH_OUTLINE_TOOL_ID].includes(name)) throw new Error('That tool name is reserved.')
   if (!description || description.length > 500) throw new Error('Add a description of up to 500 characters.')
   approvedTemplateUrl(urlTemplate)
   if (!templateParameters(urlTemplate).length) throw new Error('Add at least one {{parameter}} to the URL.')

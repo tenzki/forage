@@ -111,6 +111,8 @@ The credential-free management sidecar owns `~/.forage/settings.json`, drop-ins 
 
 At local admission, the desktop captures a catalog/configuration/source digest snapshot and explicit tool ownership. The run sidecar verifies it before import, leases managed revisions for the run, and applies the same effective allowlist to built-in, custom HTTP, and extension tools. Pi remains a replaceable internal agent-loop adapter behind this native boundary. Enabled extensions are trusted Node.js code with the user's process permissions; the host and process separation are not an OS sandbox. Extension installations, settings, secrets, and snapshots remain device-local, and server execution never falls back to them.
 
+Local image generation is provided by the explicitly enabled Image Generation extension, using its own API key or local Codex login. Core accepts bounded raster tool results and owns their image IDs and normal asset placement; it has no local image-provider adapter. Existing saved images remain readable without the extension. The server retains its separate image capability. See [ADR-0022](ADRs/ADR-0022-image-generation-extension.md).
+
 See [Extensions](extensions.md) for the Settings and development workflow.
 
 ## External capture and assets

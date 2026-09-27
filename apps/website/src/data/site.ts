@@ -40,6 +40,16 @@ export const extensions: readonly Extension[] = [{
     { title: 'Organize', description: 'Classify and filter by meaning.' },
   ],
   usage: 'Choose System One when creating a skill, then set the question and criteria. The results become part of your outline.',
+}, {
+  name: 'Image Generation',
+  label: 'OpenAI',
+  description: 'Give an idea a visual form. Generate images right in your outline, alongside the notes and questions that inspired them.',
+  capabilities: [
+    { title: 'Explore', description: 'Try a visual direction for an idea.' },
+    { title: 'Illustrate', description: 'Create an image from your own brief.' },
+    { title: 'Keep', description: 'Save the result with your notes.' },
+  ],
+  usage: 'Enable the extension, connect your Codex login or an OpenAI API key, and create a command such as /image to use it in your outline.',
 }]
 
 export const ownership = [

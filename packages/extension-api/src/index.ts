@@ -95,7 +95,14 @@ export interface ExtensionManifest {
 }
 
 export type ExtensionToolInputSchema = Readonly<Record<string, ExtensionJsonValue>>
-export type ExtensionToolResult = { text: string } | { json: ExtensionJsonValue }
+/** Raster bytes are validated and held by the host, never exposed to the model. */
+export interface ExtensionImageResult {
+  readonly mediaType: 'image/png' | 'image/webp' | 'image/jpeg'
+  readonly base64: string
+  readonly alt: string
+}
+
+export type ExtensionToolResult = { text: string } | { json: ExtensionJsonValue } | { image: ExtensionImageResult }
 
 export interface ExtensionProgress {
   readonly message: string

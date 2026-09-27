@@ -22,7 +22,7 @@ export interface OutlineImage {
   prompt: string
 }
 
-/** Resolves image IDs returned by `generate_image` in this turn. */
+/** Resolves image IDs returned by image tools in this turn. */
 export interface ImageReferences {
   get(imageId: string): OutlineImage | undefined
 }
@@ -57,7 +57,7 @@ export function createEmitOutlineTool(images: ImageReferences, sources: Verified
   return defineTool({
     name: EMIT_OUTLINE_TOOL,
     label: 'Emit Outline',
-    description: 'Return the final answer as structured text or image outline nodes. A generated image must be a separate image-only node using the imageId returned by generate_image. List the pages you read in sources.',
+    description: 'Return the final answer as structured text or image outline nodes. A generated image must be a separate image-only node using the imageId returned by an image tool. List the pages you read in sources.',
     promptSnippet: 'Emit the final response as nested text nodes and separate generated-image nodes',
     promptGuidelines: [
       'Use emit_outline as the final action for every task.',

@@ -140,8 +140,8 @@ describe('sidecar run on the shared Pi turn', () => {
     expect(settled(events)).toEqual({ type: 'agent_settled', outcome: 'text' })
   })
 
-  it('reports a missing required tool as a process error', async () => {
-    const events = await run([], { ...payload, requiredToolIds: ['generate_image'] })
+  it('requires an installed image extension even when generate_image is authorized', async () => {
+    const events = await run([], { ...payload, enabledToolIds: ['generate_image'], requiredToolIds: ['generate_image'] })
     expect(settled(events)).toEqual({ type: 'process_error', error: 'Required tool is unavailable: generate_image' })
   })
 })

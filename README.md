@@ -10,7 +10,7 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
   - `/research <topic>` — investigate a topic and structure findings as child notes
   - `/brainstorm <prompt>` — generate ideas and options for the current note
   - `/ask <question>` — ask the agent about the current branch
-  - `/image <prompt>` — generate an image under the current bullet (via Codex or the OpenAI Images API)
+  - Image generation — install the [Image Generation extension](extensions/image-generation/README.md) and configure a skill such as `/image` (via Codex or the OpenAI Images API)
 - **Bi-directional links** — type `[[` to link any bullet to any other via stable IDs: click to jump, and a backlinks panel shows everything that references the current bullet. Links survive reordering and nesting, and linked branches can be pinned as explicit agent context.
 - **Your notes as agent memory** — every skill invocation automatically carries the bullet's full ancestry and branch, and agents can search your whole outline (`search_outline`) before writing, so answers build on what you already know instead of duplicating it.
 - **Extensible agents and skills** — every agent and slash-command skill is a typed definition you can edit in Settings (Cmd+,): model, instructions, and a per-agent tool allowlist. Add custom HTTP tools, new skills, whole new agents, or explicitly trusted local extensions.

@@ -42,7 +42,6 @@ import type {
 
 export const RESERVED_EXTENSION_TOOL_IDS = [
   'emit_outline',
-  'generate_image',
   'search_outline',
   'web_fetch',
   'web_search',
@@ -889,10 +888,21 @@ export const extensionToolInputSchemaSchema = z.record(z.string().max(100), exte
   .refine((value) => Object.keys(value).length <= 100, 'Tool input schema has too many keys')
   .refine((value) => serializedJsonIsBounded(value, 20_000), 'Tool input schema is too large')
 
+export const extensionImageResultSchema = z.object({
+  mediaType: z.enum(['image/png', 'image/webp', 'image/jpeg']),
+  base64: z.string().min(4).max(6_990_508).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine((value) => value.length % 4 === 0, 'Invalid base64')
+    .refine((value) => value.length / 4 * 3 - (value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0) <= 5 * 1024 * 1024,
+      'Image exceeds 5 MiB'),
+  alt: z.string().trim().min(1).max(500),
+}).strict()
+
 export const extensionToolResultSchema = z.union([
-  z.object({ text: z.string().max(100_000) }).strict(),
-  z.object({ json: extensionJsonValueSchema }).strict(),
-]).refine(serializedJsonIsBounded, 'Extension tool result is too large')
+  z.union([
+    z.object({ text: z.string().max(100_000) }).strict(),
+    z.object({ json: extensionJsonValueSchema }).strict(),
+  ]).refine(serializedJsonIsBounded, 'Extension tool result is too large'),
+  z.object({ image: extensionImageResultSchema }).strict(),
+])
 
 export const extensionProgressSchema = z.object({
   message: z.string().trim().min(1).max(500),

@@ -16,7 +16,6 @@ import { conversationDirectory, createFileConversationStore, runPiTurn } from '@
 
 import {
   createCustomHttpTool,
-  createImageTool,
   createSearchOutlineTool,
   createWebFetchTool,
   createWebSearchTool,
@@ -75,6 +74,7 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
       ...(entry.data === undefined ? {} : { data: sanitizeLogData(entry.data, knownSecrets) }),
     })
     const extensionTools = adaptExtensionTools(extensions, authorizedExtensionTools, {
+      images: generatedImages,
       signal,
       secrets: payload.extensionSecrets,
       onProgress: (installationId, extensionId, toolId, progress) => emit({
@@ -122,7 +122,6 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
       piTools: ({ sources }) => [
         createWebSearchTool(),
         createWebFetchTool(sources),
-        createImageTool(generatedImages),
         createSearchOutlineTool(() => outlineSnapshot),
         ...customToolConfigs.map(createCustomHttpTool),
         ...extensionTools,

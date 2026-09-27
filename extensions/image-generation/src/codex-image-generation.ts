@@ -263,6 +263,8 @@ async function runImageTurn(client: CodexRpcClient, root: string, request: Codex
     developerInstructions: 'Call the built-in image generation tool exactly once. Never call shell, file, web, app, connector, or multi-agent tools.',
   })
   const waiting = waitForImage(client, request.signal)
+  // Observe rejection even if turn/start fails before the result can be awaited.
+  void waiting.catch(() => undefined)
   await client.request('turn/start', {
     threadId: threadId(started),
     input: [{ type: 'text', text: imagePrompt(request) }],
@@ -297,8 +299,9 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 export async function generateCodexSubscriptionImage(request: CodexImageRequest): Promise<CodexImageResult> {
   if (!request.accessToken.trim() || !request.accountId.trim()) {
-    throw new Error('ChatGPT subscription credentials are missing. Reconnect ChatGPT in Settings.')
+    throw new Error('ChatGPT subscription credentials are missing. Run codex login again.')
   }
+  request.signal?.throwIfAborted()
   const root = await createIsolatedRoot()
   const child = spawn('codex', codexArguments(), {
     cwd: join(root, 'workspace'),
@@ -308,7 +311,10 @@ export async function generateCodexSubscriptionImage(request: CodexImageRequest)
   const client = new CodexRpcClient(child)
   const timeout = AbortSignal.timeout(GENERATION_TIMEOUT_MS)
   const combinedSignal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout
+  const abort = () => { child.kill() }
+  combinedSignal.addEventListener('abort', abort, { once: true })
   try {
+    combinedSignal.throwIfAborted()
     const item = await runImageTurn(client, root, { ...request, signal: combinedSignal })
     if (item.status !== 'completed') throw imageFailure(item)
     if (!validCodexPng(item.result)) throw new Error('Codex returned an invalid or oversized PNG image.')
@@ -319,6 +325,7 @@ export async function generateCodexSubscriptionImage(request: CodexImageRequest)
     }
     throw error
   } finally {
+    combinedSignal.removeEventListener('abort', abort)
     await stopChild(child)
     try {
       await rm(root, { recursive: true, force: true })

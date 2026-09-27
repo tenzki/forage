@@ -34,7 +34,7 @@ export const DEFAULT_AGENTS: AgentDefinition[] = [{
   name: 'General assistant',
   description: 'General-purpose outline assistant',
   systemPrompt: 'You are an agent embedded in a tree-based note-taking application. Be concise, factual, and organize the answer for an outliner.',
-  toolIds: ['web_search', 'web_fetch', 'generate_image'],
+  toolIds: ['web_search', 'web_fetch'],
 }]
 
 export const DEFAULT_SKILLS: LlmSkillDefinition[] = [
@@ -58,13 +58,6 @@ export const DEFAULT_SKILLS: LlmSkillDefinition[] = [
     agentId: DEFAULT_AGENT_ID,
     systemPrompt: 'Answer the question using the selected outline context. Be concise and direct.',
     requiredToolIds: [],
-  },
-  {
-    id: 'image', label: 'image', description: 'Generate an image under the current note',
-    execution: 'llm',
-    agentId: DEFAULT_AGENT_ID,
-    systemPrompt: 'Call generate_image once for the requested visual. In emit_outline, return an optional caption as a text node followed by a separate image-only node containing the returned imageId and accessible imageAlt. Never attach an image to a text node.',
-    requiredToolIds: ['generate_image'],
   },
 ]
 

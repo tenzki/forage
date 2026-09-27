@@ -1,23 +1,14 @@
 import { Type } from '@earendil-works/pi-ai'
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { fetch as undiciFetch } from 'undici'
-import { generateCodexSubscriptionImage } from './codex-image-generation'
 
 // ── bounds ──────────────────────────────────────────────────────────────────
 
 const MAX_TOOL_OUTPUT = 30_000
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const MAX_IMAGE_RESPONSE_CHARS = 7_100_000
-const IMAGE_MODEL = 'gpt-image-2'
 const APPROVED_CUSTOM_ORIGINS = new Set(['https://api.github.com', 'https://api.open-meteo.com'])
-const RESERVED_TOOLS = new Set(['emit_outline', 'web_search', 'web_fetch', 'generate_image', 'search_outline'])
+const RESERVED_TOOLS = new Set(['emit_outline', 'web_search', 'web_fetch', 'search_outline'])
 
 // ── types ───────────────────────────────────────────────────────────────────
-
-interface StoredImage {
-  src: string
-  prompt: string
-}
 
 export interface CustomToolConfig {
   name: string
@@ -100,83 +91,6 @@ function duckResults(html: string, count: number): string {
   return results.length ? results.join('\n\n') : 'No web results found.'
 }
 
-// ── image generation ────────────────────────────────────────────────────────
-
-function apiImageCredential(): string {
-  const key = process.env.AI_CHAT_API_KEY?.trim()
-  if (key) return key
-  throw new Error('Image generation requires an OpenAI API key. Add one in Settings.')
-}
-
-function subscriptionImageCredential(): { accessToken: string; accountId: string } {
-  const accessToken = process.env.AI_CHAT_API_KEY?.trim()
-  const accountId = process.env.AI_CHAT_ACCOUNT_ID?.trim()
-  if (!accessToken || !accountId) {
-    throw new Error('ChatGPT subscription credentials are missing. Reconnect ChatGPT in Settings.')
-  }
-  return { accessToken, accountId }
-}
-
-function validWebp(base64: string): boolean {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64) || base64.length % 4 !== 0) return false
-  const bytes = Buffer.from(base64, 'base64')
-  return bytes.length > 0 && bytes.length <= MAX_IMAGE_BYTES
-    && bytes.subarray(0, 4).toString('ascii') === 'RIFF'
-    && bytes.subarray(8, 12).toString('ascii') === 'WEBP'
-}
-
-function apiError(text: string, status: number): Error {
-  try {
-    const parsed = JSON.parse(text) as { error?: { code?: unknown; message?: unknown } }
-    const code = typeof parsed.error?.code === 'string' ? ` (${parsed.error.code})` : ''
-    const detail = typeof parsed.error?.message === 'string' ? ` ${parsed.error.message.slice(0, 500)}` : ''
-    return new Error(`OpenAI image generation failed with HTTP ${status}${code}.${detail}`)
-  } catch {
-    return new Error(`OpenAI image generation failed with HTTP ${status}.`)
-  }
-}
-
-async function generateApiImage(prompt: string, size: string, quality: string, signal?: AbortSignal): Promise<StoredImage> {
-  const timeout = AbortSignal.timeout(120_000)
-  const response = await undiciFetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    redirect: 'error',
-    headers: {
-      Authorization: `Bearer ${apiImageCredential()}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      model: IMAGE_MODEL,
-      prompt,
-      n: 1,
-      size,
-      quality,
-      output_format: 'webp',
-      output_compression: 80,
-    }),
-  })
-  const declared = Number(response.headers.get('content-length') ?? 0)
-  if (declared > MAX_IMAGE_RESPONSE_CHARS) throw new Error('OpenAI image response exceeded the allowed size.')
-  const text = await response.text()
-  if (text.length > MAX_IMAGE_RESPONSE_CHARS) throw new Error('OpenAI image response exceeded the allowed size.')
-  if (!response.ok) throw apiError(text, response.status)
-  const parsed = JSON.parse(text) as { data?: Array<{ b64_json?: unknown }> }
-  const base64 = parsed.data?.[0]?.b64_json
-  if (typeof base64 !== 'string' || !validWebp(base64)) throw new Error('OpenAI returned an invalid or oversized image.')
-  return { src: `data:image/webp;base64,${base64}`, prompt }
-}
-
-async function generateImage(prompt: string, size: string, quality: string, signal?: AbortSignal): Promise<StoredImage> {
-  if (process.env.AI_CHAT_PROVIDER !== 'openai-codex') {
-    return generateApiImage(prompt, size, quality, signal)
-  }
-  const credential = subscriptionImageCredential()
-  const image = await generateCodexSubscriptionImage({ prompt, size, quality, ...credential, signal })
-  return { src: `data:image/png;base64,${image.base64}`, prompt }
-}
-
 // ── tool factories ──────────────────────────────────────────────────────────
 
 export function createWebSearchTool(): ToolDefinition {
@@ -211,29 +125,6 @@ export function createWebFetchTool(sources?: { register(url: string): void }): T
       const text = bounded(await response.text(), 'Webpage')
       sources?.register(target.toString())
       return { content: [{ type: 'text', text }], details: {} }
-    },
-  })
-}
-
-export function createImageTool(images: Map<string, StoredImage>): ToolDefinition {
-  return defineTool({
-    name: 'generate_image',
-    label: 'Generate Image',
-    description: `Generate one image with OpenAI ${IMAGE_MODEL}. Returns an imageId to attach to an emit_outline node. Subscription mode uses included Codex limits; API-key mode uses API billing.`,
-    parameters: Type.Object({
-      prompt: Type.String({ minLength: 1, maxLength: 4_000 }),
-      size: Type.Optional(Type.Union([Type.Literal('1024x1024'), Type.Literal('1536x1024'), Type.Literal('1024x1536')])),
-      quality: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('medium')])),
-    }),
-    async execute(_toolCallId, params, signal) {
-      if (images.size >= 1) throw new Error('At most one image can be generated in one run.')
-      const image = await generateImage(params.prompt.trim(), params.size ?? '1024x1024', params.quality ?? 'low', signal)
-      const imageId = `img_${crypto.randomUUID().replace(/-/g, '')}`
-      images.set(imageId, image)
-      return {
-        content: [{ type: 'text', text: `Generated image ${imageId}. Attach this exact imageId to an emit_outline node.` }],
-        details: { action: 'generated_image', imageId },
-      }
     },
   })
 }

@@ -4,7 +4,19 @@
 
 Every extension has one `forage.extension.json` contract containing reverse-DNS identity, ordinary semantic package `version`, a confined entry path, and static tool/hook/setting/executor declarations. There are no API or manifest version discriminators and no negotiation or legacy loader. Inventory inspects the manifest without importing code; after trust and enablement, runtime registrations must match it semantically, independent of object property order.
 
-Tools keep the bounded JSON Schema, progress, structured logging, cancellation and text/JSON result contract. Settings are `string`, `multiline`, `number`, `boolean`, `select` or `secret`; plaintext secrets remain in device-local credential storage.
+Tools keep the bounded JSON Schema, progress, structured logging, cancellation and text/JSON/raster result contract. Settings are `string`, `multiline`, `number`, `boolean`, `select` or `secret`; plaintext secrets remain in device-local credential storage.
+
+## Raster tool results
+
+A tool may return `{ image: { mediaType, base64, alt } }` instead of text or JSON.
+Supported media types are `image/png`, `image/webp`, and `image/jpeg`; bytes must
+be canonical base64, match the raster signature, and decode to at most 5 MiB.
+Alt text is required and limited to 500 characters. The host retains at most one
+image per run, assigns an opaque `imageId`, and exposes only that ID to the model.
+The model can then emit an image-only outline node through `emit_outline`.
+Images are ordinary application-owned assets after placement; extensions receive
+no editor or asset-store authority. Text/JSON results retain their 100,000-character
+limit. This raster variant applies to model tools, not direct skill executors.
 
 ## Generic skill executors
 

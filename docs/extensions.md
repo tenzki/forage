@@ -55,7 +55,7 @@ The System One package is an example of whole-feature ownership rather than a bu
 
 For authoring, see the [public API contract](../packages/extension-api/README.md) and [reference extension](../extensions/reference/README.md).
 
-Repository extensions live in `extensions/`: `reference/` is the deterministic example and `system-one/` owns the complete System One feature. Each is an independent workspace package with its own manifest, build, and tests. Shared extension infrastructure stays in `packages/extension-api` and `packages/extension-host`.
+Repository extensions live in `extensions/`: `reference/` is the deterministic example `system-one/` owns the complete System One feature, and [`image-generation/`](../extensions/image-generation/README.md) owns local image generation and its provider credentials. Each is an independent workspace package with its own manifest, build, and tests. Shared extension infrastructure stays in `packages/extension-api` and `packages/extension-host`.
 
 ## Offline smoke coverage
 

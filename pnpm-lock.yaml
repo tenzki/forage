@@ -328,6 +328,31 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  extensions/image-generation:
+    dependencies:
+      '@forage/extension-api':
+        specifier: workspace:*
+        version: link:../../packages/extension-api
+      undici:
+        specifier: 8.9.0
+        version: 8.9.0
+    devDependencies:
+      '@forage/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@forage/extension-host':
+        specifier: workspace:*
+        version: link:../../packages/extension-host
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.1
+        version: 4.1.1(@opentelemetry/api@1.9.0)(@types/node@26.2.0)(jsdom@29.0.1)(vite@6.4.1(@types/node@26.2.0)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.0))
+
   extensions/reference:
     dependencies:
       '@forage/extension-api':

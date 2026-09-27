@@ -1,0 +1,43 @@
+{
+  "id": "dev.forage.image-generation",
+  "name": "Image Generation",
+  "version": "0.1.0",
+  "description": "Generate images with an extension-owned OpenAI API key or local Codex ChatGPT login.",
+  "entry": "./dist/index.js",
+  "contributes": {
+    "tools": [
+      {
+        "id": "generate_image",
+        "name": "Generate images",
+        "description": "Generate one image using OpenAI GPT Image 2. Returns an imageId for a separate image-only emit_outline node."
+      }
+    ],
+    "hooks": [
+      "run:start"
+    ],
+    "settings": [
+      {
+        "key": "provider",
+        "label": "Image provider",
+        "type": "select",
+        "default": "codex",
+        "options": [
+          {
+            "value": "codex",
+            "label": "Codex ChatGPT login"
+          },
+          {
+            "value": "api",
+            "label": "OpenAI API key"
+          }
+        ]
+      },
+      {
+        "key": "api_key",
+        "label": "OpenAI API key",
+        "type": "secret",
+        "description": "Required only for the OpenAI API provider. Image calls use API billing."
+      }
+    ]
+  }
+}
