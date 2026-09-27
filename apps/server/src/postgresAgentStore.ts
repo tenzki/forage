@@ -11,6 +11,7 @@ import {
   type PortableAgentConfiguration,
   type SupportedAgentConfiguration,
   type ComputeProfile,
+  type LocalAnswerResult,
   type RunInput,
   type RunStatus,
   type StructuredResult,
@@ -19,10 +20,16 @@ import { automationPolicySetSchema, type AutomationPolicySet } from '@forage/pro
 import { canonicalJson } from '@forage/domain'
 import {
   AgentStoreError,
+  CONVERSATION_UNAVAILABLE_MESSAGE,
+  CALL_BUSY_MESSAGE,
+  TURN_CONFLICT_MESSAGE,
+  requireNextTurn,
   type AdmitRunInput,
   type AgentRunRecord,
   type AgentRunResult,
   type AgentStore,
+  type CallTurnEntries,
+  type CallVersion,
   type PublishedAutomation,
   type PublishedConfiguration,
   type PublishedComputeProfile,
@@ -111,32 +118,59 @@ export class PostgresAgentStore implements AgentStore {
   async admitRun(admission: AdmitRunInput): Promise<AgentRunRecord> {
     const input = runInputSchema.parse(admission.input)
     if (!admission.ownerId) throw new AgentStoreError('invalid_state', 'Run owner is required.')
-    const result = await this.pool.query<AgentRunRow>(
-      `INSERT INTO agent_runs
-       (id, owner_id, outline_id, trigger_kind, trigger_identity, invocation_id, intent_hash, source_note_id, target_note_id,
-        input_snapshot, definition_snapshot, configuration_revision, credential_reference, status,
-        max_attempts, retry_of_run_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'queued',$14,$15)
-       ON CONFLICT (outline_id, trigger_identity)
-       DO UPDATE SET id = agent_runs.id
-       RETURNING *`,
-      [input.runId, admission.ownerId, input.outlineId, admission.trigger, admission.triggerIdentity,
-        admission.invocationId ?? null, admission.intentHash ?? null,
-        input.source.nodeId ?? null, input.target.parentId, input,
-        { agent: input.agent, skill: input.skill, effectiveToolIds: input.effectiveToolIds, policyId: admission.policyId ?? null },
-        input.configurationRevision, input.credentialRef, Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null],
-    )
-    const row = result.rows[0]!
-    if (admission.intentHash && row.intent_hash !== admission.intentHash) {
-      throw new AgentStoreError('conflict', 'Invocation identifier was already used with different intent.')
+    const thread = input.thread
+    if (thread?.turn === 1 && thread.callId !== input.runId) {
+      throw new AgentStoreError('conflict', 'A call starts with its first run as the call.')
     }
-    return runFromRow(row)
+    return this.transaction(async (client) => {
+      if (thread && thread.turn > 1) {
+        // Replies to one call serialize on its first run, so two devices cannot both start a turn.
+        const root = await client.query<{ call_id: string | null }>(
+          'SELECT call_id FROM agent_runs WHERE id=$1 AND outline_id=$2 FOR UPDATE', [thread.callId, input.outlineId],
+        )
+        const replay = await client.query<AgentRunRow>(
+          'SELECT * FROM agent_runs WHERE outline_id=$1 AND trigger_identity=$2', [input.outlineId, admission.triggerIdentity],
+        )
+        if (replay.rows[0]) return admitted(replay.rows[0], admission)
+        if (root.rows[0]?.call_id !== thread.callId) throw new AgentStoreError('conversation_unavailable', CONVERSATION_UNAVAILABLE_MESSAGE)
+        const active = await client.query(
+          `SELECT 1 FROM agent_runs WHERE outline_id=$1 AND call_id=$2
+           AND status NOT IN ('completed','completed_unplaced','failed','cancelled','interrupted') LIMIT 1`,
+          [input.outlineId, thread.callId],
+        )
+        if (active.rowCount) throw new AgentStoreError('call_busy', CALL_BUSY_MESSAGE)
+        const stored = await client.query<{ turns: number; bytes: string }>(
+          'SELECT count(*)::int AS turns, COALESCE(sum(entry_bytes),0) AS bytes FROM agent_call_turns WHERE call_id=$1 AND outline_id=$2',
+          [thread.callId, input.outlineId],
+        )
+        requireNextTurn(thread.turn, stored.rows[0]!.turns, Number(stored.rows[0]!.bytes), admission.conversationBudgetBytes ?? Number.POSITIVE_INFINITY)
+      }
+      const result = await client.query<AgentRunRow>(
+        `INSERT INTO agent_runs
+         (id, owner_id, outline_id, trigger_kind, trigger_identity, invocation_id, intent_hash, source_note_id, target_note_id,
+          input_snapshot, definition_snapshot, configuration_revision, credential_reference, status,
+          max_attempts, retry_of_run_id, call_id, call_turn)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'queued',$14,$15,$16,$17)
+         ON CONFLICT (outline_id, trigger_identity)
+         DO UPDATE SET id = agent_runs.id
+         RETURNING *`,
+        [input.runId, admission.ownerId, input.outlineId, admission.trigger, admission.triggerIdentity,
+          admission.invocationId ?? null, admission.intentHash ?? null,
+          input.source.nodeId ?? null, input.target.parentId, input,
+          { agent: input.agent, skill: input.skill, effectiveToolIds: input.effectiveToolIds, policyId: admission.policyId ?? null },
+          input.configurationRevision, input.credentialRef, Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null,
+          thread?.callId ?? null, thread?.turn ?? null],
+      )
+      return admitted(result.rows[0]!, admission)
+    })
   }
 
   async getRun(outlineId: string, runId: string): Promise<AgentRunRecord | null> {
     const result = await this.pool.query<AgentRunRow>(
-      `SELECT r.*, result.first_revision, result.last_revision, result.root_note_ids
+      `SELECT r.*, result.first_revision, result.last_revision, result.root_note_ids,
+         answer.structured_output->>'text' AS answer_text
        FROM agent_runs r LEFT JOIN agent_run_results result ON result.run_id = r.id
+       LEFT JOIN agent_run_outputs answer ON answer.run_id = r.id AND answer.output_kind = 'answer'
        WHERE r.outline_id = $1 AND r.id = $2`, [outlineId, runId],
     )
     return result.rows[0] ? runFromRow(result.rows[0]) : null
@@ -144,8 +178,10 @@ export class PostgresAgentStore implements AgentStore {
 
   async listRuns(outlineId: string, limit: number, before?: string, status?: RunStatus): Promise<AgentRunRecord[]> {
     const result = await this.pool.query<AgentRunRow>(
-      `SELECT r.*, result.first_revision, result.last_revision, result.root_note_ids
+      `SELECT r.*, result.first_revision, result.last_revision, result.root_note_ids,
+         answer.structured_output->>'text' AS answer_text
        FROM agent_runs r LEFT JOIN agent_run_results result ON result.run_id = r.id
+       LEFT JOIN agent_run_outputs answer ON answer.run_id = r.id AND answer.output_kind = 'answer'
        WHERE r.outline_id = $1 AND ($2::timestamptz IS NULL OR r.created_at < $2)
          AND ($3::text IS NULL OR r.status = $3)
        ORDER BY r.created_at DESC, r.id DESC LIMIT $4`, [outlineId, before ?? null, status ?? null, Math.max(1, Math.min(limit, 100))],
@@ -257,7 +293,7 @@ export class PostgresAgentStore implements AgentStore {
     })
   }
 
-  async complete(runId: string, workerId: string, resultIdentity: string, result: AgentRunResult): Promise<AgentRunResult> {
+  async complete(runId: string, workerId: string, resultIdentity: string, result: AgentRunResult, turn?: CallTurnEntries): Promise<AgentRunResult> {
     return this.transaction(async (client) => {
       const existing = await client.query<ResultRow>('SELECT * FROM agent_run_results WHERE run_id = $1', [runId])
       if (existing.rows[0]) {
@@ -267,6 +303,7 @@ export class PostgresAgentStore implements AgentStore {
       }
       const locked = await requireLease(client, runId, workerId)
       if (locked.cancel_requested_at) throw new AgentStoreError('invalid_state', 'Run cancellation was requested.')
+      if (turn) await insertCallTurn(client, locked, turn)
       await client.query(
         `INSERT INTO agent_run_results(run_id, result_identity, first_revision, last_revision, root_note_ids)
          VALUES ($1,$2,$3,$4,$5)`, [runId, resultIdentity, result.firstRevision, result.lastRevision, result.rootNoteIds],
@@ -285,18 +322,22 @@ export class PostgresAgentStore implements AgentStore {
 
   async persistOutput(runId: string, workerId: string, resultIdentity: string, result: StructuredResult): Promise<void> {
     await this.transaction(async (client) => {
-      const existing = await client.query<{ result_identity: string; structured_output: unknown }>(
-        'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1', [runId],
+      const existing = await client.query<{ result_identity: string; structured_output: unknown; output_kind: string }>(
+        'SELECT result_identity,structured_output,output_kind FROM agent_run_outputs WHERE run_id=$1', [runId],
       )
-      if (existing.rows[0]) {
-        if (existing.rows[0].result_identity !== resultIdentity || canonicalJson(existing.rows[0].structured_output) !== canonicalJson(result)) {
-          throw new AgentStoreError('conflict', 'Run already has different persisted output.')
-        }
-        return
+      const previous = existing.rows[0]
+      if (previous && previous.result_identity === resultIdentity && canonicalJson(previous.structured_output) === canonicalJson(result)) return
+      const locked = await requireLease(client, runId, workerId).catch((error: unknown) => {
+        if (previous) throw new AgentStoreError('conflict', 'Run already has different persisted output.')
+        throw error
+      })
+      if (previous && (previous.result_identity !== resultIdentity || previous.output_kind !== 'structured' || locked.status !== 'running')) {
+        throw new AgentStoreError('conflict', 'Run already has different persisted output.')
       }
-      await requireLease(client, runId, workerId)
+      // A later attempt of a run that was never settled replaces the earlier attempt's output.
       await client.query(
-        'INSERT INTO agent_run_outputs(run_id,result_identity,structured_output) VALUES ($1,$2,$3)',
+        `INSERT INTO agent_run_outputs(run_id,result_identity,structured_output) VALUES ($1,$2,$3)
+         ON CONFLICT (run_id) DO UPDATE SET structured_output=EXCLUDED.structured_output, persisted_at=now()`,
         [runId, resultIdentity, result],
       )
     })
@@ -304,18 +345,19 @@ export class PostgresAgentStore implements AgentStore {
 
   async output(runId: string) {
     const result = await this.pool.query<{ result_identity: string; structured_output: StructuredResult }>(
-      'SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1', [runId],
+      `SELECT result_identity,structured_output FROM agent_run_outputs WHERE run_id=$1 AND output_kind='structured'`, [runId],
     )
     return result.rows[0]
       ? { resultIdentity: result.rows[0].result_identity, result: result.rows[0].structured_output }
       : null
   }
 
-  async completeUnplaced(runId: string, workerId: string, reason: string): Promise<void> {
+  async completeUnplaced(runId: string, workerId: string, reason: string, turn?: CallTurnEntries): Promise<void> {
     await this.transaction(async (client) => {
       const locked = await requireLease(client, runId, workerId)
       const output = await client.query('SELECT run_id FROM agent_run_outputs WHERE run_id=$1', [runId])
       if (!output.rowCount) throw new AgentStoreError('invalid_state', 'Run output has not been persisted.')
+      if (turn) await insertCallTurn(client, locked, turn)
       await client.query(
         `UPDATE agent_run_attempts SET status='completed',finished_at=now()
          WHERE run_id=$1 AND attempt_number=$2`, [runId, locked.attempt_count],
@@ -325,6 +367,67 @@ export class PostgresAgentStore implements AgentStore {
          lease_expires_at=NULL,updated_at=now() WHERE id=$1`, [runId, reason],
       )
     })
+  }
+
+  async completeAnswer(runId: string, workerId: string, answer: LocalAnswerResult, turn: CallTurnEntries): Promise<void> {
+    await this.transaction(async (client) => {
+      const locked = await requireLease(client, runId, workerId)
+      if (locked.cancel_requested_at) throw new AgentStoreError('invalid_state', 'Run cancellation was requested.')
+      await insertCallTurn(client, locked, turn)
+      await client.query(
+        `INSERT INTO agent_run_outputs(run_id,result_identity,structured_output,output_kind) VALUES ($1,$2,$3,'answer')
+         ON CONFLICT (run_id) DO UPDATE SET result_identity=EXCLUDED.result_identity,
+           structured_output=EXCLUDED.structured_output, output_kind='answer', persisted_at=now()`,
+        [runId, `answer:${runId}`, answer],
+      )
+      await client.query(
+        `UPDATE agent_run_attempts SET status='completed',finished_at=now() WHERE run_id=$1 AND attempt_number=$2`,
+        [runId, locked.attempt_count],
+      )
+      await client.query(
+        `UPDATE agent_runs SET status='completed',error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
+        [runId],
+      )
+    })
+  }
+
+  async conversationEntries(callId: string, beforeTurn: number): Promise<unknown[]> {
+    const result = await this.pool.query<{ turn: number; entries: unknown[] }>(
+      'SELECT turn, entries FROM agent_call_turns WHERE call_id=$1 AND turn < $2 ORDER BY turn ASC', [callId, beforeTurn],
+    )
+    if (result.rows.length !== beforeTurn - 1 || result.rows.some((row, index) => row.turn !== index + 1)) return []
+    return result.rows.flatMap((row) => row.entries)
+  }
+
+  async latestCallVersion(outlineId: string, callId: string, beforeTurn: number): Promise<CallVersion | null> {
+    return latestCallVersion(this.pool, outlineId, callId, beforeTurn)
+  }
+
+  async clearFinishedHistory(outlineId: string): Promise<number> {
+    const result = await this.pool.query(
+      `DELETE FROM agent_runs WHERE outline_id=$1 AND COALESCE(call_id, id) IN (
+         SELECT COALESCE(call_id, id) FROM agent_runs WHERE outline_id=$1
+         GROUP BY COALESCE(call_id, id)
+         HAVING bool_and(status IN ('completed','failed','cancelled','interrupted'))
+       )`,
+      [outlineId],
+    )
+    return result.rowCount ?? 0
+  }
+
+  async pruneConversations(before: Date): Promise<number> {
+    const result = await this.pool.query(
+      `DELETE FROM agent_call_turns WHERE call_id IN (
+         SELECT turn.call_id FROM agent_call_turns turn
+         WHERE NOT EXISTS (
+           SELECT 1 FROM agent_runs run WHERE run.call_id = turn.call_id
+             AND run.status NOT IN ('completed','completed_unplaced','failed','cancelled','interrupted')
+         )
+         GROUP BY turn.call_id HAVING max(turn.created_at) < $1
+       )`,
+      [before],
+    )
+    return result.rowCount ?? 0
   }
 
   async placeOutput(outlineId: string, runId: string, resultIdentity: string, result: AgentRunResult): Promise<AgentRunResult> {
@@ -386,7 +489,9 @@ interface AgentRunRow extends QueryResultRow {
   retry_of_run_id: string | null; created_at: Date; updated_at: Date
   invocation_id: string | null; intent_hash: string | null
   placement_error: string | null
+  call_id: string | null; call_turn: number | null
   first_revision?: string | null; last_revision?: string | null; root_note_ids?: string[] | null
+  answer_text?: string | null
 }
 
 interface ResultRow extends QueryResultRow { result_identity: string; first_revision: string; last_revision: string; root_note_ids: string[] }
@@ -405,6 +510,7 @@ function runFromRow(row: AgentRunRow): AgentRunRecord {
     retryOfRunId: row.retry_of_run_id, admittedAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
     invocationId: row.invocation_id, intentHash: row.intent_hash,
     placementError: row.placement_error,
+    callId: row.call_id, callTurn: row.call_turn, answer: row.answer_text ?? null,
     result: row.first_revision && row.last_revision && row.root_note_ids
       ? { firstRevision: Number(row.first_revision), lastRevision: Number(row.last_revision), rootNoteIds: row.root_note_ids }
       : null,
@@ -429,6 +535,42 @@ async function lockOutline(client: PoolClient, outlineId: string): Promise<void>
 async function currentRevision(client: PoolClient, table: 'agent_configuration_revisions' | 'agent_automation_revisions', outlineId: string): Promise<number> {
   const result = await client.query<{ revision: string }>(`SELECT revision FROM ${table} WHERE outline_id = $1 ORDER BY revision DESC LIMIT 1`, [outlineId])
   return Number(result.rows[0]?.revision ?? 0)
+}
+
+function admitted(row: AgentRunRow, admission: AdmitRunInput): AgentRunRecord {
+  if (admission.intentHash && row.intent_hash !== admission.intentHash) {
+    throw new AgentStoreError('conflict', 'Invocation identifier was already used with different intent.')
+  }
+  return runFromRow(row)
+}
+
+/** Store a settled turn's entries inside the transaction that records the run's outcome. */
+export async function insertCallTurn(
+  client: PoolClient,
+  run: Pick<AgentRunRow, 'id' | 'owner_id' | 'outline_id' | 'call_id' | 'call_turn'>,
+  turn: CallTurnEntries,
+): Promise<void> {
+  if (!run.call_id || !run.call_turn) return
+  const inserted = await client.query(
+    `INSERT INTO agent_call_turns(call_id,turn,run_id,owner_id,outline_id,entries,entry_bytes)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) ON CONFLICT DO NOTHING`,
+    [run.call_id, run.call_turn, run.id, run.owner_id, run.outline_id, JSON.stringify(turn.entries), turn.entryBytes],
+  )
+  if (!inserted.rowCount) throw new AgentStoreError('conflict', TURN_CONFLICT_MESSAGE)
+}
+
+/** The call's latest placed version before a turn, which that turn's revision replaces. */
+export async function latestCallVersion(
+  connection: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>,
+  outlineId: string, callId: string, beforeTurn: number,
+): Promise<CallVersion | null> {
+  const result = await connection.query<{ id: string; root_note_ids: string[] }>(
+    `SELECT run.id, result.root_note_ids FROM agent_runs run JOIN agent_run_results result ON result.run_id = run.id
+     WHERE run.outline_id=$1 AND run.call_id=$2 AND run.call_turn < $3
+     ORDER BY run.call_turn DESC LIMIT 1`,
+    [outlineId, callId, beforeTurn],
+  )
+  return result.rows[0] ? { runId: result.rows[0].id, rootNoteIds: result.rows[0].root_note_ids } : null
 }
 
 async function requireLease(client: PoolClient, runId: string, workerId: string): Promise<AgentRunRow> {

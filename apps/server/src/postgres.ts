@@ -26,13 +26,17 @@ import {
   NOTE_PROJECTOR_SCHEMA_VERSION,
   type BoundPrincipal,
 } from './repository.js'
-import { PostgresAgentStore } from './postgresAgentStore.js'
+import { insertCallTurn, latestCallVersion, PostgresAgentStore } from './postgresAgentStore.js'
+import type { CallTurnEntries } from './agentStore.js'
 import {
+  isLocalAnswerResult,
+  localAnswerResultSchema,
   parseStructuredResult,
   migrateAgentConfiguration,
   requireStructuredResultV1,
   resolveEffectiveToolIds,
   runInputSchema,
+  type LocalRunResult,
   type RunInput,
   type StructuredResult,
   type StructuredResultV1,
@@ -494,6 +498,10 @@ export class PostgresServerRepository implements ServerRepository {
     }
   }
 
+  async canonicalOutline(outlineId: string) {
+    return queryCanonicalOutline((await this.canonicalProjection(this.pool, outlineId)).state)
+  }
+
   async searchOutline(outlineId: string, query: string, limit = 20) {
     const status = await this.noteIndexStatus(outlineId)
     if (!status.ready) {
@@ -557,13 +565,18 @@ export class PostgresServerRepository implements ServerRepository {
     return stale.length
   }
 
-  async commitAgentResult(runId: string, workerId: string, rawResult: StructuredResult) {
+  async commitAgentResult(runId: string, workerId: string, rawResult: LocalRunResult, turn?: CallTurnEntries) {
+    if (isLocalAnswerResult(rawResult)) {
+      if (!turn) throw new RepositoryError('conflict', 'An answer settles a conversation turn.')
+      await this.agentStore.completeAnswer(runId, workerId, localAnswerResultSchema.parse(rawResult), turn)
+      return { placement: 'answered' as const }
+    }
     const result = requireStructuredResultV1(parseStructuredResult(rawResult))
     await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, result)
     const committed = await this.transaction(async (client) => {
       const selected = await client.query<{
         id: string; owner_id: string; outline_id: string; input_snapshot: unknown; status: string; lease_owner: string | null
-        cancel_requested_at: Date | null; attempt_count: number
+        cancel_requested_at: Date | null; attempt_count: number; call_id: string | null; call_turn: number | null
       }>('SELECT * FROM agent_runs WHERE id = $1 FOR UPDATE', [runId])
       const run = selected.rows[0]
       if (!run) throw hiddenResourceError()
@@ -601,13 +614,17 @@ export class PostgresServerRepository implements ServerRepository {
         runId, skillId: input.skill.id, ...(input.source.nodeId ? { sourceNodeId: input.source.nodeId } : {}),
         sourceUrls: result.sources.map((source) => source.url).slice(0, 20),
       }
+      // A call's later revision replaces the version before it in the same event.
+      const replaces = run.call_id && run.call_turn && run.call_turn > 1
+        ? await latestCallVersion(client, run.outline_id, run.call_id, run.call_turn)
+        : null
       const event = parseEventEnvelope({
         id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
-        deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: 1,
+        deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: replaces ? 2 : 1,
         documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
         baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
         changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
-        payload: { runId, targetNodeId: input.target.parentId, nodes, sources: result.sources },
+        payload: { runId, targetNodeId: input.target.parentId, nodes, sources: result.sources, ...(replaces ? { replaces } : {}) },
       })
       await this.insertEvent(client, event)
       await this.applyProjection(client, run.outline_id, revision, event)
@@ -619,6 +636,7 @@ export class PostgresServerRepository implements ServerRepository {
         `INSERT INTO agent_run_results(run_id,result_identity,first_revision,last_revision,root_note_ids)
          VALUES ($1,$2,$3,$4,$5)`, [runId, `result:${runId}`, revision, revision, rootNoteIds],
       )
+      if (turn) await insertCallTurn(client, run, turn)
       await client.query(
         `UPDATE agent_run_attempts SET status='completed',finished_at=now() WHERE run_id=$1 AND attempt_number=$2`,
         [runId, run.attempt_count],
@@ -630,7 +648,7 @@ export class PostgresServerRepository implements ServerRepository {
       return { placement: 'placed' as const, ...settled }
     })
     if (committed.placement === 'unplaced') {
-      await this.agentStore.completeUnplaced(runId, workerId, committed.reason)
+      await this.agentStore.completeUnplaced(runId, workerId, committed.reason, turn)
     }
     return committed
   }

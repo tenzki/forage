@@ -140,6 +140,7 @@ function reduceInto(state: OutlineState, event: EventEnvelope): OutlineState {
       const projected = insertAgentResult(parseDocument(state.doc, state.schemaEpoch), {
         targetNodeId: event.payload.targetNodeId,
         nodes: event.payload.nodes,
+        ...(event.payload.replaces ? { replacesRootNoteIds: event.payload.replaces.rootNoteIds } : {}),
       })
       state.doc = projected.toJSON() as JsonObject
       parsedDocuments.set(state.doc, projected)

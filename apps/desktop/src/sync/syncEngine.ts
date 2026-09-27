@@ -414,7 +414,9 @@ export class DesktopSyncEngine {
 }
 
 function requireSupportedAgentEvent(event: EventEnvelope): void {
-  if (event.origin === 'agent' && event.eventVersion !== 1) throw new Error('upgrade_required: unsupported agent event version')
+  // Version 2 is an agent result that replaces a call's previous version.
+  const supported = event.type === 'agent.result_committed' ? [1, 2] : [1]
+  if (event.origin === 'agent' && !supported.includes(event.eventVersion)) throw new Error('upgrade_required: unsupported agent event version')
 }
 
 function isDocumentEvent(event: EventEnvelope): event is Extract<EventEnvelope, {

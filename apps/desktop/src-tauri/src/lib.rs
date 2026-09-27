@@ -133,6 +133,7 @@ pub fn run() {
             sync_commands::server_agent_run,
             sync_commands::server_agent_activity,
             sync_commands::server_agent_cancel,
+            sync_commands::server_agent_clear_history,
             sync_commands::server_agent_retry,
             sync_commands::server_agent_place,
             ];

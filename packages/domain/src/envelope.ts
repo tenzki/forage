@@ -94,6 +94,8 @@ const eventPayloadSchemas = {
     targetNodeId: boundedId,
     nodes: z.array(agentResultTreeNodeSchema).min(1).max(500),
     sources: z.array(z.object({ url: z.url().max(2_000), label: z.string().trim().min(1).max(300) }).strict()).max(100),
+    /** Version 2: a call's replacing revision removes the previous version's generated roots first. */
+    replaces: z.object({ runId: boundedId, rootNoteIds: z.array(boundedId).min(1).max(500) }).strict().optional(),
   }).strict(),
 } as const
 
@@ -133,6 +135,7 @@ export interface EventPayloadByType {
     targetNodeId: string
     nodes: AgentResultTreeNode[]
     sources: Array<{ url: string; label: string }>
+    replaces?: { runId: string; rootNoteIds: string[] }
   }
 }
 
@@ -187,6 +190,12 @@ export const eventEnvelopeSchema = eventUnionSchema.superRefine((event, context)
   }
   if (event.origin !== 'agent' && event.agentProvenance) {
     context.addIssue({ code: 'custom', path: ['agentProvenance'], message: 'Agent provenance is only valid for agent-origin events' })
+  }
+  if (event.type === 'agent.result_committed' && event.eventVersion !== (event.payload.replaces ? 2 : 1)) {
+    context.addIssue({
+      code: 'custom', path: ['eventVersion'],
+      message: 'Agent results are version 1, or version 2 when they replace a previous version',
+    })
   }
 })
 

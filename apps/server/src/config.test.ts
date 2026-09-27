@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { loadServerConfig, publicConfigForLogging } from './config'
+import { assertSupportedNodeVersion, loadServerConfig, publicConfigForLogging } from './config'
 
 describe('server configuration', () => {
   it('validates PostgreSQL, origin, filesystem, and compatibility settings', () => {
@@ -46,5 +46,39 @@ describe('server configuration', () => {
     }
     expect(() => loadServerConfig(base)).toThrow(/encryption/i)
     expect(() => loadServerConfig({ ...base, FORAGE_AGENT_ENCRYPTION_KEY: '1:not-base64' })).toThrow(/encryption/i)
+  })
+
+  it('runs agents on Pi by default and accepts legacy as the rollback engine', () => {
+    const base = {
+      DATABASE_URL: 'postgres://localhost/forage', FORAGE_INSTANCE_ID: 'instance-1', FORAGE_ASSET_DIR: '/tmp/assets',
+      FORAGE_AGENT_ENCRYPTION_KEY: `1:${Buffer.alloc(32, 3).toString('base64')}`,
+    }
+    expect(loadServerConfig(base).agent.engine).toBe('pi')
+    const legacy = loadServerConfig({ ...base, FORAGE_AGENT_ENGINE: 'legacy' })
+    expect(legacy.agent.engine).toBe('legacy')
+    expect(publicConfigForLogging(legacy)).toContain('"agentEngine":"legacy"')
+    expect(() => loadServerConfig({ ...base, FORAGE_AGENT_ENGINE: 'openai' })).toThrow(/pi or legacy/)
+  })
+
+  it('bounds call transcripts at 2 MB per call and 90 days by default', () => {
+    const base = {
+      DATABASE_URL: 'postgres://localhost/forage', FORAGE_INSTANCE_ID: 'instance-1', FORAGE_ASSET_DIR: '/tmp/assets',
+      FORAGE_AGENT_ENCRYPTION_KEY: `1:${Buffer.alloc(32, 3).toString('base64')}`,
+    }
+    expect(loadServerConfig(base).agent.conversations).toEqual({ maxBytes: 2 * 1024 * 1024, maxAgeDays: 90 })
+    expect(loadServerConfig({
+      ...base, FORAGE_AGENT_CONVERSATION_MAX_BYTES: '1048576', FORAGE_AGENT_CONVERSATION_MAX_AGE_DAYS: '30',
+    }).agent.conversations).toEqual({ maxBytes: 1_048_576, maxAgeDays: 30 })
+    expect(() => loadServerConfig({ ...base, FORAGE_AGENT_CONVERSATION_MAX_AGE_DAYS: '0' })).toThrow()
+  })
+
+  it('refuses to start on a Node.js older than the Pi SDK requires', () => {
+    expect(() => assertSupportedNodeVersion('22.18.0')).toThrow('Forage server requires Node.js 22.19.0 or newer to run agents; this is Node.js 22.18.0.')
+    expect(() => assertSupportedNodeVersion('v20.19.5')).toThrow(/22\.19\.0/)
+    expect(() => assertSupportedNodeVersion('18.20.0')).toThrow(/22\.19\.0/)
+    for (const version of ['22.19.0', '22.20.1', '24.0.0', 'v26.8.1']) {
+      expect(() => assertSupportedNodeVersion(version)).not.toThrow()
+    }
+    expect(() => assertSupportedNodeVersion()).not.toThrow()
   })
 })

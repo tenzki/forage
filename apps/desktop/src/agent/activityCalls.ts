@@ -54,6 +54,7 @@ export function applyActivityEvent(
       ...(isCallEvent && event.note ? { note: event.note } : {}),
       ...(isCallEvent && event.thread ? { thread: event.thread } : {}),
       ...(isCallEvent && event.answer ? { answer: event.answer } : {}),
+      ...(isCallEvent && event.automation ? { automation: true } : {}),
       events: isCallEvent ? [] : [nextEvent],
     }].slice(-MAX_ACTIVITY_CALLS)
   }
@@ -74,6 +75,7 @@ export function applyActivityEvent(
         placementPending: event.placementPending ?? call.placementPending,
         ...(isCallEvent && event.thread ? { thread: event.thread } : {}),
         ...(isCallEvent && event.answer !== undefined ? { answer: event.answer || undefined } : {}),
+        ...(isCallEvent && event.automation ? { automation: true } : {}),
         events,
       }
     : call)

@@ -4,7 +4,7 @@ import {
 } from '@forage/agent-runtime'
 
 import { validateCustomTool, type CustomToolConfig } from './tools'
-import { parseRunThread, type RunThread } from './conversation-store'
+import { parseRunThread, type PiTurnRequest, type RunThread } from '@forage/pi-runtime'
 
 export const MAX_PAYLOAD_BYTES = 512_000
 const MAX_CONTEXT_CHARACTERS = 40_000
@@ -91,35 +91,17 @@ function parseExtensionSecrets(value: unknown): Record<string, Record<string, st
   return output
 }
 
-export function isFollowUpTurn(payload: RunPayload): boolean {
-  return (payload.thread?.turn ?? 1) > 1
-}
-
-/** The user message for one turn: outline context, then the task or the follow-up. */
-export function taskMessage(payload: RunPayload): string {
-  const context = payload.context.length
-    ? `Selected outline context (hierarchy preserved by indentation):\n${payload.context.join('\n')}\n\n`
-    : ''
-  if (!isFollowUpTurn(payload)) return `${context}Task: ${payload.prompt}`
-  const invocationOutline = payload.invocationOutline.length
-    ? payload.invocationOutline.join('\n')
-    : '(no bullets)'
-  return `${context}Outline under the invocation bullet:\n${invocationOutline}\n\nUser follow-up: ${payload.prompt}`
-}
-
-const FOLLOW_UP_INSTRUCTIONS = [
-  'This is a follow-up turn in an ongoing conversation about your earlier result. The outline context in the latest message is current and takes precedence over earlier turns.',
-  'If the user asks a question or wants to learn more, answer in plain text and do not call emit_outline; the outline stays unchanged.',
-  'If the user asks to change, extend, or replace the result, call emit_outline with the complete revised result. It replaces your previous output under the invocation bullet; the user\'s own bullets there are kept.',
-  'Images generated in earlier turns are already placed in the outline; emit_outline can reference only images generated in this turn.',
-  'Do not edit files or run shell commands.',
-].join('\n')
-
-export function systemPrompt(instructions: string, followUp = false): string {
-  return [
-    instructions,
-    followUp
-      ? FOLLOW_UP_INSTRUCTIONS
-      : 'Return the final answer by calling emit_outline. Do not edit files or run shell commands.',
-  ].join('\n\n')
+/** The shared Pi turn for a local run. Desktop agent and skill instructions arrive already combined. */
+export function turnRequest(payload: RunPayload): PiTurnRequest {
+  return {
+    runId: payload.runId,
+    executionMode: 'local',
+    instructions: [payload.instructions],
+    prompt: payload.prompt,
+    context: payload.context,
+    invocationOutline: payload.invocationOutline,
+    ...(payload.thread ? { thread: payload.thread } : {}),
+    effectiveToolIds: payload.enabledToolIds,
+    requiredToolIds: payload.requiredToolIds,
+  }
 }

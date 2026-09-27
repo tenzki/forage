@@ -6,6 +6,8 @@ import {
   portableAgentConfigurationSchema,
   migrateAgentConfiguration,
   computeProfileSchema,
+  callIdSchema,
+  MAX_ANSWER_CHARS,
   runStatusSchema,
 } from '@forage/agent-runtime'
 
@@ -183,13 +185,24 @@ export const agentRunAdmissionRequestSchema = z.object({
   credentialRef: boundedId.optional(),
 }).strict()
 
+/**
+ * A reply to a server call names the call and the turn it starts. The first turn
+ * omits it; the server starts the call with the run's ID as the call ID and turn 1.
+ */
+export const agentCallConversationSchema = z.object({
+  callId: callIdSchema,
+  turn: z.number().int().min(2),
+}).strict()
+
 export const agentInvocationIntentSchema = z.object({
   version: z.literal(2),
   invocationId: boundedId,
   sourceNodeId: boundedId,
   skillId: boundedId,
+  /** For a reply, the reply text. */
   prompt: z.string().trim().min(1).max(20_000),
   acknowledgedOutlineRevision: revision,
+  conversation: agentCallConversationSchema.optional(),
 }).strict()
 
 export const agentRunAdmissionResponseSchema = z.object({
@@ -210,6 +223,7 @@ export const agentRunErrorSchema = z.object({
     'target_unavailable',
     'attempts_exhausted',
     'lease_lost',
+    'conversation_unavailable',
     'outline_not_synchronized',
     'source_missing',
     'source_trashed',
@@ -242,12 +256,24 @@ export const agentRunSummarySchema = z.object({
   admittedAt: timestamp,
   updatedAt: timestamp,
   retryOfRunId: boundedId.nullable(),
+  /** The call a manual run belongs to and its turn; automation runs are not calls. */
+  callId: callIdSchema.nullable().default(null),
+  turn: z.number().int().positive().nullable().default(null),
+  /** A manual run's invocation bullet and prompt (a reply's text), so any bound device can show its call. */
+  sourceNodeId: boundedId.nullable().default(null),
+  prompt: z.string().max(20_000).nullable().default(null),
 }).strict()
 
 export const agentRunDetailSchema = agentRunSummarySchema.extend({
   error: agentRunErrorSchema.nullable(),
   result: agentRunResultSchema.nullable(),
   placementError: z.string().trim().min(1).max(500).nullable().default(null),
+  /** A reply's inline answer; it is never placed in the outline. */
+  answer: z.string().trim().min(1).max(MAX_ANSWER_CHARS).nullable().default(null),
+}).strict()
+
+export const agentRunHistoryClearResponseSchema = z.object({
+  deletedRuns: z.number().int().nonnegative(),
 }).strict()
 
 export const outlineSearchQuerySchema = z.object({

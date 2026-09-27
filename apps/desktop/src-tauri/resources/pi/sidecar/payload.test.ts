@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { decodePayload, systemPrompt, taskMessage } from './payload'
+import { composeSystemPrompt, composeTaskMessage, UNTRUSTED_MATERIAL_RULE, VERIFIED_CITATION_RULE } from '@forage/pi-runtime'
+
+import { decodePayload, turnRequest, type RunPayload } from './payload'
 
 function encode(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
+}
+
+function taskMessage(payload: RunPayload): string {
+  const request = turnRequest(payload)
+  return composeTaskMessage({ ...request, followUp: (request.thread?.turn ?? 1) > 1 })
 }
 
 const base = {
@@ -45,14 +52,18 @@ describe('sidecar turn payload', () => {
       .toBe('Outline under the invocation bullet:\n(no bullets)\n\nUser follow-up: Which source said that?')
   })
 
-  it('adds the follow-up addendum only on resumed turns', () => {
-    expect(systemPrompt('Research.')).toBe(
-      'Research.\n\nReturn the final answer by calling emit_outline. Do not edit files or run shell commands.',
-    )
-    const followUp = systemPrompt('Research.', true)
-    expect(followUp.startsWith('Research.\n\n')).toBe(true)
+  it('applies the shared untrusted-material and citation rules to local runs', () => {
+    const request = turnRequest(decodePayload(encode(base)))
+    expect(request).toMatchObject({ executionMode: 'local', instructions: ['Research the topic.'] })
+
+    const firstTurn = composeSystemPrompt({ ...request, followUp: false })
+    expect(firstTurn.startsWith('Research the topic.\n\n')).toBe(true)
+    expect(firstTurn).toContain(UNTRUSTED_MATERIAL_RULE)
+    expect(firstTurn).toContain(VERIFIED_CITATION_RULE)
+    expect(firstTurn).toMatch(/calling emit_outline/)
+    const followUp = composeSystemPrompt({ ...request, followUp: true })
+    expect(followUp).toContain(VERIFIED_CITATION_RULE)
     expect(followUp).toMatch(/answer in plain text and do not call emit_outline/)
-    expect(followUp).toMatch(/call emit_outline with the complete revised result/)
   })
 
   it('bounds the combined context and rejects invalid conversation turns', () => {

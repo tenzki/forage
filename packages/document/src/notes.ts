@@ -54,12 +54,18 @@ export interface AgentResultTreeNode {
   children?: AgentResultTreeNode[]
 }
 
-/** Applies a complete generated subtree to a document value as one reducer operation. */
+/**
+ * Applies a complete generated subtree to a document value as one reducer operation.
+ * A replacing revision first removes the previous version's generated roots that are
+ * still under the target; roots the user moved elsewhere or already deleted stay as they are.
+ */
 export function insertAgentResult(
   document: ProseMirrorNode,
-  input: { targetNodeId: string; nodes: AgentResultTreeNode[] },
+  input: { targetNodeId: string; nodes: AgentResultTreeNode[]; replacesRootNoteIds?: string[] },
 ): ProseMirrorNode {
-  let projected = document
+  let projected = input.replacesRootNoteIds?.length
+    ? removeGeneratedRoots(document, input.targetNodeId, input.replacesRootNoteIds)
+    : document
   const insert = (nodes: AgentResultTreeNode[], parentId: string): void => {
     for (const node of nodes) {
       if (node.type === 'text') {
@@ -99,4 +105,39 @@ function insertGeneratedImage(document: ProseMirrorNode, parentId: string, asset
     transform.insert(found.pos + 1 + nestedOffset + 1 + nested.content.size, image)
   }
   return transform.doc
+}
+
+function removeGeneratedRoots(document: ProseMirrorNode, targetNodeId: string, rootNoteIds: string[]): ProseMirrorNode {
+  let projected = document
+  for (const rootNoteId of new Set(rootNoteIds)) {
+    let target: { node: ProseMirrorNode; pos: number } | null = null
+    projected.descendants((node, pos) => {
+      if (target) return false
+      if (node.type.name === 'listItem' && node.attrs.nodeId === targetNodeId) target = { node, pos }
+      return true
+    })
+    if (!target) return projected
+    const found = target as { node: ProseMirrorNode; pos: number }
+    let root: { from: number; to: number; listFrom: number; listTo: number; siblings: number } | null = null
+    found.node.descendants((node, offset, parent) => {
+      if (root) return false
+      if (node.type.name === 'listItem' && node.attrs.nodeId === rootNoteId && parent?.type.name === 'bulletList') {
+        const from = found.pos + 1 + offset
+        const $from = projected.resolve(from)
+        root = {
+          from, to: from + node.nodeSize,
+          listFrom: $from.before(), listTo: $from.after(), siblings: parent.childCount,
+        }
+        return false
+      }
+      return true
+    })
+    if (!root) continue
+    const range = root as { from: number; to: number; listFrom: number; listTo: number; siblings: number }
+    // Removing a list's only item would leave an empty list, which the schema forbids.
+    projected = range.siblings === 1
+      ? new Transform(projected).delete(range.listFrom, range.listTo).doc
+      : new Transform(projected).delete(range.from, range.to).doc
+  }
+  return projected
 }

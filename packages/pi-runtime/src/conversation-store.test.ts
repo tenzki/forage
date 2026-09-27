@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -8,6 +8,8 @@ import {
   CONVERSATION_UNAVAILABLE,
   conversationDirectory,
   conversationPath,
+  createFileConversationStore,
+  createRehydratedConversation,
   openConversationTurn,
   parseRunThread,
 } from './conversation-store'
@@ -70,6 +72,24 @@ describe('call conversation store', () => {
     expect(transcript(third.sessionManager)).toHaveLength(4)
   })
 
+  it('implements the conversation store interface and reports only the entries a resumed turn appended', async () => {
+    const store = createFileConversationStore(directory)
+    const first = await store.openTurn({ callId: 'call-1', turn: 1 })
+    completeTurn(first.sessionManager, 'Task: research tides', 'Tides follow the moon.')
+    expect(first.appendedEntries().filter((entry) => entry.type === 'message')).toHaveLength(2)
+
+    const second = await store.openTurn({ callId: 'call-1', turn: 2 })
+    expect(transcript(second.sessionManager)).toEqual([
+      'user: Task: research tides',
+      'assistant: Tides follow the moon.',
+    ])
+    expect(second.appendedEntries()).toEqual([])
+    completeTurn(second.sessionManager, 'User follow-up: why?', 'Gravity.')
+    expect(second.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
+
+    await expect(store.openTurn({ callId: 'missing', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
+  })
+
   it('fails a reply closed when the conversation is missing or unreadable', () => {
     expect(() => openConversationTurn(directory, { callId: 'missing', turn: 2 })).toThrow(CONVERSATION_UNAVAILABLE)
 
@@ -118,5 +138,44 @@ describe('call conversation store', () => {
     }
     expect(() => conversationPath(directory, '../escape')).toThrow()
     expect(() => conversationDirectory('')).toThrow(/unavailable/i)
+  })
+
+  describe('rehydrated from stored turns', () => {
+    it('keeps a first turn in memory and reports its entries after the session header', async () => {
+      const conversation = createRehydratedConversation([], { tempRoot: agentDir })
+      const turn = await conversation.store.openTurn({ callId: 'call-1', turn: 1 })
+      completeTurn(turn.sessionManager, 'Task: research tides', 'Tides follow the moon.')
+
+      expect(conversation.appendedEntries().map((entry) => entry.type)).toEqual(['session', 'message', 'message'])
+      expect(turn.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
+      expect(readdirSync(agentDir)).toEqual([])
+      await conversation.dispose()
+    })
+
+    it('resumes the stored turns from a temporary file, reports only new entries, and removes the file', async () => {
+      const first = createRehydratedConversation([], { tempRoot: agentDir })
+      completeTurn((await first.store.openTurn({ callId: 'call-1', turn: 1 })).sessionManager, 'Task: research tides', 'Tides follow the moon.')
+      const stored = JSON.parse(JSON.stringify(first.appendedEntries())) as unknown[]
+
+      const reply = createRehydratedConversation(stored, { tempRoot: agentDir })
+      const turn = await reply.store.openTurn({ callId: 'call-1', turn: 2 })
+      expect(transcript(turn.sessionManager)).toEqual(['user: Task: research tides', 'assistant: Tides follow the moon.'])
+      expect(readdirSync(agentDir)).toHaveLength(1)
+      completeTurn(turn.sessionManager, 'User follow-up: why?', 'Gravity.')
+      expect(reply.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
+
+      await reply.dispose()
+      await reply.dispose()
+      expect(readdirSync(agentDir)).toEqual([])
+    })
+
+    it('fails a reply closed when the stored transcript is missing or unreadable', async () => {
+      for (const stored of [[], [{ type: 'message' }], [{ type: 'session', version: 3, id: 'x', timestamp: '', cwd: '/' }], ['bad']]) {
+        const conversation = createRehydratedConversation(stored, { tempRoot: agentDir })
+        await expect(conversation.store.openTurn({ callId: 'call-1', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
+        await conversation.dispose()
+      }
+      expect(readdirSync(agentDir)).toEqual([])
+    })
   })
 })

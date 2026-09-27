@@ -23,7 +23,7 @@ pnpm exec vitest run -t "test name"               # single test by name
 pnpm --filter @forage/server typecheck             # server typecheck only
 ```
 
-Prerequisites: Node.js 18+, pnpm 10.32.1 (via Corepack or a direct install), Codex 0.148.0+ (subscription image generation only).
+Prerequisites: Node.js 18+ (22.19+ for the server, whose agent runs use the Pi SDK), pnpm 10.32.1 (via Corepack or a direct install), Codex 0.148.0+ (subscription image generation only).
 The sidecar runs via `tsx` as a pnpm workspace package in `apps/desktop/src-tauri/resources/pi/sidecar/`;
 `pnpm install` at root handles both the webview and sidecar in one step.
 
@@ -45,7 +45,7 @@ Four things carry the design:
 
 **Generated images are content-addressed assets.** Documents store `assetId` plus alt text, never data URLs or paths. Rust verifies and caches local bytes. Server mode uploads/downloads through authenticated native commands; the server verifies signature, size, hash, ownership, and completion before accepting a referencing event.
 
-**Agent work runs in a Node.js SDK sidecar.** `apps/desktop/src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `apps/desktop/src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `apps/desktop/src-tauri/resources/pi/sidecar/tools.ts` registers all tools (`web_search`, `web_fetch`, `generate_image`, `emit_outline`, `search_outline`, custom HTTP); `apps/desktop/src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Secrets loaded from the SQLite credential store are passed through the child environment, never process arguments. `plugin-store` retains only settings and non-secret credential metadata. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
+**Agent work runs in a Node.js SDK sidecar.** `apps/desktop/src/agent/piSdkClient.ts` spawns `node` (via `tsx`) running `apps/desktop/src-tauri/resources/pi/sidecar/index.ts` with the Pi SDK (`@earendil-works/pi-coding-agent`) embedded directly. `apps/desktop/src-tauri/resources/pi/sidecar/run.ts` runs each payload through the shared `runPiTurn`; `apps/desktop/src-tauri/resources/pi/sidecar/tools.ts` registers the local tools (`web_search`, `web_fetch`, `generate_image`, `search_outline`, custom HTTP); `packages/pi-runtime` holds what the sidecar and server share: `emit_outline`, prompt composition, tool policy and limits, final-response handling, model runtime authentication, conversation storage and `runPiTurn`; `apps/desktop/src-tauri/resources/pi/sidecar/codex-image-generation.ts` handles isolated Codex app-server image generation. Secrets loaded from the SQLite credential store are passed through the child environment, never process arguments. `plugin-store` retains only settings and non-secret credential metadata. Communication is JSONL over stdin/stdout using the same event vocabulary the frontend already expects.
 
 This replaced the earlier `pi --mode rpc` + bridge extension design (`piRpcClient.ts`, `ai-chat-bridge.ts` — still on disk, only referenced by tests). The SDK sidecar removes the `pi` CLI dependency; the only runtime requirement is Node.js 18+.
 

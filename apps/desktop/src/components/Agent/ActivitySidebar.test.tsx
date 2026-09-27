@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ActivitySidebar, type ActivityCall } from './ActivitySidebar'
+import { SERVER_CALL_MESSAGES, serverCallErrorMessage } from '../../agent/serverCallErrors'
 
 const researchRun: ActivityCall = {
   id: 'skill-1',
@@ -117,6 +118,60 @@ describe('activity sidebar', () => {
     fireEvent.change(composer, { target: { value: 'Add the scopes as bullets.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }))
     expect(onSteer).toHaveBeenCalledWith(expect.objectContaining({ id: 'skill-1' }), 'Add the scopes as bullets.')
+  })
+
+  it('shows a server call with an inline answer and a replacing version in one thread', () => {
+    // Server calls are keyed by the server's call ID, not by the invoking device's run IDs.
+    const serverTurn = (id: string, turn: number, extra: Partial<ActivityCall>): ActivityCall => ({
+      id, kind: 'skill', label: 'Run /research tauri', detail: 'tauri', nodeId: 'bullet-1', status: 'complete',
+      timestamp: turn, thread: { callId: 'run_first', turn },
+      events: extra.answer ? [] : [{ id: `outline-${id}`, kind: 'output', label: 'Outline updated', status: 'complete', timestamp: turn, nodeId: 'bullet-1' }],
+      ...extra,
+    })
+    render(<ActivitySidebar
+      calls={[
+        serverTurn('first', 1, {}),
+        serverTurn('question', 2, { note: 'Which page covers permissions?', answer: 'The shell plugin page.' }),
+        serverTurn('revision', 3, { note: 'Only the scopes.' }),
+      ]}
+      onClear={() => undefined}
+      describeNode={describeNode}
+      canSteer={() => true}
+      onSteer={vi.fn()}
+    />)
+
+    expect(screen.getByText(/v2\s+·\s+3 iterations/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+    expect(screen.getByText('The shell plugin page.')).toBeTruthy()
+    expect(screen.getByText('replaced by v2')).toBeTruthy()
+    expect(screen.getByText('Answers here, or replaces v2 with v3')).toBeTruthy()
+  })
+
+  it('offers no reply box for an Inbox automation run', () => {
+    const inbox: ActivityCall = {
+      id: 'run_inbox', kind: 'skill', label: 'Run /research inbox', status: 'complete', timestamp: 1, nodeId: 'bullet-1',
+      automation: true, events: [],
+    }
+    render(<ActivitySidebar calls={[inbox]} onClear={() => undefined} canSteer={() => true} onSteer={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research inbox' }))
+
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Send/ })).toBeNull()
+  })
+
+  it('explains a refused server reply in the call thread', () => {
+    const first: ActivityCall = { ...researchRun, thread: { callId: 'run_first', turn: 1 } }
+    const refused: ActivityCall = {
+      id: 'skill-2', kind: 'skill', label: 'Run /research tauri', nodeId: 'bullet-1', note: 'And the scopes?',
+      thread: { callId: 'run_first', turn: 2 }, status: 'error', timestamp: 10, events: [],
+      detail: serverCallErrorMessage(new Error('call_busy: busy'), true),
+    }
+    render(<ActivitySidebar calls={[first, refused]} onClear={() => undefined} canSteer={() => true} onSteer={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open /research tauri' }))
+
+    expect(screen.getByText(SERVER_CALL_MESSAGES.call_busy)).toBeTruthy()
+    // The refused reply stored nothing, so the call still takes a reply.
+    expect(screen.getByRole('textbox', { name: 'Reply to /research tauri' })).toHaveProperty('disabled', false)
   })
 
   it('shows a running reply as a pending answer', () => {

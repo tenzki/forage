@@ -8,7 +8,7 @@ import {
   type StructuredResultNode,
 } from '@forage/agent-runtime'
 import type { CodexAuthConfig } from './client'
-import { generateWithPi, type PiGenerateOptions, type PiOutlineNode } from './piGeneration'
+import { generateWithPi, type PiGenerateOptions, type PiOutlineNode, type PiSourceReference } from './piGeneration'
 import type { LocalRuntimeRunner } from './localExecutor'
 import { NativeAssetRepository } from '../persistence/assetStore'
 import type { GeneratedAssetIngestor } from './insertIntoEditor'
@@ -28,6 +28,7 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
   return async (input, options) => {
     let sequence = 0
     let outline: PiOutlineNode[] | null = null
+    let sources: PiSourceReference[] = []
     let text = ''
     const activityWrites: Promise<void>[] = []
     const auth = await dependencies.resolveCredential(input.credentialRef)
@@ -73,7 +74,10 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
         text = nextText
         options.onDelta?.(nextText)
       },
-      onOutline: async (nodes) => { outline = nodes },
+      onOutline: async (nodes, verifiedSources) => {
+        outline = nodes
+        sources = verifiedSources
+      },
       onActivity: (event) => { activityWrites.push(activity(event)) },
     })
     await Promise.all(activityWrites)
@@ -82,10 +86,8 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
     if (!outline && (input.thread?.turn ?? 1) > 1) {
       return parseLocalRunResult({ version: 1, type: 'answer', text: answerText(text || finalText) })
     }
-    const nodes = outline
-      ? await materializeNodes(outline, assets)
-      : textNodes(text || finalText)
-    return parseStructuredResult({ version: 1, nodes, sources: [] })
+    if (!outline) return parseStructuredResult({ version: 1, nodes: textNodes(text || finalText), sources: [] })
+    return parseStructuredResult({ version: 1, nodes: await materializeNodes(outline, assets), sources })
   }
 }
 

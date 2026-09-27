@@ -1,8 +1,8 @@
 // Skill calls for the activity panel (Screens 07A/07B in docs/desktop.pen).
 //
 // Each run is one ActivityCall. A *skill call* groups the runs of one call: a
-// local call's runs share a conversation `callId`; older and server-mode runs
-// are grouped by skill and bullet. Replies either answer inline or produce the
+// call's runs share a conversation `callId`, locally and on the server; older
+// runs are grouped by skill and bullet. Replies either answer inline or produce the
 // next version, so versions count only outline-producing runs. Grouping is
 // derived from the run list rather than stored, so it also holds for history
 // rebuilt after a restart.
@@ -32,6 +32,8 @@ export interface SkillCallGroup {
   versions: number
   /** Whether replies continue a stored agent conversation instead of rerunning the skill. */
   conversational: boolean
+  /** An Inbox automation run, which takes no replies. */
+  automation: boolean
   latest: ActivityCall
   status: ActivityStatus
   /** When the latest iteration started. */
@@ -96,6 +98,7 @@ export function groupSkillCalls(calls: ActivityCall[]): SkillCallGroup[] {
       iterations: [{ call, version: null }],
       versions: 0,
       conversational: Boolean(call.thread),
+      automation: Boolean(call.automation),
       latest: call,
       status: call.status,
       timestamp: call.timestamp,

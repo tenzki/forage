@@ -6,6 +6,7 @@ import {
   parseAgentConfigurationResponse,
   agentRunAdmissionResponseSchema,
   agentRunDetailSchema,
+  agentRunHistoryClearResponseSchema,
   agentRunListResponseSchema,
   agentRunRetryResponseSchema,
   apiKeyEnrollmentRequestSchema,
@@ -40,6 +41,8 @@ export interface ServerAgentTransport {
   activity(runId: string, afterSequence: number, limit?: number): Promise<ActivityPage>
   cancel(runId: string): Promise<void>
   retry(runId: string): Promise<z.infer<typeof agentRunRetryResponseSchema>>
+  /** Delete the outline's finished calls and their stored transcripts. */
+  clearHistory(): Promise<z.infer<typeof agentRunHistoryClearResponseSchema>>
 }
 
 export class TauriServerAgentTransport implements ServerAgentTransport {
@@ -131,6 +134,9 @@ export class TauriServerAgentTransport implements ServerAgentTransport {
   async cancel(runId: string): Promise<void> { await this.invokeNative('server_agent_cancel', { runId }) }
   async retry(runId: string) {
     return agentRunRetryResponseSchema.parse(await this.invokeNative('server_agent_retry', { runId }))
+  }
+  async clearHistory() {
+    return agentRunHistoryClearResponseSchema.parse(await this.invokeNative('server_agent_clear_history'))
   }
   async place(runId: string, targetNodeId: string) {
     return agentRunPlacementResponseSchema.parse(await this.invokeNative('server_agent_place', { runId, targetNodeId }))

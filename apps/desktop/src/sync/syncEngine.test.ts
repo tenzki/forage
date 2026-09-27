@@ -166,6 +166,40 @@ describe('desktop synchronization state machine', () => {
     expect(engine.appliedEvents).toEqual([resultEvent])
   })
 
+  it('accepts a replacing agent result as version 2 and refuses unknown agent versions', async () => {
+    const replacing: EventEnvelope = {
+      id: 'agent-result-2', outlineId: 'outline-1', actorId: 'owner-1', deviceId: 'agent-server-1',
+      type: 'agent.result_committed', eventVersion: 2, documentVersion: 1, schemaEpoch: 1,
+      baseRevision: 0, revision: 1, origin: 'agent', occurredAt: '2026-09-13T12:00:00.000Z',
+      changeGroupId: 'run_run-2',
+      agentProvenance: { runId: 'run-2', skillId: 'research', sourceNodeId: 'inbox', sourceUrls: [] },
+      payload: {
+        runId: 'run-2', targetNodeId: 'inbox',
+        nodes: [{ type: 'text', nodeId: 'result-node-2', text: 'Version 2' }],
+        sources: [], replaces: { runId: 'run-1', rootNoteIds: ['result-node-1'] },
+      },
+    }
+    const transport = (event: EventEnvelope): SyncTransport => ({
+      status: async () => ({ ...status, eventVersions: { 'agent.result_committed': [1, 2] } }),
+      checkpoint: async () => ({ checkpoint: {
+        id: 'checkpoint-1', outlineId: 'outline-1', documentVersion: 1, schemaEpoch: 1,
+        revision: 0, integrityHash: await sha256Hex(canonicalJson(initialState)), state: initialState,
+      } }),
+      pull: async () => ({ events: [event], currentRevision: 1, nextAfterRevision: null }),
+      push: async () => { throw new Error('no pending events') },
+    })
+
+    const engine = new DesktopSyncEngine(repository('server'), transport(replacing))
+    await engine.sync()
+    expect(engine.state).toEqual({ kind: 'up-to-date', revision: 1 })
+    expect(engine.appliedEvents).toEqual([replacing])
+
+    const future = new DesktopSyncEngine(repository('server'), transport({ ...replacing, eventVersion: 3 } as EventEnvelope))
+    const failure = await future.sync().then(() => null, (error: unknown) => error)
+    expect(future.state.kind).not.toBe('up-to-date')
+    expect(String(failure ?? JSON.stringify(future.state))).toMatch(/version/i)
+  })
+
   it('pushes nothing and pulls from revision 0 after a seed', async () => {
     const repo = repository('server')
     // After adoption the device already holds the seeded state at revision 0 and its

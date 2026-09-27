@@ -19,10 +19,13 @@ export interface SkillRunSteering {
   iteration: number
 }
 
-/** A reply that continues a call's stored agent conversation. */
+/** A reply that continues a call's stored agent conversation, on this device or on the server. */
 export interface SkillRunConversation {
   callId: string
-  /** Turn number of the run being started; turn 1 starts the conversation. */
+  /**
+   * Turn number of the run being started; turn 1 starts the conversation. Only
+   * completed turns are stored, so it follows the last completed turn.
+   */
   turn: number
   /** Run whose outline output a revision replaces, for superseded-version display. */
   replacesRunId?: string
@@ -38,8 +41,8 @@ export interface SkillRunRequest {
 
 /**
  * The run for a reply to a call that keeps an agent conversation, or null when
- * the call has none (server mode, extension skills, older history) and the reply
- * takes the legacy single-shot steering path.
+ * the call has none (extension skills, older history) and the reply takes the
+ * legacy single-shot steering path.
  */
 export function conversationReply(group: SkillCallGroup, note: string): SkillRunRequest | null {
   const callId = group.latest.thread?.callId
@@ -56,7 +59,8 @@ export function conversationReply(group: SkillCallGroup, note: string): SkillRun
       conversation: { callId, turn: 1 },
     }
   }
-  const turn = Math.max(...turns.map((call) => call.thread!.turn)) + 1
+  // A failed or cancelled turn stored nothing, so the reply takes its number.
+  const turn = Math.max(...turns.filter((call) => call.status === 'complete').map((call) => call.thread!.turn)) + 1
   const replaced = [...turns].reverse().find((call) => call.status === 'complete' && !call.answer)
   return {
     ...request,

@@ -260,7 +260,7 @@ export async function runAgent(
   }
 }
 
-function toolActivityDetail(toolId: string, arguments_: Record<string, unknown>): string {
+export function toolActivityDetail(toolId: string, arguments_: Record<string, unknown>): string {
   const allowedArgument = ['web_fetch', 'web_read', 'x_read', 'youtube_transcript'].includes(toolId)
     ? 'url'
     : ['web_search', 'outline_search', 'search_outline'].includes(toolId)
@@ -274,7 +274,7 @@ function toolActivityDetail(toolId: string, arguments_: Record<string, unknown>)
   return keys.length ? `Arguments: ${keys.join(', ')}` : 'No arguments'
 }
 
-function normalizedSourceUrl(value: string): string {
+export function normalizedSourceUrl(value: string): string {
   try {
     const url = new URL(value)
     url.hash = ''
@@ -289,18 +289,18 @@ function bounded(value: string, maximum: number): string {
   return normalized.slice(0, maximum)
 }
 
-function boundedActivityId(value: string, fallback: number): string {
+export function boundedActivityId(value: string, fallback: number): string {
   const normalized = value.trim().replace(/[^A-Za-z0-9._:-]/g, '-')
   return (normalized && /^[A-Za-z0-9]/.test(normalized) ? normalized : `activity-${fallback}`).slice(0, 128)
 }
 
-function boundedToolOutput(output: unknown): string {
+export function boundedToolOutput(output: unknown): string {
   const serialized = typeof output === 'string' ? output : JSON.stringify(output)
   if (!serialized) return 'Tool completed without content.'
   return serialized.length <= 30_000 ? serialized : `${serialized.slice(0, 30_000)}\n[tool output truncated]`
 }
 
-function boundedSafeError(error: unknown): string {
+export function boundedSafeError(error: unknown): string {
   const message = error instanceof Error ? error.message : 'Tool execution failed.'
   const redacted = message
     .replace(/(?:sk-[A-Za-z0-9_-]+|Bearer\s+\S+)/gi, '[redacted]')
@@ -308,6 +308,6 @@ function boundedSafeError(error: unknown): string {
   return bounded(redacted, 2_000)
 }
 
-function isAbortError(error: unknown): boolean {
+export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }

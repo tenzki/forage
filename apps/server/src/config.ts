@@ -12,7 +12,10 @@ const environmentSchema = z.object({
   FORAGE_AGENT_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
   FORAGE_AGENT_LEASE_SECONDS: z.coerce.number().int().min(15).max(900).default(60),
   FORAGE_AGENT_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(3),
+  FORAGE_AGENT_ENGINE: z.enum(['pi', 'legacy'], { error: 'FORAGE_AGENT_ENGINE must be pi or legacy.' }).default('pi'),
   FORAGE_AGENT_MAX_BACKOFF_SECONDS: z.coerce.number().int().min(1).max(86_400).default(300),
+  FORAGE_AGENT_CONVERSATION_MAX_BYTES: z.coerce.number().int().min(64 * 1024).max(64 * 1024 * 1024).default(2 * 1024 * 1024),
+  FORAGE_AGENT_CONVERSATION_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
   FORAGE_OAUTH_DEVICE_URL: z.string().url().default('https://auth.openai.com/api/accounts/deviceauth/usercode'),
   FORAGE_OAUTH_DEVICE_TOKEN_URL: z.string().url().default('https://auth.openai.com/api/accounts/deviceauth/token'),
   FORAGE_OAUTH_TOKEN_URL: z.string().url().default('https://auth.openai.com/oauth/token'),
@@ -26,6 +29,24 @@ const environmentSchema = z.object({
 
 export interface AgentEncryptionKey { version: number; keyBase64: string }
 
+/** `pi` runs the shared Pi agent loop; `legacy` keeps the previous loop for one release as a rollback path. */
+export type AgentEngine = 'pi' | 'legacy'
+
+/** The Pi SDK the server runs agents on requires this Node.js version. */
+export const MINIMUM_NODE_VERSION = '22.19.0'
+
+/** Fail fast when the running Node.js is older than the Pi SDK supports. */
+export function assertSupportedNodeVersion(version: string = process.versions.node): void {
+  const [major = 0, minor = 0, patch = 0] = version.replace(/^v/, '').split('.').map((part) => Number.parseInt(part, 10) || 0)
+  const [minimumMajor, minimumMinor, minimumPatch] = MINIMUM_NODE_VERSION.split('.').map(Number) as [number, number, number]
+  const supported = major !== minimumMajor ? major > minimumMajor
+    : minor !== minimumMinor ? minor > minimumMinor
+      : patch >= minimumPatch
+  if (!supported) {
+    throw new Error(`Forage server requires Node.js ${MINIMUM_NODE_VERSION} or newer to run agents; this is Node.js ${version}.`)
+  }
+}
+
 export interface ServerConfig {
   databaseUrl: string
   instanceId: string
@@ -33,6 +54,9 @@ export interface ServerConfig {
   host: string
   port: number
   agent: {
+    engine: AgentEngine
+    /** Call transcripts: a reply to a call over `maxBytes` is refused; finished calls older than `maxAgeDays` are deleted. */
+    conversations: { maxBytes: number; maxAgeDays: number }
     worker: { concurrency: number; pollMs: number; leaseSeconds: number; maxAttempts: number; maxBackoffSeconds: number }
     encryptionKeys: AgentEncryptionKey[]
     oauth: {
@@ -72,6 +96,11 @@ export function loadServerConfig(environment: Record<string, string | undefined>
     host: value.FORAGE_HOST,
     port: value.FORAGE_PORT,
     agent: {
+      engine: value.FORAGE_AGENT_ENGINE,
+      conversations: {
+        maxBytes: value.FORAGE_AGENT_CONVERSATION_MAX_BYTES,
+        maxAgeDays: value.FORAGE_AGENT_CONVERSATION_MAX_AGE_DAYS,
+      },
       worker: {
         concurrency: value.FORAGE_AGENT_WORKER_CONCURRENCY,
         pollMs: value.FORAGE_AGENT_POLL_MS,
@@ -104,6 +133,9 @@ export function publicConfigForLogging(config: ServerConfig): string {
     host: config.host,
     port: config.port,
     database: `${database.protocol}//${database.hostname}:${database.port || '5432'}${database.pathname}`,
+    agentEngine: config.agent.engine,
+    conversationMaxBytes: config.agent.conversations.maxBytes,
+    conversationMaxAgeDays: config.agent.conversations.maxAgeDays,
     workerConcurrency: config.agent.worker.concurrency,
     transcriptProviderConfigured: config.agent.supadata !== null,
     credentialKeyVersions: config.agent.encryptionKeys.map((key) => key.version),

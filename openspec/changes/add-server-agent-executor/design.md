@@ -32,6 +32,8 @@ The initial deployment remains one owner with local-only and self-hosted server 
 
 ### 1. Introduce a portable runtime with environment adapters
 
+> **Superseded in part by [ADR-0022](../../../docs/ADRs/ADR-0022-pi-agent-loop-in-both-environments.md).** The desktop sidecar never became an adapter of the `packages/agent-runtime` loop, so the desktop (Pi) and the server (`runAgent`) run different agent loops. ADR-0022 makes the Pi SDK loop the shared engine in both environments. `packages/agent-runtime` keeps the shared contracts, and its `runAgent` loop is retired by `openspec/changes/run-pi-on-server`. The tool-policy, admission, placement-authority and limit decisions below still apply. Read "the same runtime" as "the shared Pi session setup".
+
 Create `packages/agent-runtime` for runtime-validated agent, skill, tool, run-input, structured-output, and activity-event contracts plus the bounded model/tool loop. It has no React, Tauri, Fastify, PostgreSQL, keyring, or browser dependency. Network access, model calls, credentials, outline search, assets, clocks, IDs, and activity persistence enter through interfaces.
 
 The existing desktop Pi sidecar becomes a local adapter of this package. The server imports the same runtime and supplies server adapters. `packages/protocol` exposes wire schemas without importing server or desktop implementation code. This was chosen over maintaining separate desktop and server harnesses because prompt composition, tool authorization, output validation, cancellation, and limits must be identical. Running every local call through the remote server was rejected because local mode must remain usable without a server.

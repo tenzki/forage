@@ -21,7 +21,7 @@ import { LinkPeekPane } from './components/Outliner/LinkPeekPane'
 import { pagePeekAvailable, preparePage } from './components/Outliner/pagePeek'
 import { OUTLINE_LINK_PEEK_EVENT, type LinkPeekRequest } from './editor/externalLinks'
 import type { ActivityEvent } from './agent/activity'
-import { applyActivityEvent, callsFromHistory, fromRuntimeEvent } from './agent/activityCalls'
+import { applyActivityEvent, callsFromHistory } from './agent/activityCalls'
 import { serverRunManager } from './agent/serverRunManager'
 import { agentRunSignals } from './agent/agentRunSignals'
 import {
@@ -207,9 +207,9 @@ export default function App() {
   }, [skills])
 
   /**
-   * Reply to a skill call. A local call resumes its agent conversation. Other
-   * calls start the next version: take the current output out of the outline,
-   * then rerun the skill with the note and that output as context.
+   * Reply to a skill call. A call with a conversation, local or on the server,
+   * resumes it. Other calls start the next version: take the current output out
+   * of the outline, then rerun the skill with the note and that output as context.
    */
   const steerCall = useCallback((group: SkillCallGroup, note: string) => {
     if (!editor || !group.nodeId || !group.skillLabel || group.status === 'running') return
@@ -235,15 +235,17 @@ export default function App() {
     })
   }, [editor])
 
+  const serverMode = sessionStatus.storageBackend.kind === 'server'
   const clearActivity = useCallback(() => {
     // A retained paid result is not disposable activity history. Keep its
     // recovery affordance until the user places it successfully.
     setActivityCalls((calls) => calls.filter((call) => call.placementPending))
+    // In server mode the server also deletes finished calls and their transcripts.
     void Promise.all([
       session.clearAgentRunHistory(),
-      serverRunManager.clearFinishedHistory(),
+      serverRunManager.clearFinishedHistory({ server: serverMode }),
     ]).catch((error) => setAgentError(errorMessage(error)))
-  }, [session])
+  }, [serverMode, session])
 
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
 
@@ -297,7 +299,7 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded) return
-    void serverRunManager.restore((event, runId) => handleActivity(fromRuntimeEvent(event, runId)))
+    void serverRunManager.restore(handleActivity)
       .then(() => serverRunManager.adoptActive())
       .catch(() => undefined)
   }, [handleActivity, loaded])

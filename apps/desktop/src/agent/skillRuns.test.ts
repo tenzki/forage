@@ -28,7 +28,7 @@ describe('steered skill prompts', () => {
 })
 
 describe('conversation replies', () => {
-  it('resumes a local call at the next turn and names the version it replaces', () => {
+  it('resumes a call after its last completed turn and names the version it replaces', () => {
     const [group] = groupSkillCalls([
       call('run-1', 1, { thread: { callId: 'run-1', turn: 1 } }),
       call('run-2', 2, { thread: { callId: 'run-1', turn: 2 }, note: 'Why?', answer: 'Because.' }),
@@ -38,13 +38,13 @@ describe('conversation replies', () => {
     expect(conversationReply(group!, 'Shorter please')).toEqual({
       invocationNodeId: 'bullet-1', skillLabel: 'research', prompt: 'Shorter please',
       steering: { note: 'Shorter please', basePrompt: 'tides', iteration: 4 },
-      conversation: { callId: 'run-1', turn: 4, replacesRunId: 'run-1' },
+      conversation: { callId: 'run-1', turn: 3, replacesRunId: 'run-1' },
     })
   })
 
   it('takes the legacy path for calls without a conversation', () => {
-    const [serverCall] = groupSkillCalls([call('run-1', 1)])
-    expect(conversationReply(serverCall!, 'Shorter please')).toBeNull()
+    const [olderCall] = groupSkillCalls([call('run-1', 1)])
+    expect(conversationReply(olderCall!, 'Shorter please')).toBeNull()
   })
 
   it('starts the conversation over when no turn completed', () => {

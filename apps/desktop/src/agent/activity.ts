@@ -16,10 +16,12 @@ export interface ActivityEvent {
   placementPending?: boolean
   durationMs?: number
   note?: string
-  /** Conversation turn of a local call run; set on the call-level event. */
+  /** Conversation turn of a call run, local or server; set on the call-level event. */
   thread?: RunThread
   /** Inline answer text of a conversation reply, streamed or final. An empty string clears it. */
   answer?: string
+  /** An Inbox automation run: not a call, so it takes no replies. Set on the call-level event. */
+  automation?: boolean
 }
 
 export type ActivityReporter = (event: ActivityEvent) => void

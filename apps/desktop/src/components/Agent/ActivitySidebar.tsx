@@ -72,10 +72,12 @@ export interface ActivityCall {
   placementPending?: boolean
   /** The user's steering note that started this iteration, if it was one. */
   note?: string
-  /** Conversation turn, for local calls that keep an agent conversation. */
+  /** Conversation turn, for calls that keep an agent conversation, local or on the server. */
   thread?: RunThread
   /** Inline answer of a conversation reply, streamed while it runs. */
   answer?: string
+  /** An Inbox automation run, which takes no replies. */
+  automation?: boolean
   events: ActivityEntry[]
 }
 
@@ -439,7 +441,8 @@ function CallDetail({ group, position, total, describeNode, onBack, onOpenNode, 
     .find((nodeId) => nodeId && (!describeNode || describeNode(nodeId)))
   const goTo = resultNodeId ?? group.nodeId
   const stoppable = running && onCancel && canCancel?.(group.latest.id)
-  const steerable = Boolean(onSteer && canSteer?.(group))
+  // Inbox automation runs are not calls, so they never offer a reply box.
+  const steerable = Boolean(onSteer && !group.automation && canSteer?.(group))
 
   // Follow new steps while the reader is at the bottom of the thread. Scrolling up
   // to read stops following; opening a call or sending a reply starts it again.

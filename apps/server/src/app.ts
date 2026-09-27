@@ -11,6 +11,7 @@ import {
   agentRunAdmissionResponseSchema,
   agentRunCancelResponseSchema,
   agentRunDetailSchema,
+  agentRunHistoryClearResponseSchema,
   agentRunListQuerySchema,
   agentRunListResponseSchema,
   agentRunRetryResponseSchema,
@@ -44,7 +45,9 @@ import {
 } from '@forage/agent-runtime'
 import type { BoundPrincipal, ServerRepository, TokenScope } from './repository.js'
 import { RepositoryError, requireBoundOutline } from './repository.js'
-import { AgentStoreError, type AgentRunRecord } from './agentStore.js'
+import { AgentStoreError, CONVERSATION_UNAVAILABLE_MESSAGE, type AgentRunRecord } from './agentStore.js'
+import { DEFAULT_CONVERSATION_BUDGET_BYTES } from './callConversations.js'
+import type { AgentEngine } from './config.js'
 import { CredentialServiceError, type ServerCredentialService } from './credentialService.js'
 import type { AssetStorage } from './assets.js'
 import { verifyAssetBytes } from './assets.js'
@@ -59,6 +62,10 @@ export interface ServerOptions {
   supportedAgentToolIds?: string[]
   agentMaxAttempts?: number
   workerAvailable?: boolean
+  /** The worker's agent engine; replies to calls need `pi`, which keeps their transcripts. */
+  agentEngine?: AgentEngine
+  /** Per-call transcript budget; a reply to a call over it is refused. */
+  conversationBudgetBytes?: number
   /**
    * Live change fan-out for connected desktops. The outline stream endpoint is
    * registered only when one is supplied, so a deployment without it keeps
@@ -109,7 +116,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       'trash.entry_purged': [1], 'shortcut.created': [1], 'shortcut.updated': [1],
       'shortcut.deleted': [1], 'shortcuts.reordered': [1], 'asset.reference_added': [1],
       'document.schema_migrated': [1],
-      'agent.result_committed': [1],
+      'agent.result_committed': [1, 2],
     },
     agentOriginVersions: [1],
     minimumAgentClientVersion: '0.1.0',
@@ -339,6 +346,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
         input: admission.input, ownerId: principal.ownerId, trigger: 'manual',
         triggerIdentity: `manual:${admission.invocationId}`, invocationId: admission.invocationId, intentHash: admission.intentHash,
         maxAttempts: options.agentMaxAttempts ?? 3,
+        conversationBudgetBytes: options.conversationBudgetBytes ?? DEFAULT_CONVERSATION_BUDGET_BYTES,
       })
       return reply.code(202).send(agentRunAdmissionResponseSchema.parse({ runId: run.id, status: 'queued', admittedAt: run.admittedAt }))
     } catch (error) { return sendError(reply, error) }
@@ -352,6 +360,14 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       return agentRunListResponseSchema.parse({
         runs: runs.map(runSummary), nextCursor: runs.length === query.limit ? runs.at(-1)!.admittedAt : null,
       })
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.post('/api/v1/outlines/:outlineId/agent-runs/clear-history', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:execute', request.params)
+      const deletedRuns = await repository.agentStore.clearFinishedHistory(principal.outlineId)
+      return agentRunHistoryClearResponseSchema.parse({ deletedRuns })
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -398,9 +414,17 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
       if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
       const context = await repository.runAdmissionContext(principal, previous.input.source.nodeId ?? '', previous.input.target.parentId)
+      const retryRunId = `run_${randomUUID()}`
+      const thread = previous.input.thread
+      if (thread && thread.turn > 1) requireConversationEngine(options)
       const input = buildInputFromConfiguration(options, configuration, {
-        ...previous.input, runId: `run_${randomUUID()}`, baseRevision: context.baseRevision,
+        ...previous.input, runId: retryRunId, baseRevision: context.baseRevision,
         configurationRevision: configuration.revision, source: { ...previous.input.source, text: context.sourceText }, context: context.context,
+        // A retried first run starts a new call; a retried reply is the same turn of its call.
+        ...(thread ? {
+          thread: thread.turn > 1 ? thread : { callId: retryRunId, turn: 1 },
+          ...(thread.turn > 1 ? { invocationOutline: await invocationOutline(repository, principal.outlineId, previous.input.target.parentId) } : {}),
+        } : {}),
       }, previous.skillId, compute.profile.credentialRef, compute.profile.modelId)
       const retry = await repository.agentStore.retry(principal.outlineId, runId, input, options.agentMaxAttempts ?? 3)
       return agentRunRetryResponseSchema.parse({ runId: retry.id, retryOfRunId: runId, status: 'queued' })
@@ -605,23 +629,61 @@ async function makeRunInput(
   if (acknowledgedRevision !== undefined && currentRevision < acknowledgedRevision) {
     throw new RepositoryError('outline_not_synchronized', 'The server has not received the acknowledged outline revision.', 'synchronize_outline')
   }
-  const targetParentId = 'targetParentId' in body ? body.targetParentId : body.sourceNodeId
+  const conversation = 'conversation' in body ? body.conversation : undefined
+  let targetParentId = 'targetParentId' in body ? body.targetParentId : body.sourceNodeId
+  if (conversation) {
+    requireConversationEngine(options)
+    // A reply continues the call's invocation: same bullet, same skill.
+    const root = await repository.agentStore.getRun(principal.outlineId, conversation.callId)
+    if (!root || root.callId !== conversation.callId) throw new RepositoryError('conversation_unavailable', CONVERSATION_UNAVAILABLE_MESSAGE, 'run_again')
+    if (root.skillId !== body.skillId || root.input.source.nodeId !== body.sourceNodeId) {
+      throw new RepositoryError('conflict', 'A reply must continue the call it belongs to.')
+    }
+    targetParentId = root.input.target.parentId
+  }
   const context = await repository.runAdmissionContext(principal, body.sourceNodeId, targetParentId)
   const resolvedAgent = { ...agent, modelId: compute.profile.modelId, credentialRef }
   const invocationId = 'invocationId' in body ? body.invocationId : `legacy-${legacyInvocationId}`
   const intentHash = await sha256Hex(canonicalJson({
     version: 2, invocationId, sourceNodeId: body.sourceNodeId, skillId: body.skillId,
     prompt: body.prompt, acknowledgedOutlineRevision: acknowledgedRevision ?? context.baseRevision,
+    ...(conversation ? { conversation } : {}),
   }))
+  const runId = `run_${randomUUID()}`
   const input = buildInputFromConfiguration(options, configuration, {
-    version: 1, runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: principal.outlineId,
+    version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
     source: { nodeId: body.sourceNodeId, text: context.sourceText }, target: { parentId: targetParentId },
     baseRevision: context.baseRevision, configurationRevision: configuration.revision, credentialRef,
     agent: resolvedAgent, skill, effectiveToolIds: [], prompt: body.prompt, context: context.context,
     customTools: configuration.customTools,
+    // A manual run starts a call with its own ID; a reply is the next turn of that call.
+    thread: conversation ?? { callId: runId, turn: 1 },
+    ...(conversation ? { invocationOutline: await invocationOutline(repository, principal.outlineId, targetParentId) } : {}),
   }, skill.id, credentialRef, compute.profile.modelId)
   input.target.parentId = targetParentId
   return { input, invocationId, intentHash }
+}
+
+function requireConversationEngine(options: ServerOptions): void {
+  if (options.agentEngine === 'legacy') {
+    throw new RepositoryError('conversation_unavailable', CONVERSATION_UNAVAILABLE_MESSAGE, 'run_again')
+  }
+}
+
+/**
+ * The invocation's current subtree for a reply, one line per bullet, marking what
+ * server agents wrote. A first run excludes it; a reply sees its earlier results.
+ */
+async function invocationOutline(repository: ServerRepository, outlineId: string, invocationNodeId: string): Promise<string[]> {
+  const outline = await repository.canonicalOutline(outlineId)
+  return outline.nodes()
+    .filter((node) => node.ancestorIds.includes(invocationNodeId))
+    .slice(0, 100)
+    .map((node) => {
+      const depth = node.ancestorIds.length - node.ancestorIds.indexOf(invocationNodeId) - 1
+      const author = node.id.startsWith('note_run_') ? 'agent' : 'user'
+      return `${'  '.repeat(depth)}- [${author}] ${node.text || '(empty)'}`.slice(0, 40_000)
+    })
 }
 
 function buildInputFromConfiguration(
@@ -674,6 +736,9 @@ function runSummary(run: AgentRunRecord) {
     id: run.id, outlineId: run.outlineId, trigger: run.trigger, status: run.status,
     skillId: run.skillId, policyId: run.policyId, configurationRevision: run.configurationRevision, attemptCount: run.attemptCount,
     admittedAt: run.admittedAt, updatedAt: run.updatedAt, retryOfRunId: run.retryOfRunId,
+    callId: run.callId, turn: run.callTurn,
+    sourceNodeId: run.trigger === 'manual' ? run.input.source.nodeId ?? null : null,
+    prompt: run.trigger === 'manual' ? run.input.prompt : null,
   }
 }
 
@@ -683,13 +748,14 @@ function runDetail(run: AgentRunRecord) {
     error: run.errorCode ? publicRunError(run.errorCode) : null,
     result: run.result,
     placementError: run.placementError,
+    answer: run.answer,
   }
 }
 
 function publicRunError(code: string) {
   const allowed = new Set([
     'authentication_required', 'dependency_unavailable', 'provider_rate_limited', 'timeout', 'unsupported_tool',
-    'invalid_input', 'invalid_output', 'target_unavailable', 'attempts_exhausted', 'lease_lost',
+    'invalid_input', 'invalid_output', 'target_unavailable', 'attempts_exhausted', 'lease_lost', 'conversation_unavailable',
   ])
   const publicCode = allowed.has(code) ? code : 'dependency_unavailable'
   return { code: publicCode, message: publicCode.replaceAll('_', ' '), retryable: ['dependency_unavailable', 'provider_rate_limited', 'timeout', 'lease_lost'].includes(publicCode) }
@@ -698,7 +764,12 @@ function publicRunError(code: string) {
 function sendError(reply: { code: (status: number) => { send: (body: unknown) => unknown } }, error: unknown) {
   if (error instanceof AgentStoreError) {
     const status = error.code === 'not_found' ? 403 : 409
-    return reply.code(status).send({ error: { code: error.code === 'not_found' ? 'authorization_denied' : 'conflict', message: error.message, retryable: false } })
+    const code = error.code === 'not_found' ? 'authorization_denied'
+      : ['call_busy', 'conversation_too_large', 'conversation_unavailable'].includes(error.code) ? error.code : 'conflict'
+    return reply.code(status).send({ error: {
+      code, message: error.message, retryable: error.code === 'call_busy',
+      ...(['conversation_too_large', 'conversation_unavailable'].includes(error.code) ? { recoveryAction: 'run_again' } : {}),
+    } })
   }
   if (error instanceof CredentialServiceError) {
     const status = error.code === 'authentication_required' ? 401 : 409

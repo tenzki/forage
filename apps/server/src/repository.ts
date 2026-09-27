@@ -9,9 +9,11 @@ import {
 } from '@forage/domain'
 import type { NotesCreateRequest, NotesCreateResponse } from '@forage/protocol'
 import { createOutlineSchema, findSystemNode, queryCanonicalOutline } from '@forage/document'
-import { InMemoryAgentStore, type AgentStore } from './agentStore.js'
-import type { AgentDefinition, StructuredResult, StructuredResultV1 } from '@forage/agent-runtime'
-import { requireStructuredResultV1, resolveEffectiveToolIds, type RunInput } from '@forage/agent-runtime'
+import { InMemoryAgentStore, type AgentStore, type CallTurnEntries } from './agentStore.js'
+import type { AgentDefinition, LocalRunResult, StructuredResultV1 } from '@forage/agent-runtime'
+import {
+  isLocalAnswerResult, localAnswerResultSchema, requireStructuredResultV1, resolveEffectiveToolIds, type RunInput,
+} from '@forage/agent-runtime'
 import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
 
 export type TokenScope = 'notes:create' | 'sync' | 'agents:read' | 'agents:execute' | 'agents:manage'
@@ -60,7 +62,8 @@ export class RepositoryError extends Error {
       | 'authentication_required' | 'authorization_denied' | 'upgrade_required' | 'conflict' | 'idempotency_conflict'
       | 'outline_not_synchronized' | 'source_missing' | 'source_trashed' | 'target_missing' | 'target_trashed'
       | 'configuration_unavailable' | 'configuration_conflict' | 'compute_unavailable'
-      | 'capability_unavailable' | 'projection_rebuilding' | 'worker_unavailable',
+      | 'capability_unavailable' | 'projection_rebuilding' | 'worker_unavailable'
+      | 'conversation_unavailable',
     message: string,
     public readonly recoveryAction?: string,
   ) {
@@ -90,9 +93,17 @@ export interface ServerRepository {
   runAdmissionContext(principal: BoundPrincipal, sourceNodeId: string, targetParentId: string): Promise<{
     sourceText: string; context: string[]; baseRevision: number
   }>
-  commitAgentResult(runId: string, workerId: string, result: StructuredResult): Promise<
+  /** The canonical outline for admission checks that need more than the invocation's ancestors. */
+  canonicalOutline(outlineId: string): Promise<ReturnType<typeof queryCanonicalOutline>>
+  /**
+   * Settle a run: place a structured result (replacing the call's previous version for a
+   * later turn), retain it unplaced, or store a reply's answer. A call's turn entries are
+   * stored in the same transaction as the outcome.
+   */
+  commitAgentResult(runId: string, workerId: string, result: LocalRunResult, turn?: CallTurnEntries): Promise<
     | { placement: 'placed'; firstRevision: number; lastRevision: number; rootNoteIds: string[] }
     | { placement: 'unplaced'; reason: string }
+    | { placement: 'answered' }
   >
   searchOutline(outlineId: string, query: string, limit?: number): Promise<Array<{ nodeId: string; text: string }>>
   noteIndexStatus(outlineId: string): Promise<{ ready: boolean; sourceRevision: number; schemaVersion: number }>
@@ -440,6 +451,11 @@ export class InMemoryServerRepository implements ServerRepository {
     }
   }
 
+  async canonicalOutline(outlineId: string) {
+    this.requireOutline(outlineId)
+    return queryCanonicalOutline(this.state!)
+  }
+
   async searchOutline(outlineId: string, query: string, limit = 20) {
     this.requireOutline(outlineId)
     const needle = query.trim().toLowerCase()
@@ -454,14 +470,19 @@ export class InMemoryServerRepository implements ServerRepository {
     return { ready: this.noteProjectorRevision === this.revision, sourceRevision: this.noteProjectorRevision, schemaVersion: NOTE_PROJECTOR_SCHEMA_VERSION }
   }
 
-  async commitAgentResult(runId: string, workerId: string, result: StructuredResult) {
-    const materializable = requireStructuredResultV1(result)
+  async commitAgentResult(runId: string, workerId: string, result: LocalRunResult, turn?: CallTurnEntries) {
     const run = await this.agentStore.getRun(this.outlineId, runId)
     if (!run) throw new RepositoryError('authorization_denied', 'The requested resource is unavailable.')
+    if (isLocalAnswerResult(result)) {
+      if (!turn) throw new RepositoryError('conflict', 'An answer settles a conversation turn.')
+      await this.agentStore.completeAnswer(runId, workerId, localAnswerResultSchema.parse(result), turn)
+      return { placement: 'answered' as const }
+    }
+    const materializable = requireStructuredResultV1(result)
     await this.agentStore.persistOutput(runId, workerId, `result:${runId}`, materializable)
     const target = queryCanonicalOutline(this.state!).resolve(run.input.target.parentId)
     if (target.state !== 'live') {
-      await this.agentStore.completeUnplaced(runId, workerId, `target_${target.state}`)
+      await this.agentStore.completeUnplaced(runId, workerId, `target_${target.state}`, turn)
       return { placement: 'unplaced' as const, reason: `target_${target.state}` }
     }
     const ownership = await this.agentStore.renewLease(runId, workerId, new Date(), 60_000)
@@ -471,19 +492,22 @@ export class InMemoryServerRepository implements ServerRepository {
     const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
     if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
     const provenance = { runId, skillId: run.skillId, sourceNodeId: run.input.source.nodeId, sourceUrls: materializable.sources.map((source) => source.url).slice(0, 20) }
+    const replaces = run.callId && run.callTurn && run.callTurn > 1
+      ? await this.agentStore.latestCallVersion(run.outlineId, run.callId, run.callTurn)
+      : null
     const event = parseEventEnvelope({
       id: `event_${randomUUID()}`, outlineId: run.outlineId, actorId: this.ownerId, deviceId: `agent_${this.instanceId}`,
-      type: 'agent.result_committed', eventVersion: 1, documentVersion: 1, schemaEpoch: 1,
+      type: 'agent.result_committed', eventVersion: replaces ? 2 : 1, documentVersion: 1, schemaEpoch: 1,
       baseRevision: this.revision, revision: this.revision + 1, origin: 'agent', agentProvenance: provenance,
       changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
-      payload: { runId, targetNodeId: run.input.target.parentId, nodes, sources: materializable.sources },
+      payload: { runId, targetNodeId: run.input.target.parentId, nodes, sources: materializable.sources, ...(replaces ? { replaces } : {}) },
     })
     this.revision += 1
     this.events.push(event)
     this.state = reduceOutlineEvent(this.state!, event)
     const settled = { firstRevision: this.revision, lastRevision: this.revision, rootNoteIds }
     this.rebuildNoteIndex()
-    await this.agentStore.complete(runId, workerId, `result:${runId}`, settled)
+    await this.agentStore.complete(runId, workerId, `result:${runId}`, settled, turn)
     return { placement: 'placed' as const, ...settled }
   }
 

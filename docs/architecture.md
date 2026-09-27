@@ -40,7 +40,7 @@ Responsibilities are divided by capability:
 | React/TypeScript desktop | Editor behavior, application orchestration, event capture, deterministic projection, synchronization policy, agent context and tool policy, and UI state |
 | Shared TypeScript packages | ProseMirror schema and operations, event envelopes and reduction, protocol validation, rebase behavior, agent configuration, run inputs, activity, and structured-result contracts |
 | Tauri/Rust boundary | SQLite durability, checkpoints and outbox state, local content-addressed asset bytes, local credential storage, and origin-pinned authenticated server transport |
-| Local Node.js sidecar | In-memory Pi SDK sessions, local model/tool execution, the private native-extension adapter, streaming lifecycle events, structured output, cancellation, and process cleanup |
+| Local Node.js sidecar | Pi SDK sessions and per-call conversation transcripts, local model/tool execution, the private native-extension adapter, streaming lifecycle events, structured output, cancellation, and process cleanup |
 | Forage extension host | Manifest-only inventory, device-local configuration/package lifecycle, trust and revision checks, native tool/hook loading, and bounded extension execution outside the webview |
 | Optional server | Authentication, global event sequencing, authoritative server-mode projection, Notes API, asset transfer, agent configuration, and durable agent work |
 | PostgreSQL | Authoritative server-mode events, revisions, projections, credentials, automation policy, durable agent queues, leases, activity, and result identity |
@@ -49,7 +49,7 @@ Responsibilities are divided by capability:
 
 ### Local mode
 
-Local mode requires no account or server. SQLite in the platform application-data directory is authoritative for immutable events, checkpoints, persistent history, local agent-run state, and synchronization metadata. Asset bytes live beside it in a verified content-addressed store. Local mode is intentionally single-device and does not use iCloud for document synchronization.
+Local mode requires no account or server. SQLite in the platform application-data directory is authoritative for immutable events, checkpoints, persistent history, local agent-run state, and synchronization metadata. Asset bytes live beside it in a verified content-addressed store. Local agent conversations are Pi JSONL session files under `pi-agent/agent-sessions/` in the same directory: a derived agent cache keyed by run rows, never outline data (ADR-0022). Local mode is intentionally single-device and does not use iCloud for document synchronization.
 
 ### Server mode
 
@@ -85,10 +85,21 @@ The flattened note index never authorizes or validates a write. Its source revis
 
 The desktop supports two execution locations behind shared run and result contracts:
 
-- Local execution launches the Node.js sidecar, which embeds the Pi SDK and uses a user-owned OpenAI API key or short-lived ChatGPT OAuth credential. The sidecar is stateless across invocations and receives only explicitly selected outline context and authorized tools.
+- Local execution launches the Node.js sidecar, which embeds the Pi SDK and uses a user-owned OpenAI API key or short-lived ChatGPT OAuth credential. Each run receives only explicitly selected outline context and authorized tools.
 - Server execution accepts a small invocation intent and resolves current canonical context, portable configuration, compute, credentials, and capabilities at admission. PostgreSQL-backed workers claim bounded leases and append sanitized activity. The application-level desktop run manager observes multiple runs across popup closure, restart, disconnect, and reconnect.
 
 Both paths return validated structured outline nodes. Server output is persisted before placement and enters the outline as one atomic `agent.result_committed` event. A missing or trashed target produces `completed_unplaced`; the intact stored output can later be placed exactly once under another live node. There is no parallel agent-owned outline, and the editor remains available while runs and synchronization continue.
+
+### Call conversations
+
+In local mode, a skill call is a conversation (ADR-0022). Every local run carries a `thread` of call ID and turn number. The first turn starts a Pi session file named after the call ID; a reply from the activity panel resumes that file and sends the reply, together with the current outline context and the bullets under the invocation, as the next user message. The sidecar derives the file path only from the validated call ID, and a failed or cancelled turn is rolled back so the next reply resumes from the last completed turn. A missing or unreadable transcript fails closed and asks the user to run the skill again.
+
+The agent chooses the outcome of each reply:
+
+- **Answer.** A question is answered in plain text. The answer is stored as the run's result and shown in the activity thread; the outline is unchanged.
+- **Revision.** A requested change ends with `emit_outline`. The new result replaces the call's previous agent-written bullets and images under the invocation bullet in one undoable transaction, keeping the user's own bullets, and becomes the call's next version.
+
+Clearing activity history deletes the session files of the calls it removes; calls with a retained unplaced result keep their files. At startup, session files whose call has no remaining run are pruned. Server-mode calls, extension skills and older history keep single-shot steering, and a local conversation cannot be continued in server mode. Server conversations are designed in `openspec/changes/run-pi-on-server`.
 
 ### Local extensions
 
@@ -124,5 +135,6 @@ Generated raster images are stored outside the event payload as content-addresse
 - [ADR-0019: Admit Server Agents From Invocation Intents](ADRs/ADR-0019-intent-based-server-agent-admission.md)
 - [ADR-0020: Keep Agent Runs Concurrent and Commit Results Atomically](ADRs/ADR-0020-concurrent-agents-and-atomic-results.md)
 - [ADR-0021: Allow Explicitly Trusted Local Code Through a Forage Extension Contract](ADRs/ADR-0021-trusted-local-forage-extensions.md)
+- [ADR-0022: Run the Pi Agent Loop Wherever Agents Execute and Persist Call Conversations There](ADRs/ADR-0022-pi-agent-loop-in-both-environments.md)
 
 For server setup, security, and operational limits, see [Optional Server Backend](server-backend.md).

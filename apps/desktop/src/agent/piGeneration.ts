@@ -8,8 +8,14 @@ export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
   | { image: GeneratedImageData }
 
+/** A citation the run verified by reading it; the sidecar drops the rest. */
+export interface PiSourceReference {
+  url: string
+  label: string
+}
+
 export interface PiGenerateOptions extends GenerateOptions {
-  onOutline?: (nodes: PiOutlineNode[]) => void | Promise<void>
+  onOutline?: (nodes: PiOutlineNode[], sources: PiSourceReference[]) => void | Promise<void>
   onActivity?: ActivityReporter
 }
 
@@ -124,8 +130,8 @@ export async function generateWithPi(
     if (emitted) {
       beginOutput()
       options.onActivity?.({ id: outputId, phase: 'complete', kind: 'output', label: 'Outline ready', durationMs: Date.now() - startedAt })
-      outline = emitted
-      const write = options.onOutline?.(emitted)
+      outline = emitted.nodes
+      const write = options.onOutline?.(emitted.nodes, emitted.sources)
       if (write) outlineWrites.push(write)
     }
     if (event.type === 'agent_settled' && !outline) {
@@ -202,12 +208,21 @@ function toolStart(event: PiRpcEvent): string | null {
     : null
 }
 
-function emittedOutline(event: PiRpcEvent): PiOutlineNode[] | null {
+function emittedOutline(event: PiRpcEvent): { nodes: PiOutlineNode[]; sources: PiSourceReference[] } | null {
   if (event.type !== 'tool_execution_end' || event.toolName !== 'emit_outline') return null
   const details = asRecord(asRecord(event.result)?.details)
   if (details?.action !== 'emit_outline' || !Array.isArray(details.nodes)) return null
   const nodes = details.nodes.flatMap(validateNode)
-  return nodes.length ? nodes : null
+  const sources = Array.isArray(details.sources) ? details.sources.slice(0, 100).flatMap(validateSource) : []
+  return nodes.length ? { nodes, sources } : null
+}
+
+function validateSource(value: unknown): PiSourceReference[] {
+  const source = asRecord(value)
+  if (typeof source?.url !== 'string' || typeof source.label !== 'string') return []
+  const label = source.label.trim()
+  if (!label || label.length > 300 || source.url.length > 2_000 || !isUrl(source.url)) return []
+  return [{ url: source.url, label }]
 }
 
 function validateNode(value: unknown): PiOutlineNode[] {
@@ -220,6 +235,15 @@ function validateNode(value: unknown): PiOutlineNode[] {
   if (typeof node.text !== 'string' || !node.text.trim()) return []
   const children = Array.isArray(node.children) ? node.children.flatMap(validateNode) : []
   return [{ text: node.text.trim(), ...(children.length ? { children } : {}) }]
+}
+
+function isUrl(value: string): boolean {
+  try {
+    new URL(value)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

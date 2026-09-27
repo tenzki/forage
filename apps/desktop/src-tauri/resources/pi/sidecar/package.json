@@ -14,6 +14,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "@forage/agent-runtime": "workspace:*",
     "@forage/extension-host": "workspace:*",
+    "@forage/pi-runtime": "workspace:*",
     "typebox": "1.3.7",
     "undici": "8.9.0"
   },

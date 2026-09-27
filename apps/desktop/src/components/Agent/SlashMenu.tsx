@@ -47,6 +47,7 @@ import {
 import { NativeEventRepository } from '../../persistence/eventStore'
 import { LocalAgentExecutor } from '../../agent/localExecutor'
 import { serverRunManager } from '../../agent/serverRunManager'
+import { serverCallErrorMessage, serverRunFailureMessage } from '../../agent/serverCallErrors'
 import { createPiLocalRunner } from '../../agent/piLocalRunner'
 import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
 import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
@@ -374,8 +375,8 @@ export function SlashMenu({
   /**
    * Run `skill` for the bullet `invocationNodeId`. `steering` marks a follow-up
    * iteration: the call keeps its original label and records the user's note.
-   * `conversation` continues a local call's agent conversation; without it, a
-   * local run starts a new conversation of its own.
+   * `conversation` continues a call's agent conversation, on this device or on
+   * the server; without it, a run starts a new call of its own.
    */
   function runSkill(
     skill: SkillDefinition,
@@ -548,6 +549,7 @@ export function SlashMenu({
     const startedAt = Date.now()
     const callLabel = runActivityLabel(skill.label, steering?.basePrompt ?? prompt)
     let localOutputNodeId: string | null = null
+    // A reply joins its call's thread at once, before the run is admitted.
     onActivity?.({
       id: runId,
       phase: 'start',
@@ -556,26 +558,33 @@ export function SlashMenu({
       nodeId: invocationNodeId,
       ...(prompt ? { detail: steering?.basePrompt ?? prompt } : {}),
       ...(steering ? { note: steering.note } : {}),
+      ...(followUp && conversation ? { thread: { callId: conversation.callId, turn: conversation.turn } } : {}),
     })
+    let serverRun = false
     void (async () => {
       const followUpContext = followUp ? resolveFollowUpContext(editor.state.doc, invocationNodeId) : null
       const context = followUpContext?.context ?? contextSnapshot!
       const mode = await repository.storageMode()
-      if (mode === 'server' && conversation) {
-        throw new Error('This conversation is stored on this device. Switch back to local mode to reply to it.')
-      }
       if (mode === 'server') {
+        serverRun = true
         await onBeforeServerRun?.()
         const connection = await repository.serverConnection()
         if (!connection) throw new Error('Server mode is not configured.')
         const sync = await repository.syncState(connection.outlineId)
+        // A reply resumes the server call; the server resolves its context. A call
+        // whose first turn never completed has nothing to resume and starts over.
         const handle = await serverRunManager.invoke({
           version: 2, invocationId: runId, sourceNodeId: invocationNodeId,
           skillId: skill.id, prompt: prompt || skill.label,
           acknowledgedOutlineRevision: sync.lastPulledRevision,
-        }, (event) => onActivity?.(fromRuntimeEvent(event, runId)))
+          ...(followUp && conversation ? { conversation: { callId: conversation.callId, turn: conversation.turn } } : {}),
+        }, onActivity, { label: callLabel, ...(steering ? { note: steering.note } : {}) })
         onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
         const completed = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
+        if (completed.status === 'failed') throw new Error(serverRunFailureMessage(completed))
+        if (completed.status === 'cancelled' || completed.status === 'interrupted') {
+          throw new DOMException('The server run was cancelled.', 'AbortError')
+        }
         if (completed.status === 'completed_unplaced') {
           onActivity?.({
             id: `placement-${runId}`, callId: runId, phase: 'error', kind: 'output',
@@ -583,14 +592,15 @@ export function SlashMenu({
             detail: 'The bullet this run wrote to was removed. The output is kept on the server.',
             nodeId: invocationNodeId,
           })
-        } else {
+        } else if (!completed.answer) {
+          // The server committed the result, or the revision replacing the previous
+          // version, as one outline event; pull it now.
           await onAfterServerRun?.()
-          onActivity?.({
-            id: `outline-${runId}`, callId: runId, phase: 'complete', kind: 'output',
-            label: 'Outline updated', nodeId: invocationNodeId,
-          })
         }
-        onActivity?.({ id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId, durationMs: Date.now() - startedAt })
+        onActivity?.({
+          id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
+          durationMs: Date.now() - startedAt, ...(completed.answer ? { answer: completed.answer } : {}),
+        })
         return
       }
 
@@ -704,7 +714,7 @@ export function SlashMenu({
         durationMs: Date.now() - startedAt, ...(followUp ? { answer: '' } : {}),
       })
     })().catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error)
+      const detail = serverRun ? serverCallErrorMessage(error, followUp) : error instanceof Error ? error.message : String(error)
       if (localOutputNodeId) {
         setAgentActivity(editor, localOutputNodeId, null)
         removeAiList(editor, localOutputNodeId)

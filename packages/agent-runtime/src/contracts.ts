@@ -598,9 +598,9 @@ export const structuredResultSchema = z.union([structuredResultV1Schema, structu
 export const MAX_ANSWER_CHARS = 20_000
 
 /**
- * A local follow-up turn that answered inline instead of emitting an outline. It is
- * stored as the run's result and never placed, so it stays out of the server's
- * structured result union.
+ * A follow-up turn that answered inline instead of emitting an outline, in either
+ * execution mode. It is stored as the run's result and never placed, so it stays out
+ * of the structured result union.
  */
 export const localAnswerResultSchema = z.object({
   version: z.literal(1),

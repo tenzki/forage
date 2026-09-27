@@ -27,7 +27,7 @@ describe('Pi local runtime adapter', () => {
       await options.onOutline?.([
         { text: 'Caption', children: [{ text: 'Detail' }] },
         { image: { src: 'data:image/png;base64,bytes', alt: 'A diagram' } },
-      ])
+      ], [{ url: 'https://example.com/diagram', label: 'Diagram source' }])
       return ''
     })
     const runner = createPiLocalRunner({
@@ -46,7 +46,7 @@ describe('Pi local runtime adapter', () => {
         { type: 'text', text: 'Caption', children: [{ type: 'text', text: 'Detail' }] },
         { type: 'image', assetId: 'a'.repeat(64), alt: 'A diagram' },
       ],
-      sources: [],
+      sources: [{ url: 'https://example.com/diagram', label: 'Diagram source' }],
     })
     expect(activities).toEqual([expect.objectContaining({ sequence: 1, kind: 'tool' })])
     expect(generate).toHaveBeenCalledWith(
@@ -104,7 +104,7 @@ describe('Pi local runtime adapter', () => {
       resolveCredential: async () => ({ mode: 'api_key', apiKey: 'secret', oauthCredential: null, modelId: '' }),
       generate: async (_auth, _input, options) => {
         options.onDelta('Let me revise that.')
-        await options.onOutline?.([{ text: 'Revised' }])
+        await options.onOutline?.([{ text: 'Revised' }], [])
         return 'Let me revise that.'
       },
       assets: { ingestGeneratedImage: async () => { throw new Error('unused') } },

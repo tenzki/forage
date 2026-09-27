@@ -1,10 +1,21 @@
-import { AgentRuntimeError, runAgent, type ModelAdapter, type RuntimeTool } from '@forage/agent-runtime'
-import type { AgentRunRecord } from './agentStore.js'
+import {
+  AgentRuntimeError,
+  runAgent,
+  type ActivityEvent,
+  type LocalRunResult,
+  type ModelAdapter,
+  type RuntimeTool,
+} from '@forage/agent-runtime'
+import { CONVERSATION_UNAVAILABLE } from '@forage/pi-runtime'
+import type { AgentRunRecord, CallTurnEntries } from './agentStore.js'
 import { AgentStoreError } from './agentStore.js'
 import type { ServerCredentialService, ResolvedModelCredential } from './credentialService.js'
 import { CredentialServiceError } from './credentialService.js'
 import { ProviderError } from './transcript.js'
 import type { ServerRepository } from './repository.js'
+import type { AgentEngine } from './config.js'
+import { createServerPiModel, runServerPiTurn, type ServerPiModel } from './piExecutor.js'
+import { openCallConversation, settledTurnEntries } from './callConversations.js'
 
 export interface ServerAgentRunnerOptions {
   repository: ServerRepository
@@ -13,7 +24,14 @@ export interface ServerAgentRunnerOptions {
   workerId: string
   leaseMs: number
   maxBackoffMs?: number
-  modelFactory: (credential: ResolvedModelCredential, run: AgentRunRecord) => ModelAdapter
+  /** The agent loop that executes runs: the shared Pi turn, or `legacy` as the rollback path. Defaults to `pi`. */
+  engine?: AgentEngine
+  /** The Pi engine's model; defaults to the credential's provider and the run's model. */
+  piModelFactory?: (credential: ResolvedModelCredential, run: AgentRunRecord) => Promise<ServerPiModel>
+  /** The legacy engine's model adapter. */
+  modelFactory?: (credential: ResolvedModelCredential, run: AgentRunRecord) => ModelAdapter
+  /** Where a reply's temporary session file is written; the OS temp directory by default. */
+  conversationTempRoot?: string
 }
 
 export class ServerAgentRunner {
@@ -36,14 +54,10 @@ export class ServerAgentRunner {
     try {
       const credential = await this.options.credentials.resolve(run.credentialReference, run.ownerId, run.outlineId)
       const tools = typeof this.options.tools === 'function' ? this.options.tools(run, credential) : this.options.tools
-      const result = await runAgent(run.input, {
-        model: this.options.modelFactory(credential, run),
-        tools,
-        onActivity: async (event) => { await this.options.repository.agentStore.appendActivity(run.id, event) },
-      }, { signal: controller.signal })
+      const { result, turn } = await this.runEngine(run, credential, tools, controller.signal)
       await renew()
       if (leaseLost || controller.signal.aborted) throw controller.signal.reason ?? new Error('lease_lost')
-      await this.options.repository.commitAgentResult(run.id, this.options.workerId, result)
+      await this.options.repository.commitAgentResult(run.id, this.options.workerId, result, turn)
     } catch (error) {
       const current = await this.options.repository.agentStore.getRun(run.outlineId, run.id)
       if (!current || ['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status)) return
@@ -67,6 +81,30 @@ export class ServerAgentRunner {
       }
     } finally { clearInterval(interval) }
   }
+
+  private async runEngine(
+    run: AgentRunRecord, credential: ResolvedModelCredential, tools: RuntimeTool[], signal: AbortSignal,
+  ): Promise<{ result: LocalRunResult; turn?: CallTurnEntries }> {
+    const onActivity = async (event: ActivityEvent) => { await this.options.repository.agentStore.appendActivity(run.id, event) }
+    if (this.options.engine === 'legacy') {
+      // The previous engine keeps no transcripts, so it never runs a reply without its history.
+      if ((run.input.thread?.turn ?? 1) > 1) throw new AgentRuntimeError('conversation_unavailable', CONVERSATION_UNAVAILABLE)
+      if (!this.options.modelFactory) throw new Error('The legacy agent engine requires a model factory.')
+      return { result: await runAgent(run.input, { model: this.options.modelFactory(credential, run), tools, onActivity }, { signal }) }
+    }
+    const model = this.options.piModelFactory
+      ? await this.options.piModelFactory(credential, run)
+      : await createServerPiModel(credential, run.input.agent.modelId)
+    const conversation = await openCallConversation(this.options.repository.agentStore, run, this.options.conversationTempRoot)
+    try {
+      const result = await runServerPiTurn(run.input, {
+        model, tools, onActivity, signal, ...(conversation ? { conversation: conversation.store } : {}),
+      })
+      return { result, ...(conversation ? { turn: settledTurnEntries(conversation.appendedEntries(), credential) } : {}) }
+    } finally {
+      await conversation?.dispose()
+    }
+  }
 }
 
 export function classifyRunFailure(error: unknown): { code: string; retryable: boolean; detail: string } {
@@ -74,6 +112,7 @@ export function classifyRunFailure(error: unknown): { code: string; retryable: b
   if (error instanceof CredentialServiceError) return { code: 'authentication_required', retryable: false, detail: safeFailureDetail(error) }
   if (error instanceof AgentRuntimeError) {
     if (error.code === 'required_tool_unavailable') return { code: 'unsupported_tool', retryable: false, detail: safeFailureDetail(error) }
+    if (error.code === 'conversation_unavailable') return { code: 'conversation_unavailable', retryable: false, detail: safeFailureDetail(error) }
     return { code: 'invalid_output', retryable: false, detail: safeFailureDetail(error) }
   }
   return { code: 'dependency_unavailable', retryable: true, detail: safeFailureDetail(error) }

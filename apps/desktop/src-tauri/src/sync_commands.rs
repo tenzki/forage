@@ -589,6 +589,19 @@ pub async fn server_agent_cancel(
     .await
 }
 
+/// Delete the outline's finished calls and their stored transcripts on the server.
+#[tauri::command]
+pub async fn server_agent_clear_history(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(
+        &state,
+        Method::POST,
+        "agent-runs/clear-history",
+        Some(json!({})),
+        MAX_STATUS_BYTES,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn server_agent_retry(
     state: State<'_, NativeState>,

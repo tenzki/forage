@@ -103,7 +103,7 @@ describe('generateWithPi activity', () => {
     }, { onDelta: vi.fn(), onOutline })
 
     expect(rpc.promptCount).toBe(2)
-    expect(onOutline).toHaveBeenCalledWith([{ text: 'Recovered response' }])
+    expect(onOutline).toHaveBeenCalledWith([{ text: 'Recovered response' }], [])
   })
 
   it('stops after one recovery attempt when Pi keeps returning empty', async () => {
@@ -166,7 +166,17 @@ describe('generateWithPi activity', () => {
       {
         type: 'tool_execution_end',
         toolName: 'emit_outline',
-        result: { details: { action: 'emit_outline', nodes: [{ text: 'Structured response' }] } },
+        result: {
+          details: {
+            action: 'emit_outline',
+            nodes: [{ text: 'Structured response' }],
+            sources: [
+              { url: 'https://example.com/read', label: ' Read page ' },
+              { url: 'not a url', label: 'Broken' },
+              { url: 'https://example.com/unlabeled', label: '' },
+            ],
+          },
+        },
       },
       { type: 'agent_settled', text: 'Fallback response' },
     ]
@@ -177,7 +187,10 @@ describe('generateWithPi activity', () => {
       skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
     }, { onDelta, onOutline })
 
-    expect(onOutline).toHaveBeenCalledWith([{ text: 'Structured response' }])
+    expect(onOutline).toHaveBeenCalledWith(
+      [{ text: 'Structured response' }],
+      [{ url: 'https://example.com/read', label: 'Read page' }],
+    )
     expect(onDelta).not.toHaveBeenCalled()
   })
 

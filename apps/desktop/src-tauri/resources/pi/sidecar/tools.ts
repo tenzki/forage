@@ -19,22 +19,6 @@ interface StoredImage {
   prompt: string
 }
 
-export interface OutlineTextNode {
-  text: string
-  children?: OutlineNode[]
-}
-
-export interface OutlineImageNode {
-  imageId: string
-  imageAlt?: string
-}
-
-export type OutlineNode = OutlineTextNode | OutlineImageNode
-
-export type MaterializedOutline =
-  | { text: string; children?: MaterializedOutline[] }
-  | { type: 'image'; image: { src: string; alt: string } }
-
 export interface CustomToolConfig {
   name: string
   description: string
@@ -213,7 +197,8 @@ export function createWebSearchTool(): ToolDefinition {
   })
 }
 
-export function createWebFetchTool(): ToolDefinition {
+/** Pages read successfully are registered, so the result may cite them. */
+export function createWebFetchTool(sources?: { register(url: string): void }): ToolDefinition {
   return defineTool({
     name: 'web_fetch',
     label: 'Read Webpage',
@@ -223,7 +208,9 @@ export function createWebFetchTool(): ToolDefinition {
       const target = publicUrl(params.url)
       const response = await request(`https://r.jina.ai/${target.toString()}`, signal)
       if (!response.ok) throw new Error(`Webpage reader failed with HTTP ${response.status}.`)
-      return { content: [{ type: 'text', text: bounded(await response.text(), 'Webpage') }], details: {} }
+      const text = bounded(await response.text(), 'Webpage')
+      sources?.register(target.toString())
+      return { content: [{ type: 'text', text }], details: {} }
     },
   })
 }
@@ -248,54 +235,6 @@ export function createImageTool(images: Map<string, StoredImage>): ToolDefinitio
         details: { action: 'generated_image', imageId },
       }
     },
-  })
-}
-
-export function createEmitOutlineTool(images: Map<string, StoredImage>): ToolDefinition {
-  const imageId = Type.String({ pattern: '^img_[a-f0-9]{32}$' })
-  const imageAlt = Type.Optional(Type.String({ minLength: 1, maxLength: 500 }))
-  const ImageNode = Type.Object({ imageId, imageAlt })
-  const TextLeaf = Type.Object({ text: Type.String({ minLength: 1, maxLength: 10_000 }) })
-  const Leaf = Type.Union([TextLeaf, ImageNode])
-  const TextWithChildren = Type.Object({
-    text: Type.String({ minLength: 1, maxLength: 10_000 }),
-    children: Type.Optional(Type.Array(Leaf, { maxItems: 100 })),
-  })
-  const RootNode = Type.Union([TextWithChildren, ImageNode])
-
-  return defineTool({
-    name: 'emit_outline',
-    label: 'Emit Outline',
-    description: 'Return the final answer as structured text or image outline nodes. A generated image must be a separate image-only node using the imageId returned by generate_image.',
-    promptSnippet: 'Emit the final response as nested text nodes and separate generated-image nodes',
-    promptGuidelines: [
-      'Use emit_outline as the final action for every task.',
-      'Emit each generated image as its own image-only node with imageId and imageAlt; never attach it to a text node.',
-    ],
-    parameters: Type.Object({ nodes: Type.Array(RootNode, { minItems: 1, maxItems: 100 }) }),
-    async execute(_toolCallId, params) {
-      const inputNodes = params.nodes as OutlineNode[]
-      return {
-        content: [{ type: 'text', text: `Created ${inputNodes.length} outline node(s).` }],
-        details: { action: 'emit_outline', nodes: materializeOutline(inputNodes, images) },
-        terminate: true,
-      }
-    },
-  })
-}
-
-function materializeOutline(nodes: OutlineNode[], images: Map<string, StoredImage>): MaterializedOutline[] {
-  return nodes.map((node) => {
-    if ('imageId' in node) {
-      const stored = images.get(node.imageId)
-      if (!stored) throw new Error('emit_outline referenced an unknown generated image.')
-      return {
-        type: 'image' as const,
-        image: { src: stored.src, alt: node.imageAlt?.trim() || stored.prompt.slice(0, 500) },
-      }
-    }
-    const children = node.children?.length ? materializeOutline(node.children, images) : undefined
-    return { text: node.text, ...(children ? { children } : {}) }
   })
 }
 

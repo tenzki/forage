@@ -7,6 +7,7 @@ import {
   agentRunAdmissionRequestSchema,
   agentRunAdmissionResponseSchema,
   agentRunCancelResponseSchema,
+  agentInvocationIntentSchema,
   agentRunDetailSchema,
   agentRunListQuerySchema,
   agentRunRetryResponseSchema,
@@ -132,5 +133,31 @@ describe('agent HTTP protocol', () => {
     expect(agentRunCancelResponseSchema.parse({ runId: 'run-1', status: 'cancelled' }).status).toBe('cancelled')
     expect(agentRunRetryResponseSchema.parse({ runId: 'run-2', retryOfRunId: 'run-1', status: 'queued' }).retryOfRunId).toBe('run-1')
     expect(() => agentActivityPageSchema.parse({ events: [], nextCursor: 'x'.repeat(513), status: 'running' })).toThrow()
+  })
+
+  it('carries call conversations in replies and run views, defaulting for older servers', () => {
+    const intent = {
+      version: 2, invocationId: 'invocation-2', sourceNodeId: 'node-1', skillId: 'research',
+      prompt: 'Which part?', acknowledgedOutlineRevision: 3,
+    }
+    expect(agentInvocationIntentSchema.parse(intent).conversation).toBeUndefined()
+    expect(agentInvocationIntentSchema.parse({ ...intent, conversation: { callId: 'run_1', turn: 2 } }).conversation)
+      .toEqual({ callId: 'run_1', turn: 2 })
+    for (const conversation of [{ callId: 'run_1', turn: 1 }, { callId: '../run', turn: 2 }, { callId: 'run_1' }]) {
+      expect(() => agentInvocationIntentSchema.parse({ ...intent, conversation })).toThrow()
+    }
+
+    const run = {
+      id: 'run-2', outlineId: 'outline-1', trigger: 'manual', status: 'completed', skillId: 'research',
+      policyId: null, configurationRevision: 4, attemptCount: 1, retryOfRunId: null,
+      admittedAt: '2026-08-31T10:00:00.000Z', updatedAt: '2026-08-31T10:01:00.000Z', error: null, result: null,
+    }
+    expect(agentRunDetailSchema.parse(run)).toMatchObject({ callId: null, turn: null, answer: null, sourceNodeId: null, prompt: null })
+    expect(agentRunDetailSchema.parse({
+      ...run, callId: 'run_1', turn: 2, answer: 'The moon section.', sourceNodeId: 'node-1', prompt: 'Which part?',
+    })).toMatchObject({ callId: 'run_1', turn: 2, answer: 'The moon section.', sourceNodeId: 'node-1', prompt: 'Which part?' })
+    expect(agentRunDetailSchema.parse({
+      ...run, status: 'failed', error: { code: 'conversation_unavailable', message: 'conversation unavailable', retryable: false },
+    }).error?.code).toBe('conversation_unavailable')
   })
 })
