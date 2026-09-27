@@ -1,5 +1,7 @@
 import {
   localExtensionSnapshotSchema,
+  mcpRunConnectionsSchema,
+  type McpRunConnection,
   type LocalExtensionSnapshot,
 } from '@forage/agent-runtime'
 
@@ -22,6 +24,7 @@ export interface RunPayload {
   outlineSnapshot?: string
   extensionSnapshot?: LocalExtensionSnapshot
   extensionSecrets: Record<string, Record<string, string>>
+  mcpConnections?: McpRunConnection[]
   thread?: RunThread
 }
 
@@ -67,12 +70,13 @@ export function decodePayload(encoded: string): RunPayload {
     prompt: value.prompt.slice(0, 20_000),
     context,
     invocationOutline,
-    enabledToolIds: asStrings(value.enabledToolIds, 50),
-    requiredToolIds: asStrings(value.requiredToolIds, 50),
+    enabledToolIds: asStrings(value.enabledToolIds, 64),
+    requiredToolIds: asStrings(value.requiredToolIds, 64),
     customTools,
     outlineSnapshot,
     extensionSnapshot,
     extensionSecrets: parseExtensionSecrets(value.extensionSecrets),
+    ...(value.mcpConnections === undefined ? {} : { mcpConnections: mcpRunConnectionsSchema.parse(value.mcpConnections) }),
     ...(thread ? { thread } : {}),
   }
 }

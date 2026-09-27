@@ -14,6 +14,11 @@ async function run(runtimeTool: RuntimeTool, sources = new VerifiedSources(), ar
 }
 
 describe('RuntimeTool adapter', () => {
+  it('preserves discovered MCP input schemas rather than exposing an unrestricted object', () => {
+    const inputSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false }
+    const adapted = adaptRuntimeTool({ ...tool(async () => 'ok'), inputSchema }, new VerifiedSources())
+    expect(adapted.parameters).toEqual(inputSchema)
+  })
   it('exposes the tool under its runtime ID and passes the model arguments through', async () => {
     let received: Record<string, unknown> = {}
     const adapted = adaptRuntimeTool(tool(async (args) => { received = args; return 'ok' }), new VerifiedSources())

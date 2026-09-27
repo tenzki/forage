@@ -27,6 +27,7 @@ import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationS
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { ExtensionsSettings } from './ExtensionsSettings'
+import { McpSettings } from './McpSettings'
 import {
   extensionAttentionCount,
   extensionExecutorOptions,
@@ -41,12 +42,13 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-type SettingsView = 'connection' | 'agents' | 'extensions' | 'advanced'
+type SettingsView = 'connection' | 'agents' | 'extensions' | 'mcp' | 'advanced'
 
 const SETTINGS_VIEWS: Array<{ id: SettingsView; label: string }> = [
   { id: 'connection', label: 'Connection' },
   { id: 'agents', label: 'Agents' },
   { id: 'extensions', label: 'Extensions' },
+  { id: 'mcp', label: 'MCP servers' },
   { id: 'advanced', label: 'Advanced' },
 ]
 
@@ -508,6 +510,7 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
         <div hidden={activeView !== 'advanced'} className="settings-view">
           <PiRuntimeSettings />
         </div>
+        {activeView === 'mcp' && <McpSettings />}
 
         {(actionError || storeError) && (
           <p className="settings-error" role="alert">{actionError || storeError}</p>

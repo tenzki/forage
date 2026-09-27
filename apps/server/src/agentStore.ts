@@ -1,5 +1,6 @@
 import {
   activityEventSchema,
+  hasMcpTools,
   portableAgentConfigurationSchema,
   supportedAgentConfigurationSchema,
   computeProfileSchema,
@@ -208,7 +209,7 @@ export class InMemoryAgentStore implements AgentStore {
       triggerIdentity: admission.triggerIdentity, input,
       skillId: input.skill.id, policyId: admission.policyId ?? null,
       configurationRevision: input.configurationRevision, credentialReference: input.credentialRef,
-      status: 'queued', attemptCount: 0, maxAttempts: Math.max(1, Math.min(admission.maxAttempts, 20)),
+      status: 'queued', attemptCount: 0, maxAttempts: hasMcpTools(input.effectiveToolIds) ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)),
       availableAt: now, leaseOwner: null, leaseExpiresAt: null, cancelRequestedAt: null,
       errorCode: null, retryOfRunId: admission.retryOfRunId ?? null,
       invocationId: admission.invocationId ?? null, intentHash: admission.intentHash ?? null,

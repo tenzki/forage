@@ -5,6 +5,7 @@ import {
   parseStructuredResult,
   type ActivityEvent as RuntimeActivityEvent,
   type RunInput,
+  type McpRunConnection,
   type StructuredResultNode,
 } from '@forage/agent-runtime'
 import type { CodexAuthConfig } from './client'
@@ -20,6 +21,7 @@ export interface PiLocalRunnerDependencies {
   generate?: PiGenerate
   assets?: GeneratedAssetIngestor
   resolveExtensionSecrets?: (snapshot: NonNullable<RunInput['localExtensionSnapshot']>) => Promise<Record<string, Record<string, string>>>
+  resolveMcpConnections?: (snapshot: NonNullable<RunInput['mcpSnapshot']>) => Promise<McpRunConnection[]>
 }
 
 export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): LocalRuntimeRunner {
@@ -32,6 +34,9 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
     let text = ''
     const activityWrites: Promise<void>[] = []
     const auth = await dependencies.resolveCredential(input.credentialRef)
+    if (input.mcpSnapshot?.length && !dependencies.resolveMcpConnections) throw new Error('MCP connection resolution is unavailable.')
+    const mcpConnections = input.mcpSnapshot?.length
+      ? await dependencies.resolveMcpConnections!(input.mcpSnapshot) : undefined
     const extensionSecrets = input.localExtensionSnapshot && dependencies.resolveExtensionSecrets
       ? await dependencies.resolveExtensionSecrets(input.localExtensionSnapshot)
       : undefined
@@ -66,6 +71,7 @@ export function createPiLocalRunner(dependencies: PiLocalRunnerDependencies): Lo
       outlineSnapshot: input.outlineSnapshot,
       extensionSnapshot: input.localExtensionSnapshot,
       extensionSecrets,
+      mcpConnections,
       ...(input.thread ? { thread: input.thread } : {}),
       ...(input.invocationOutline ? { invocationOutline: input.invocationOutline } : {}),
     }, {

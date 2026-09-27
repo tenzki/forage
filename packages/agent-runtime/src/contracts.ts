@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { mcpSnapshotSchema } from './mcp'
 import type { ExtensionSkillContextNode } from '@forage/extension-api'
 import {
   extensionExecutorIdSchema,
@@ -320,6 +321,7 @@ export const runInputSchema = z.object({
   customTools: z.array(customToolDefinitionSchema).max(100).optional(),
   outlineSnapshot: z.string().max(500_000).optional(),
   localExtensionSnapshot: localExtensionSnapshotSchema.optional(),
+  mcpSnapshot: mcpSnapshotSchema.optional(),
   thread: runThreadSchema.optional(),
   invocationOutline: z.array(z.string().max(40_000)).max(100).optional(),
 }).strict().superRefine((input, context) => {
@@ -327,6 +329,9 @@ export const runInputSchema = z.object({
     context.addIssue({ code: 'custom', path: ['skill', 'agentId'], message: 'Skill does not reference the snapshotted agent' })
   }
   const effectiveTools = new Set(input.effectiveToolIds)
+  if (input.mcpSnapshot?.some((connection) => connection.environment !== input.executionMode)) {
+    context.addIssue({ code: 'custom', path: ['mcpSnapshot'], message: 'MCP connections belong to the execution environment' })
+  }
   for (const requiredToolId of input.skill.requiredToolIds) {
     if (!effectiveTools.has(requiredToolId)) {
       context.addIssue({

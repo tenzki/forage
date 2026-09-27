@@ -19,7 +19,7 @@ export function adaptRuntimeTool(tool: RuntimeTool, sources: VerifiedSources): T
     name: tool.id,
     label: tool.name,
     description: tool.description,
-    parameters: Type.Object({}, { additionalProperties: true }),
+    parameters: tool.inputSchema ? Type.Unsafe(tool.inputSchema) : Type.Object({}, { additionalProperties: true }),
     async execute(_toolCallId, params, signal) {
       const toolSignal = signal ?? new AbortController().signal
       let output: unknown

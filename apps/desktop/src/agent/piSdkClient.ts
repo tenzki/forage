@@ -4,7 +4,8 @@ import { extensionLogEntrySchema, extensionProgressSchema } from '@forage/agent-
 
 const STDERR_LIMIT = 16_000
 const STDOUT_LINE_LIMIT = 8_000_000
-const ABORT_GRACE_MS = 1_500
+// MCP stdio cleanup can use two 2-second termination grace periods.
+const ABORT_GRACE_MS = 6_500
 
 export type PiRpcEvent = Record<string, unknown> & { type: string }
 

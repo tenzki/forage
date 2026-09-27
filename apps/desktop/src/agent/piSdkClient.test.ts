@@ -112,7 +112,7 @@ describe('Pi SDK startup', () => {
     await vi.runAllTicks()
     await starting
     await client.abort()
-    await vi.advanceTimersByTimeAsync(1_501)
+    await vi.advanceTimersByTimeAsync(6_501)
     expect(childKill).toHaveBeenCalledTimes(1)
     await client.stop()
     vi.useRealTimers()

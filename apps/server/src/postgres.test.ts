@@ -546,6 +546,18 @@ describePostgres('PostgreSQL server repository', () => {
     const emitOutline = (texts: string[]) => fauxAssistantMessage(fauxToolCall('emit_outline', {
       nodes: texts.map((text) => ({ text })), sources: [],
     }))
+
+    it('admits MCP runs with one attempt and does not recover their expired leases by replaying', async () => {
+      const f = await conversationFixture([{ id: `mcp_s_${'a'.repeat(48)}`, name: 'MCP', description: 'External tool', execute: async () => 'ok' }])
+      try {
+        const admitted = await f.admit('mcp-run', { callId: 'mcp-run', turn: 1 })
+        expect(admitted.maxAttempts).toBe(1)
+        const now = new Date(Date.now() + 2_000)
+        expect(await f.repository.agentStore.claimNext('worker-mcp', now, 1_000)).toMatchObject({ id: 'mcp-run', attemptCount: 1 })
+        expect(await f.repository.agentStore.claimNext('other-worker', new Date(now.getTime() + 2_000), 1_000)).toBeNull()
+        expect(await f.repository.agentStore.getRun(f.bootstrap.outlineId, 'mcp-run')).toMatchObject({ status: 'failed', maxAttempts: 1, attemptCount: 1 })
+      } finally { await rm(f.tempRoot, { recursive: true, force: true }) }
+    })
     const userMessages = (context: Context) => context.messages.filter((message) => message.role === 'user')
 
     it('resumes a call from stored turns on another worker, redacting credentials and removing temporary files', async () => {

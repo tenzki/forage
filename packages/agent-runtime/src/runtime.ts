@@ -21,6 +21,7 @@ export interface RuntimeTool {
   id: string
   name: string
   description: string
+  inputSchema?: Record<string, unknown>
   execute: (arguments_: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>
 }
 

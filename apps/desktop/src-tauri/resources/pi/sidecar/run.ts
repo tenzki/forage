@@ -1,6 +1,7 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { AgentRuntimeError, isAbortError } from '@forage/agent-runtime'
+import { mcpSecretValues, openMcpTools } from '@forage/mcp-host'
 import {
   ExtensionConfigurationStore,
   acquireManagedRevisionLeases,
@@ -42,14 +43,24 @@ type ExtensionOutcome = 'completed' | 'failed' | 'cancelled'
  * protocol. Always ends with exactly one `agent_settled` or `process_error` event.
  */
 export async function runCommand(encodedPayload: string, dependencies: RunCommandDependencies): Promise<void> {
-  const { emit, signal } = dependencies
+  const { emit: emitEvent, signal } = dependencies
+  // The desktop may terminate this sidecar as soon as it sees a terminal event.
+  // Release MCP subprocesses before publishing that event.
+  let terminalEvent: unknown
+  const emit = (value: unknown) => {
+    const type = (value as { type?: string } | null)?.type
+    if (type === 'agent_settled' || type === 'process_error') terminalEvent = value
+    else emitEvent(value)
+  }
   let currentSecrets: string[] = [dependencies.accessToken]
   let finishExtensions: ((outcome: ExtensionOutcome) => Promise<void>) | undefined
   let extensionOutcome: ExtensionOutcome = 'failed'
+  let mcp: Awaited<ReturnType<typeof openMcpTools>> | undefined
 
   try {
     const payload = decodePayload(encodedPayload)
     currentSecrets = currentSecrets.concat(Object.values(payload.extensionSecrets).flatMap((secrets) => Object.values(secrets)))
+    currentSecrets.push(...(payload.mcpConnections ?? []).flatMap(({ config }) => mcpSecretValues(config)))
     const knownSecrets = currentSecrets
     const outlineSnapshot = parseOutlineSnapshot(payload.outlineSnapshot)
     const generatedImages = new Map<string, { src: string; prompt: string }>()
@@ -116,6 +127,7 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
       }
     }
 
+    mcp = await openMcpTools(payload.mcpConnections ?? [], payload.enabledToolIds, signal)
     const outcome = await runPiTurn(turnRequest(payload), {
       modelRuntime: dependencies.modelRuntime,
       model: dependencies.model,
@@ -127,6 +139,7 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
         ...extensionTools,
       ],
       images: generatedImages,
+      runtimeTools: mcp.tools,
       conversation: createFileConversationStore(conversationDirectory(dependencies.agentDir)),
       onSessionEvent: forwardSessionEvent,
     }, { signal, agentDir: dependencies.agentDir })
@@ -147,11 +160,13 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
       emit({ type: 'process_error', error: sanitizeExtensionText(errorMessage(error), currentSecrets) })
     }
   } finally {
+    await mcp?.close()
     if (finishExtensions) {
       try { await finishExtensions(extensionOutcome) } catch (error) {
         process.stderr.write(`[forage-extension] run:end failed: ${sanitizeExtensionText(errorMessage(error), currentSecrets)}\n`)
       }
     }
+    if (terminalEvent) emitEvent(terminalEvent)
   }
 }
 

@@ -5,7 +5,9 @@ import {
   type LocalRunResult,
   type ModelAdapter,
   type RuntimeTool,
+  type McpRunConnection,
 } from '@forage/agent-runtime'
+import { openMcpTools } from '@forage/mcp-host'
 import { CONVERSATION_UNAVAILABLE } from '@forage/pi-runtime'
 import type { AgentRunRecord, CallTurnEntries } from './agentStore.js'
 import { AgentStoreError } from './agentStore.js'
@@ -32,6 +34,7 @@ export interface ServerAgentRunnerOptions {
   modelFactory?: (credential: ResolvedModelCredential, run: AgentRunRecord) => ModelAdapter
   /** Where a reply's temporary session file is written; the OS temp directory by default. */
   conversationTempRoot?: string
+  mcpConnections?: McpRunConnection[]
 }
 
 export class ServerAgentRunner {
@@ -40,6 +43,7 @@ export class ServerAgentRunner {
   async execute(run: AgentRunRecord): Promise<void> {
     const controller = new AbortController()
     let leaseLost = false
+    let mcp: Awaited<ReturnType<typeof openMcpTools>> | undefined
     const renew = async (): Promise<void> => {
       try {
         const state = await this.options.repository.agentStore.renewLease(
@@ -54,7 +58,18 @@ export class ServerAgentRunner {
     try {
       const credential = await this.options.credentials.resolve(run.credentialReference, run.ownerId, run.outlineId)
       const tools = typeof this.options.tools === 'function' ? this.options.tools(run, credential) : this.options.tools
-      const { result, turn } = await this.runEngine(run, credential, tools, controller.signal)
+      if (run.input.mcpSnapshot?.length) {
+        if (this.options.engine === 'legacy') throw new AgentRuntimeError('mcp_unavailable', 'MCP tools require the Pi agent engine.')
+        const connections = run.input.mcpSnapshot.map((connection) => {
+          const current = this.options.mcpConnections?.find((candidate) => candidate.connection.id === connection.id)
+          if (!current) throw new AgentRuntimeError('mcp_unavailable', 'An admitted MCP connection is no longer available.')
+          return { connection, config: current.config }
+        })
+        mcp = await openMcpTools(connections, run.input.effectiveToolIds, controller.signal)
+      } else if (run.input.effectiveToolIds.some((id) => id.startsWith('mcp_'))) {
+        throw new AgentRuntimeError('mcp_unavailable', 'MCP inventory was not captured for this run. Start a new run.')
+      }
+      const { result, turn } = await this.runEngine(run, credential, [...tools, ...(mcp?.tools ?? [])], controller.signal)
       await renew()
       if (leaseLost || controller.signal.aborted) throw controller.signal.reason ?? new Error('lease_lost')
       await this.options.repository.commitAgentResult(run.id, this.options.workerId, result, turn)
@@ -79,7 +94,7 @@ export class ServerAgentRunner {
       } catch (settleError) {
         if (!(settleError instanceof AgentStoreError && settleError.code === 'lease_lost')) throw settleError
       }
-    } finally { clearInterval(interval) }
+    } finally { clearInterval(interval); await mcp?.close() }
   }
 
   private async runEngine(

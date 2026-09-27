@@ -18,7 +18,7 @@
     "build:website": "pnpm --filter @forage/website build",
     "typecheck:website": "pnpm --filter @forage/website typecheck",
     "test": "pnpm test:extensions && vitest run --reporter=verbose",
-    "test:extensions": "turbo run test --filter=@forage/extension-api --filter=@forage/extension-host --filter=@forage/extension-system-one --filter=@forage/extension-image-generation --filter=@forage/extensions --filter=@forage/pi-runtime --filter=forage-sidecar",
+    "test:extensions": "turbo run test --filter=@forage/extension-api --filter=@forage/extension-host --filter=@forage/extension-system-one --filter=@forage/extension-image-generation --filter=@forage/extensions --filter=@forage/pi-runtime --filter=@forage/mcp-host --filter=forage-sidecar",
     "test:workspace": "node --test scripts/*.test.mjs"
   },
   "pnpm": {

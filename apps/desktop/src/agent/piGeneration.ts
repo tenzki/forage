@@ -2,7 +2,7 @@ import { resolveCodexAuth, type CodexAuthConfig, type GenerateInput, type Genera
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
 import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
 import { safeToolDetail, type ActivityReporter } from './activity'
-import type { LocalExtensionSnapshot, RunThread } from '@forage/agent-runtime'
+import { hasMcpTools, type LocalExtensionSnapshot, type RunThread, type McpRunConnection } from '@forage/agent-runtime'
 
 export type PiOutlineNode =
   | { text: string; children?: PiOutlineNode[] }
@@ -31,6 +31,7 @@ interface RunPayload {
   outlineSnapshot?: string
   extensionSnapshot?: LocalExtensionSnapshot
   extensionSecrets?: Record<string, Record<string, string>>
+  mcpConnections?: McpRunConnection[]
   /** The call conversation turn; replies resume the call's stored session. */
   thread?: RunThread
   invocationOutline?: string[]
@@ -43,6 +44,7 @@ export async function generateWithPi(
     outlineSnapshot?: string
     extensionSnapshot?: LocalExtensionSnapshot
     extensionSecrets?: Record<string, Record<string, string>>
+    mcpConnections?: McpRunConnection[]
     thread?: RunThread
     invocationOutline?: string[]
   },
@@ -53,6 +55,8 @@ export async function generateWithPi(
   const allowedTools = new Set(input.agent?.toolIds ?? [])
   const enabledToolIds = (input.enabledToolIds ?? []).filter((id) => allowedTools.has(id))
   const enabledSet = new Set(enabledToolIds)
+  const mcpLabels = new Map((input.mcpConnections ?? []).flatMap(({ connection }) => connection.tools
+    .map((tool) => [tool.id, `${connection.name} · ${tool.name}`.slice(0, 200)] as const)))
   const customTools = (input.customTools ?? [])
     .filter((tool) => enabledSet.has(tool.id))
     .map(({ name, description, urlTemplate }) => ({ name, description, urlTemplate }))
@@ -90,10 +94,10 @@ export async function generateWithPi(
         id: toolId,
         phase: 'start',
         kind: 'tool',
-        label: extensionActivityLabel(event, toolName),
+        label: mcpLabels.get(toolName) ?? extensionActivityLabel(event, toolName),
         detail: extensionActivityDetail(event, detail),
       })
-      options.onToolActivity?.([`${toolName}: ${detail}`])
+      options.onToolActivity?.([`${mcpLabels.get(toolName) ?? toolName}: ${detail}`])
     }
     if (event.type === 'tool_execution_end' && typeof event.toolName === 'string') {
       const toolId = typeof event.toolCallId === 'string' ? `tool-${event.toolCallId}` : undefined
@@ -104,7 +108,7 @@ export async function generateWithPi(
         id: toolId ?? `tool-${event.toolName}`,
         phase: event.isError ? 'error' : 'complete',
         kind: 'tool',
-        label: extensionActivityLabel(event, event.toolName),
+        label: mcpLabels.get(event.toolName) ?? extensionActivityLabel(event, event.toolName),
         detail: extensionActivityDetail(event, startDetail ? `${startDetail} · ${outcome}` : outcome),
       })
     }
@@ -173,10 +177,12 @@ export async function generateWithPi(
       outlineSnapshot: input.outlineSnapshot,
       extensionSnapshot: input.extensionSnapshot,
       extensionSecrets: input.extensionSecrets,
+      mcpConnections: input.mcpConnections,
       ...(input.thread ? { thread: input.thread } : {}),
       ...(input.invocationOutline ? { invocationOutline: input.invocationOutline } : {}),
     })
-    for (let attempt = 0; attempt < 2 && !outline && !text; attempt += 1) {
+    const attempts = hasMcpTools(enabledToolIds) ? 1 : 2
+    for (let attempt = 0; attempt < attempts && !outline && !text; attempt += 1) {
       const settled = client.waitForSettled()
       await client.prompt(payload)
       await settled
@@ -186,7 +192,7 @@ export async function generateWithPi(
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
     if (!outline && !text) {
       const stderr = client.getStderr().trim()
-      throw new Error(`The agent finished without producing a response after one retry.${stderr ? ` ${stderr}` : ''}`)
+      throw new Error(`${attempts === 1 ? 'The agent finished without producing a response. It was not retried because MCP tools may have changed external data.' : 'The agent finished without producing a response after one retry.'}${stderr ? ` ${stderr}` : ''}`)
     }
     return text
   } finally {

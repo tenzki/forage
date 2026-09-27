@@ -124,7 +124,8 @@ export async function runPiTurn(
   })
   if (followUp && !adapters.conversation) throw new AgentRuntimeError('conversation_unavailable', CONVERSATION_UNAVAILABLE)
 
-  const activity = new ActivityMapper(request.runId, adapters.onActivity)
+  const activity = new ActivityMapper(request.runId, adapters.onActivity,
+    new Map(tools.filter((tool) => tool.name.startsWith('mcp_')).map((tool) => [tool.name, tool.label])))
   const promptInput = { ...request, followUp }
   let conversation: ConversationTurn | undefined
   let session: AgentSession | undefined
@@ -149,7 +150,7 @@ export async function runPiTurn(
       model: adapters.model,
       modelRuntime: adapters.modelRuntime,
       sessionManager: conversation?.sessionManager ?? SessionManager.inMemory(cwd),
-      settingsManager: SettingsManager.inMemory(),
+      settingsManager: SettingsManager.inMemory(hasMcpTools(request.effectiveToolIds) ? { retry: { enabled: false } } : {}),
       resourceLoader: loader,
       noTools: 'all',
       tools: tools.map((tool) => tool.name),
@@ -225,3 +226,4 @@ export class ModelProviderError extends Error {
 function abortError(): DOMException {
   return new DOMException('Agent run cancelled.', 'AbortError')
 }
+import { hasMcpTools } from '@forage/agent-runtime'

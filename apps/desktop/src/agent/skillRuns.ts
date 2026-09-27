@@ -1,9 +1,9 @@
 // Starting skill runs from outside the slash menu.
 //
-// The slash menu owns everything a run needs (settings, credentials, the
-// extension inventory), so other surfaces — the reader peek's "Summarize into
-// outline" and the activity panel's steering box — ask it to run a skill through
-// a window event instead of duplicating that plumbing.
+// Editor surfaces forward these requests to the skill execution service, which
+// owns settings, credentials, tool admission, and local/backend routing. The
+// window event supplies the active editor for reader and activity-panel actions;
+// it carries no execution configuration or credentials.
 
 import type { SkillCallGroup } from './skillCalls'
 

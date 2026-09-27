@@ -31,7 +31,7 @@
           "cmd": "node",
           "sidecar": false,
           "args": [
-            { "validator": "^.+sidecar/dist/(?:index|management|executor)\\.mjs$" }
+            { "validator": "^.+sidecar/dist/(?:index|management|mcp-management|executor)\\.mjs$" }
           ]
         },
         {

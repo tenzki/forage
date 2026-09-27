@@ -14,6 +14,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@forage/mcp-host": "workspace:*",
     "@fastify/websocket": "^11.3.0",
     "@forage/agent-runtime": "workspace:*",
     "@forage/document": "workspace:*",

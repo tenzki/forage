@@ -60,6 +60,7 @@ export interface ServerOptions {
   logger?: FastifyServerOptions['logger']
   credentialService?: ServerCredentialService
   supportedAgentToolIds?: string[]
+  mcpInventory?: McpConnection[]
   agentMaxAttempts?: number
   workerAvailable?: boolean
   /** The worker's agent engine; replies to calls need `pi`, which keeps their transcripts. */
@@ -170,6 +171,13 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const current = await repository.agentStore.currentConfiguration(principal.outlineId)
       if (!current) throw new RepositoryError('conflict', 'No server agent configuration has been published.')
       return agentConfigurationResponseSchema.parse(current)
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.get('/api/v1/outlines/:outlineId/mcp-inventory', async (request, reply) => {
+    try {
+      await authorizeOutline(repository, request.headers.authorization, 'agents:read', request.params)
+      return mcpInventorySchema.parse(options.mcpInventory ?? [])
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -712,6 +720,7 @@ function buildInputFromConfiguration(
   return {
     ...base, configurationRevision: configuration.revision, credentialRef,
     agent: { ...agent, modelId: modelId ?? '', credentialRef }, skill, effectiveToolIds,
+    mcpSnapshot: selectMcpSnapshot(options.mcpInventory ?? [], effectiveToolIds),
     customTools: configuration.customTools,
   }
 }
@@ -792,3 +801,4 @@ function sendError(reply: { code: (status: number) => { send: (body: unknown) =>
   }
   throw error
 }
+import { mcpInventorySchema, selectMcpSnapshot, type McpConnection } from '@forage/agent-runtime'

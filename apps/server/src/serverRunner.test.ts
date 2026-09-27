@@ -5,8 +5,10 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { discoverMcp } from '@forage/mcp-host'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ModelAdapter, RunInput } from '@forage/agent-runtime'
+import type { ModelAdapter, RunInput, McpRunConnection } from '@forage/agent-runtime'
 import {
   fauxAssistantMessage, fauxText, fauxToolCall, scriptedModel, type FauxResponseStep,
 } from '@forage/pi-runtime/test-support'
@@ -60,6 +62,7 @@ async function bootstrapSeeded(repository: InMemoryServerRepository, email = 'ow
 type CredentialKind = ResolvedModelCredential['provider']
 
 interface FixtureOptions {
+  mcpConnections?: McpRunConnection[]
   engine?: AgentEngine
   targetParentId?: string
   credentialKind?: CredentialKind
@@ -94,12 +97,14 @@ async function fixture(options: FixtureOptions = {}) {
     agent: { id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: options.toolIds ?? [] },
     skill: { id: 'skill', label: 'skill', description: 'Skill', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] },
     effectiveToolIds: options.toolIds ?? [], prompt: 'Run.', context: [],
+    ...(options.mcpConnections ? { mcpSnapshot: options.mcpConnections.map(({ connection }) => connection) } : {}),
   }
   const trigger = options.trigger ?? 'manual'
   await repository.agentStore.admitRun({ input, ownerId: bootstrap.ownerId, trigger, triggerIdentity: `${trigger}:1`, maxAttempts: 2 })
   // The Pi engine builds the real model runtime for the credential, then answers from a script.
   const models: Array<{ provider: string; id: string }> = []
   const runner = new ServerAgentRunner({
+    mcpConnections: options.mcpConnections,
     repository, credentials, tools: options.tools?.(repository) ?? [], workerId: 'worker', leaseMs: 30_000,
     engine: options.engine ?? 'pi',
     piModelFactory: async (credential, run) => {
@@ -115,6 +120,29 @@ async function fixture(options: FixtureOptions = {}) {
 function emitOutline(nodes: unknown[], sources: Array<{ url: string; label: string }> = []) {
   return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes, sources }))
 }
+
+describe('backend MCP execution', () => {
+  it('runs a discovered tool through Pi and commits the resulting outline with one attempt', async () => {
+    const config = { command: process.execPath, args: [fileURLToPath(new URL('../../../packages/mcp-host/tests/fixture.mjs', import.meta.url))], env: { MCP_FIXTURE_STDIO: '1' } }
+    const connection = await discoverMcp({ id: 'custom', name: 'Custom', environment: 'server' }, config)
+    const tool = connection.tools[0]!
+    const { repository, runner, bootstrap } = await fixture({
+      mcpConnections: [{ connection, config }], toolIds: [tool.id], responses: [
+        fauxAssistantMessage(fauxToolCall(tool.id, { message: 'Backend MCP worked' })),
+        (context) => {
+          expect(JSON.stringify(context.tools)).toContain('message')
+          expect(JSON.stringify(context.messages.filter((message) => message.role === 'toolResult'))).toContain('Backend MCP worked')
+          return emitOutline([{ text: 'Backend MCP worked' }])
+        },
+      ],
+    })
+    const claimed = await repository.agentStore.claimNext('worker', new Date(), 30_000)
+    expect(claimed?.maxAttempts).toBe(1)
+    await runner.execute(claimed!)
+    expect(await repository.agentStore.getRun(bootstrap.outlineId, 'run-1')).toMatchObject({ status: 'completed', attemptCount: 1 })
+    expect(await repository.agentStore.output('run-1')).toMatchObject({ result: { nodes: [{ text: 'Backend MCP worked' }] } })
+  })
+})
 
 describe.each(['openai', 'openai-codex'] as const)('server agent runner on Pi with an %s credential', (credentialKind) => {
   it('runs a claimed immutable snapshot and commits agent-origin output exactly once', async () => {

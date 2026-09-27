@@ -84,6 +84,16 @@ describe('generateWithPi authentication', () => {
 })
 
 describe('generateWithPi activity', () => {
+  it('does not replay an empty turn when MCP tools may have external effects', async () => {
+    rpc.emitDefaultText = false
+    rpc.promptEvents = [{ type: 'agent_settled' }]
+    const id = `mcp_l_${'a'.repeat(48)}`
+    await expect(generateWithPi({ mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test' }, {
+      skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [id],
+      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: 'Help', toolIds: [id] },
+    }, { onDelta: vi.fn() })).rejects.toThrow('not retried')
+    expect(rpc.promptCount).toBe(1)
+  })
   it('retries once when Pi settles without text or an outline', async () => {
     const onOutline = vi.fn()
     rpc.emitDefaultText = false

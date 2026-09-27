@@ -17,7 +17,8 @@ export class ActivityMapper {
   private readonly thinkingId: string
   private readonly toolDetails = new Map<string, string>()
 
-  constructor(runId: string, private readonly emit: (event: ActivityEvent) => void = () => undefined) {
+  constructor(runId: string, private readonly emit: (event: ActivityEvent) => void = () => undefined,
+    private readonly toolLabels: ReadonlyMap<string, string> = new Map()) {
     this.thinkingId = boundedActivityId(`thinking-${runId}`, 1)
   }
 
@@ -39,7 +40,7 @@ export class ActivityMapper {
           callId: this.toolId(event.toolCallId),
           phase: 'start',
           kind: 'tool',
-          label: label(event.toolName),
+          label: label(this.toolLabels.get(event.toolName) ?? event.toolName),
           detail: this.toolDetails.get(event.toolCallId),
           status: 'running',
         })
@@ -54,7 +55,7 @@ export class ActivityMapper {
           callId: this.toolId(event.toolCallId),
           phase: event.isError ? 'error' : 'complete',
           kind: 'tool',
-          label: label(event.toolName),
+          label: label(this.toolLabels.get(event.toolName) ?? event.toolName),
           detail: event.isError
             ? `${this.toolDetails.get(event.toolCallId) ?? 'No arguments'}\n${resultText(event.result)}`.slice(0, 2_000)
             : this.toolDetails.get(event.toolCallId),

@@ -27,6 +27,24 @@ function input(runId = 'run-1'): RunInput {
 }
 
 describe('in-memory agent store', () => {
+  it('never retries MCP-enabled runs after failures or expired leases', async () => {
+    const store = new InMemoryAgentStore()
+    const value = input()
+    value.effectiveToolIds.push(`mcp_s_${'a'.repeat(48)}`)
+    const admitted = await store.admitRun({ input: value, trigger: 'manual', triggerIdentity: 'mcp', maxAttempts: 3 })
+    expect(admitted.maxAttempts).toBe(1)
+    const now = new Date()
+    await store.claimNext('worker', now, 1_000)
+    expect(await store.claimNext('other-worker', new Date(now.getTime() + 2_000), 1_000)).toBeNull()
+    expect(await store.getRun(value.outlineId, value.runId)).toMatchObject({ status: 'failed', attemptCount: 1 })
+
+    const second = { ...value, runId: 'mcp-second' }
+    await store.admitRun({ input: second, trigger: 'manual', triggerIdentity: 'mcp-second', maxAttempts: 3 })
+    const later = new Date(Date.now() + 3_000)
+    expect(await store.claimNext('worker', later, 1_000)).toMatchObject({ id: second.runId })
+    await store.fail(second.runId, 'worker', 'dependency_unavailable', true, later, 0)
+    expect(await store.getRun(second.outlineId, second.runId)).toMatchObject({ status: 'failed', attemptCount: 1 })
+  })
   it('publishes immutable configuration and policy revisions with compare-and-swap', async () => {
     const store = new InMemoryAgentStore()
     await expect(store.publishConfiguration('outline-1', 0, configuration)).resolves.toMatchObject({

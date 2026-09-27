@@ -154,6 +154,7 @@ export class InMemoryServerRepository implements ServerRepository {
   private readonly idempotency = new Map<string, IdempotencyRecord>()
   private readonly assets = new Map<string, AssetRecord>()
   private readonly supportedAgentToolIds: string[]
+  private readonly mcpInventory: McpConnection[]
   private readonly credentialAvailable: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
   private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
   private readonly agentMaxAttempts: number
@@ -161,6 +162,7 @@ export class InMemoryServerRepository implements ServerRepository {
   constructor(options: {
     instanceId?: string
     supportedAgentToolIds?: string[]
+    mcpInventory?: McpConnection[]
     credentialAvailable?: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
     dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
     agentMaxAttempts?: number
@@ -168,6 +170,7 @@ export class InMemoryServerRepository implements ServerRepository {
     this.instanceId = options.instanceId ?? `instance_${randomUUID()}`
     this.agentStore = new InMemoryAgentStore()
     this.supportedAgentToolIds = options.supportedAgentToolIds ?? []
+    this.mcpInventory = options.mcpInventory ?? []
     this.credentialAvailable = options.credentialAvailable ?? (async () => false)
     this.dispatcherForAgent = options.dispatcherForAgent
     this.agentMaxAttempts = options.agentMaxAttempts ?? 3
@@ -352,6 +355,7 @@ export class InMemoryServerRepository implements ServerRepository {
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
         credentialRef, agent: resolvedAgent, skill, effectiveToolIds,
+        mcpSnapshot: selectMcpSnapshot(this.mcpInventory, effectiveToolIds),
         prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
         customTools: configuration.customTools,
       }
@@ -670,3 +674,4 @@ export function sameEventContent(left: EventEnvelope, right: EventEnvelope): boo
   })
   return content(left) === content(right)
 }
+import { selectMcpSnapshot, type McpConnection } from '@forage/agent-runtime'

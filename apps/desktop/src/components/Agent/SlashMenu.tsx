@@ -4,68 +4,20 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
-import { isExtensionSkill, type SkillDefinition } from '../../agent/definitions'
-import { resolveAgentContext, resolveExtensionSkillContext, resolveFollowUpContext } from '../../agent/context'
-import {
-  commitExtensionSkillResult,
-  commitStructuredAgentResultInto,
-  currentListItemId,
-  insertAiChildUnder,
-  removeAiList,
-  replaceAiOutput,
-  setCurrentBulletText,
-  writeAiText,
-} from '../../agent/insertIntoEditor'
+import type { SkillDefinition } from '../../agent/definitions'
+import { currentListItemId, setCurrentBulletText } from '../../agent/insertIntoEditor'
 import { focusOrCreateBulletNote } from '../../editor/bulletNote'
 import { activeInternalLinkAtSelection } from '../../editor/internalLinks'
-import {
-  OUTLINE_COMMANDS,
-  type OutlineCommandDefinition,
-} from '../../editor/commandDefinitions'
-import { clearSkillContext, showExtensionSkillContext, showSkillContext, showSkillContextError } from '../../editor/contextPreview'
-import {
-  currentBulletId,
-  setBulletKind,
-  setTodoCompleted,
-} from '../../editor/outlineModel'
+import { OUTLINE_COMMANDS, type OutlineCommandDefinition } from '../../editor/commandDefinitions'
+import { clearSkillContext } from '../../editor/contextPreview'
+import { currentBulletId, setBulletKind, setTodoCompleted } from '../../editor/outlineModel'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ActivityReporter } from '../../agent/activity'
-import { fromRuntimeEvent, runActivityLabel } from '../../agent/activityCalls'
-import {
-  OUTLINE_RUN_SKILL_EVENT,
-  recordReplacedOutput,
-  type SkillRunConversation,
-  type SkillRunRequest,
-  type SkillRunSteering,
-} from '../../agent/skillRuns'
-import {
-  nativeLocalCredentialVault,
-  resolveExtensionExecutorSecretValues,
-  resolveExtensionSecretValues,
-  resolveLocalCredential,
-} from '../../agent/localCredentials'
-import { NativeEventRepository } from '../../persistence/eventStore'
-import { LocalAgentExecutor } from '../../agent/localExecutor'
-import { serverRunManager } from '../../agent/serverRunManager'
-import { serverCallErrorMessage, serverRunFailureMessage } from '../../agent/serverCallErrors'
-import { createPiLocalRunner } from '../../agent/piLocalRunner'
-import { buildOutlineSnapshot } from '../../agent/outlineSnapshot'
-import { BUILTIN_TOOL_OPTIONS } from '../../agent/tools'
-import { setAgentActivity } from '../../editor/outlinerUi'
-import {
-  assertExtensionExecutionLocation,
-  prepareExtensionSkillInvocation,
-  retainPreparedExtensionSkillResult,
-  selectedExtensionExecutor,
-} from '../../agent/extensionSkillInvocation'
-import {
-  createLocalExtensionSnapshotFromCatalog,
-  isLocalAnswerResult,
-  resolveEffectiveToolIds,
-  type ActivityEvent as RuntimeActivityEvent,
-  type RunInput,
-} from '@forage/agent-runtime'
-import { extensionExecutorOptions, extensionToolOptions, useExtensionStore } from '../../store/extensionStore'
+import { OUTLINE_RUN_SKILL_EVENT, type SkillRunConversation, type SkillRunRequest, type SkillRunSteering } from '../../agent/skillRuns'
+import { skillExecution } from '../../agent/skillExecution'
+import { skillAllowsEmptyPrompt, skillInvocationPrompt } from '../../agent/skillPreview'
+
+export { skillAllowsEmptyPrompt, skillInvocationPrompt } from '../../agent/skillPreview'
 
 interface CommandChoice {
   id: string
@@ -95,19 +47,6 @@ function commandChoices(skills: SkillDefinition[]): CommandChoice[] {
       skill,
     })),
   ]
-}
-
-export function skillInvocationPrompt(skill: SkillDefinition, prompt: string | undefined): string {
-  return (isExtensionSkill(skill) ? (prompt ?? '') : (prompt || skill.label)).trim()
-}
-
-export function skillAllowsEmptyPrompt(skill: SkillDefinition, catalog = useExtensionStore.getState().catalog): boolean {
-  if (!isExtensionSkill(skill)) return false
-  return extensionExecutorOptions(catalog).some((option) => (
-    option.available && option.allowEmptyPrompt
-    && option.extensionId === skill.executor.extensionId
-    && option.executorId === skill.executor.executorId
-  ))
 }
 
 function runOutlineCommand(editor: Editor, command: OutlineCommandDefinition): void {
@@ -156,16 +95,7 @@ export function SlashMenu({
   onAfterServerRun?: () => Promise<void>
   onRegisterExtensionCancellation?: (runId: string, cancel: (() => void) | null) => void
 }) {
-  const authMode = useSettingsStore((state) => state.authMode)
-  const localCredentials = useSettingsStore((state) => state.localCredentials)
-  const modelId = useSettingsStore((state) => state.modelId)
-  const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
-  const customTools = useSettingsStore((state) => state.customTools)
-  const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
-  const setOAuthCredential = useSettingsStore((state) => state.setOAuthCredential)
-  const extensionCatalog = useExtensionStore((state) => state.catalog)
-  const extensionConfiguration = useExtensionStore((state) => state.configuration)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [active, setActive] = useState(0)
   const [completedCommand, setCompletedCommand] = useState<CommandChoice | null>(null)
@@ -214,13 +144,10 @@ export function SlashMenu({
 
   useEffect(() => {
     if (!editor) return
-    let previewController: AbortController | null = null
-    let previewTimer: ReturnType<typeof setTimeout> | null = null
+    let cancelPreview: (() => void) | undefined
     const refresh = () => {
-      previewController?.abort()
-      previewController = null
-      if (previewTimer) clearTimeout(previewTimer)
-      previewTimer = null
+      cancelPreview?.()
+      cancelPreview = undefined
       const state = readSlashState(editor)
       const invocationNodeId = currentListItemId(editor)
       if (!editor.isFocused || !state || !invocationNodeId || isDismissed(state)) {
@@ -238,66 +165,32 @@ export function SlashMenu({
         clearSkillContext(editor)
         return
       }
-      try {
-        if (isExtensionSkill(command.skill)) {
-          const extensionSkill = command.skill
-          const option = selectedExtensionExecutor(extensionSkill, extensionCatalog)
-          const prompt = skillInvocationPrompt(extensionSkill, state.prompt)
-          if (!prompt && !option.allowEmptyPrompt) {
-            showExtensionSkillContext(editor, resolveExtensionSkillContext(editor.state.doc, invocationNodeId, prompt))
-            setContextError(null)
-            return
-          }
-          if (!extensionCatalog || !extensionConfiguration) throw new Error('Local extension inventory is unavailable; open Extensions settings and retry.')
-          const context = resolveExtensionSkillContext(editor.state.doc, invocationNodeId, prompt)
-          showExtensionSkillContext(editor, context)
-          setContextError(null)
-          previewController = new AbortController()
-          const signal = previewController.signal
-          previewTimer = setTimeout(() => {
-            void prepareExtensionSkillInvocation({
-              skill: extensionSkill, prompt, doc: editor.state.doc, invocationNodeId,
-              catalog: extensionCatalog, localConfiguration: extensionConfiguration,
-              portableConfigurationRevision: 0, runId: crypto.randomUUID(), signal,
-            }).then(async (prepared) => {
-              if (!signal.aborted && !editor.isDestroyed) showExtensionSkillContext(editor, prepared.context, prepared.admission.plan)
-              await prepared.admission.release()
-            }).catch((error) => {
-              if (signal.aborted || editor.isDestroyed) return
-              const detail = error instanceof Error ? error.message : String(error)
-              setContextError(detail)
-              showSkillContextError(editor, invocationNodeId, detail)
-            })
-          }, 150)
-          return
-        }
-        showSkillContext(editor, resolveAgentContext(editor.state.doc, invocationNodeId))
-        setContextError(null)
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        setContextError(detail)
-        showSkillContextError(editor, invocationNodeId, detail)
-      }
+      cancelPreview = skillExecution.preview({
+        editor, skillId: command.skill.id, prompt: state.prompt, invocationNodeId,
+      }, setContextError)
     }
     const blur = () => {
+      cancelPreview?.()
+      cancelPreview = undefined
       setContextError(null)
       clearSkillContext(editor)
     }
+    const unsubscribeAvailability = skillExecution.subscribeAvailability(refresh)
     refresh()
     editor.on('selectionUpdate', refresh)
     editor.on('update', refresh)
     editor.on('focus', refresh)
     editor.on('blur', blur)
     return () => {
-      previewController?.abort()
-      if (previewTimer) clearTimeout(previewTimer)
+      cancelPreview?.()
+      unsubscribeAvailability()
       editor.off('selectionUpdate', refresh)
       editor.off('update', refresh)
       editor.off('focus', refresh)
       editor.off('blur', blur)
       clearSkillContext(editor)
     }
-  }, [editor, skills, menu, completedCommand, active, extensionCatalog, extensionConfiguration])
+  }, [editor, skills, menu, completedCommand, active])
 
   useEffect(() => {
     if (!editor || !menu || matches.length === 0) return
@@ -407,366 +300,11 @@ export function SlashMenu({
       setCompletedCommand(null)
       setMenu(null)
     }
-    if (isExtensionSkill(skill)) {
-      const runId = crypto.randomUUID()
-      const controller = new AbortController()
-      const callLabel = runActivityLabel(skill.label, prompt)
-      onRegisterExtensionCancellation?.(runId, () => controller.abort(new DOMException('Extension skill cancelled by the user.', 'AbortError')))
-      onError(null)
-      onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, ...(prompt ? { detail: prompt } : {}) })
-      void (async () => {
-        const startedAt = Date.now()
-        const repository = new NativeEventRepository()
-        let prepared: Awaited<ReturnType<typeof prepareExtensionSkillInvocation>> | null = null
-        try {
-          assertExtensionExecutionLocation(await repository.storageMode())
-          if (!extensionCatalog || !extensionConfiguration) await useExtensionStore.getState().refresh()
-          const current = useExtensionStore.getState()
-          prepared = await prepareExtensionSkillInvocation({
-            skill, prompt, doc: editor.state.doc, invocationNodeId,
-            catalog: current.catalog, localConfiguration: current.configuration,
-            portableConfigurationRevision: 0, runId, signal: controller.signal,
-          })
-          showExtensionSkillContext(editor, prepared.context, prepared.admission.plan)
-          const identity = await repository.identity()
-          const activeConfiguration = useExtensionStore.getState().configuration
-          if (!activeConfiguration) throw new Error('Extension configuration is unavailable; refresh Extensions settings and retry.')
-          const secrets = await resolveExtensionExecutorSecretValues(
-            prepared.admission.executorSnapshot,
-            activeConfiguration,
-            nativeLocalCredentialVault,
-          )
-          let logSequence = 0
-          const result = await retainPreparedExtensionSkillResult(prepared, {
-            repository,
-            runId,
-            outlineId: identity.outlineId,
-            invocationNodeId,
-            secrets,
-            signal: controller.signal,
-            onProgress: (progress) => onActivity?.({
-              id: `progress-${runId}`,
-              callId: runId,
-              phase: 'start',
-              kind: 'thinking',
-              label: progress.message,
-              ...(progress.completed === undefined ? {} : {
-                detail: progress.total === undefined
-                  ? `${progress.completed} complete`
-                  : `${progress.completed} of ${progress.total} complete`,
-              }),
-              nodeId: invocationNodeId,
-            }),
-            onLog: (entry) => {
-              if (entry.level === 'debug') return
-              logSequence += 1
-              onActivity?.({
-                id: `extension-log-${runId}-${logSequence}`,
-                callId: runId,
-                phase: entry.level === 'error' ? 'error' : 'complete',
-                kind: entry.level === 'error' ? 'error' : 'thinking',
-                label: entry.message,
-                nodeId: invocationNodeId,
-              })
-            },
-          })
-          let resultNodeIds: string[] = []
-          try {
-            resultNodeIds = commitExtensionSkillResult(
-              editor,
-              invocationNodeId,
-              skill.label,
-              runId,
-              result,
-              prepared.admission.plan.admittedReferenceIds,
-            )
-            await repository.placeAgentRunResult(runId, new Date().toISOString())
-          } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error)
-            onActivity?.({
-              id: runId,
-              phase: 'complete',
-              kind: 'skill',
-              label: callLabel,
-              detail,
-              nodeId: invocationNodeId,
-              placementPending: true,
-              durationMs: Date.now() - startedAt,
-            })
-            onActivity?.({
-              id: `placement-${runId}`,
-              callId: runId,
-              phase: 'complete',
-              kind: 'output',
-              label: 'Result retained — select a bullet and choose Place here',
-              detail,
-            })
-            onError('The extension result was retained because placement could not be finalized.')
-            return
-          }
-          const resultNodeId = resultNodeIds[0]
-          if (resultNodeId) {
-            onActivity?.({
-              id: `outline-${runId}`,
-              callId: runId,
-              phase: 'complete',
-              kind: 'output',
-              label: 'Outline updated',
-              nodeId: resultNodeId,
-            })
-          }
-          onActivity?.({
-            id: runId,
-            phase: 'complete',
-            kind: 'skill',
-            label: callLabel,
-            nodeId: invocationNodeId,
-            placementPending: false,
-            durationMs: Date.now() - startedAt,
-          })
-          clearSkillContext(editor)
-          setContextError(null)
-        } finally {
-          await prepared?.admission.release()
-          onRegisterExtensionCancellation?.(runId, null)
-        }
-      })().catch((error) => {
-        const detail = error instanceof Error ? error.message : String(error)
-        const cancelled = controller.signal.aborted
-          || (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError')
-        onActivity?.({
-          id: runId,
-          phase: cancelled ? 'cancelled' : 'error',
-          kind: 'skill',
-          label: callLabel,
-          ...(cancelled ? {} : { detail }),
-          nodeId: invocationNodeId,
-        })
-        if (cancelled) {
-          onError(null)
-          clearSkillContext(editor)
-          setContextError(null)
-        } else {
-          onError(detail)
-          showSkillContextError(editor, invocationNodeId, detail)
-          setContextError(detail)
-        }
-      })
-      setMenu(null)
-      return
-    }
-    const agent = agents.find((candidate) => candidate.id === skill.agentId)
-    if (!agent) {
-      onError(`The agent assigned to /${skill.label} no longer exists.`)
-      return
-    }
-    onError(null)
-    // A reply resumes the call's conversation; its outline changes only if it ends with a revision.
-    const followUp = Boolean(conversation && conversation.turn > 1)
-    const contextSnapshot = followUp ? null : resolveAgentContext(editor.state.doc, invocationNodeId)
-    const repository = new NativeEventRepository()
-    // One call id per run keeps every event of this invocation in a single sidebar group.
-    const runId = crypto.randomUUID()
-    const startedAt = Date.now()
-    const callLabel = runActivityLabel(skill.label, steering?.basePrompt ?? prompt)
-    let localOutputNodeId: string | null = null
-    // A reply joins its call's thread at once, before the run is admitted.
-    onActivity?.({
-      id: runId,
-      phase: 'start',
-      kind: 'skill',
-      label: callLabel,
-      nodeId: invocationNodeId,
-      ...(prompt ? { detail: steering?.basePrompt ?? prompt } : {}),
-      ...(steering ? { note: steering.note } : {}),
-      ...(followUp && conversation ? { thread: { callId: conversation.callId, turn: conversation.turn } } : {}),
+    const handle = skillExecution.execute({ editor, skillId: skill.id, prompt, invocationNodeId, steering, conversation }, {
+      onError, onActivity, onContextError: setContextError, onBeforeServerRun, onAfterServerRun,
     })
-    let serverRun = false
-    void (async () => {
-      const followUpContext = followUp ? resolveFollowUpContext(editor.state.doc, invocationNodeId) : null
-      const context = followUpContext?.context ?? contextSnapshot!
-      const mode = await repository.storageMode()
-      if (mode === 'server') {
-        serverRun = true
-        await onBeforeServerRun?.()
-        const connection = await repository.serverConnection()
-        if (!connection) throw new Error('Server mode is not configured.')
-        const sync = await repository.syncState(connection.outlineId)
-        // A reply resumes the server call; the server resolves its context. A call
-        // whose first turn never completed has nothing to resume and starts over.
-        const handle = await serverRunManager.invoke({
-          version: 2, invocationId: runId, sourceNodeId: invocationNodeId,
-          skillId: skill.id, prompt: prompt || skill.label,
-          acknowledgedOutlineRevision: sync.lastPulledRevision,
-          ...(followUp && conversation ? { conversation: { callId: conversation.callId, turn: conversation.turn } } : {}),
-        }, onActivity, { label: callLabel, ...(steering ? { note: steering.note } : {}) })
-        onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
-        const completed = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
-        if (completed.status === 'failed') throw new Error(serverRunFailureMessage(completed))
-        if (completed.status === 'cancelled' || completed.status === 'interrupted') {
-          throw new DOMException('The server run was cancelled.', 'AbortError')
-        }
-        if (completed.status === 'completed_unplaced') {
-          onActivity?.({
-            id: `placement-${runId}`, callId: runId, phase: 'error', kind: 'output',
-            label: 'Result needs a destination',
-            detail: 'The bullet this run wrote to was removed. The output is kept on the server.',
-            nodeId: invocationNodeId,
-          })
-        } else if (!completed.answer) {
-          // The server committed the result, or the revision replacing the previous
-          // version, as one outline event; pull it now.
-          await onAfterServerRun?.()
-        }
-        onActivity?.({
-          id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
-          durationMs: Date.now() - startedAt, ...(completed.answer ? { answer: completed.answer } : {}),
-        })
-        return
-      }
-
-      const provider = authMode === 'subscription' ? 'openai-codex' : 'openai'
-      const credential = localCredentials.find((candidate) => candidate.provider === provider && candidate.status === 'connected')
-      if (!credential) throw new Error(authMode === 'subscription'
-        ? 'Not signed in to ChatGPT. Open Settings and connect your subscription.'
-        : 'No OpenAI API key set. Open Settings and add your API key.')
-      const identity = await repository.identity()
-      if (!extensionCatalog || !extensionConfiguration) {
-        await useExtensionStore.getState().refresh()
-      }
-      const currentExtensionState = useExtensionStore.getState()
-      if (!currentExtensionState.catalog || !currentExtensionState.configuration) {
-        throw new Error('Local extension inventory is unavailable; open Extensions settings and retry.')
-      }
-      const supportedExtensionToolIds = extensionToolOptions(currentExtensionState.catalog)
-        .filter((tool) => tool.available)
-        .map((tool) => tool.id)
-      const effectiveToolIds = resolveEffectiveToolIds({
-        agentToolIds: agent.toolIds, requiredToolIds: skill.requiredToolIds,
-        globallyEnabledToolIds: enabledToolIds, policyAllowedToolIds: agent.toolIds,
-        executorSupportedToolIds: [
-          ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
-          ...customTools.map((tool) => tool.id),
-          ...supportedExtensionToolIds,
-        ],
-      })
-      const localExtensionSnapshot = createLocalExtensionSnapshotFromCatalog(
-        currentExtensionState.catalog,
-        currentExtensionState.configuration.revision,
-        effectiveToolIds,
-      )
-      const thread = conversation
-        ? { callId: conversation.callId, turn: conversation.turn }
-        : { callId: runId, turn: 1 }
-      const input: RunInput = {
-        version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
-        // A reply's prompt is the reply; its source text keeps the call's first prompt.
-        source: { nodeId: invocationNodeId, text: followUp ? steering?.basePrompt ?? '' : prompt },
-        target: { parentId: invocationNodeId },
-        baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
-        agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: context.lines,
-        customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
-        ...(localExtensionSnapshot ? { localExtensionSnapshot } : {}),
-        thread,
-        ...(followUpContext ? { invocationOutline: followUpContext.invocationOutline } : {}),
-      }
-      onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, thread })
-      const runner = createPiLocalRunner({
-        resolveCredential: async (reference) => {
-          if (reference !== credential.id) throw new Error('The local credential reference changed before execution.')
-          const auth = await resolveLocalCredential(credential, nativeLocalCredentialVault)
-          return { ...auth, modelId, onCredentialRefresh: setOAuthCredential }
-        },
-        resolveExtensionSecrets: async (snapshot) => {
-          const configuration = useExtensionStore.getState().configuration
-          if (!configuration) throw new Error('Extension configuration is unavailable; refresh Extensions settings and retry.')
-          return resolveExtensionSecretValues(snapshot, configuration, nativeLocalCredentialVault)
-        },
-      })
-      if (!followUp) {
-        localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)
-        if (!localOutputNodeId) throw new Error('Could not create live agent output.')
-        setAgentActivity(editor, localOutputNodeId, ['Thinking…'])
-      }
-      let streamedText = ''
-      const handle = await new LocalAgentExecutor(repository, runner).invoke(input, {
-        onActivity: (event) => onActivity?.(fromRuntimeEvent(event, runId)),
-        onDelta: (nextText) => {
-          // A reply streams into the call's thread until its outcome is known.
-          if (followUp) {
-            onActivity?.({ id: runId, phase: 'start', kind: 'skill', label: callLabel, nodeId: invocationNodeId, answer: nextText })
-            return
-          }
-          if (!localOutputNodeId) return
-          setAgentActivity(editor, localOutputNodeId, [])
-          writeAiText(editor, localOutputNodeId, nextText, streamedText)
-          streamedText = nextText
-        },
-      })
-      onRegisterExtensionCancellation?.(runId, () => void handle.cancel())
-      const result = await handle.completion.finally(() => onRegisterExtensionCancellation?.(runId, null))
-      if (isLocalAnswerResult(result)) {
-        onActivity?.({
-          id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
-          answer: result.text, durationMs: Date.now() - startedAt,
-        })
-        return
-      }
-      let resultNodeId: string | undefined
-      if (followUp) {
-        // The revision replaces the previous agent output in one undoable step.
-        const { nodeIds, replaced } = replaceAiOutput(editor, invocationNodeId, runId, result)
-        if (conversation?.replacesRunId) recordReplacedOutput(conversation.replacesRunId, replaced)
-        resultNodeId = nodeIds[0]
-      } else {
-        setAgentActivity(editor, localOutputNodeId!, null)
-        ;[resultNodeId] = commitStructuredAgentResultInto(
-          editor,
-          invocationNodeId,
-          localOutputNodeId!,
-          skill.label,
-          result,
-        )
-        localOutputNodeId = null
-      }
-      if (resultNodeId) await recordResultActivity(repository, runId, resultNodeId, onActivity)
-      onActivity?.({
-        id: runId, phase: 'complete', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
-        durationMs: Date.now() - startedAt, ...(followUp ? { answer: '' } : {}),
-      })
-    })().catch((error: unknown) => {
-      const detail = serverRun ? serverCallErrorMessage(error, followUp) : error instanceof Error ? error.message : String(error)
-      if (localOutputNodeId) {
-        setAgentActivity(editor, localOutputNodeId, null)
-        removeAiList(editor, localOutputNodeId)
-      }
-      // A failed or cancelled reply keeps no partial answer; the outline was never touched.
-      const clearAnswer = followUp ? { answer: '' } : {}
-      if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') {
-        onActivity?.({
-          id: runId, phase: 'cancelled', kind: 'skill', label: callLabel, nodeId: invocationNodeId,
-          durationMs: Date.now() - startedAt, ...clearAnswer,
-        })
-        onError(null)
-        return
-      }
-      onActivity?.({
-        id: runId,
-        phase: 'error',
-        kind: 'skill',
-        label: callLabel,
-        detail,
-        nodeId: invocationNodeId,
-        durationMs: Date.now() - startedAt,
-        ...clearAnswer,
-      })
-      onError(detail)
-      showSkillContextError(editor, invocationNodeId, detail)
-      setContextError(detail)
-    })
-    clearSkillContext(editor)
-    setContextError(null)
-    setMenu(null)
+    onRegisterExtensionCancellation?.(handle.runId, handle.cancel)
+    void handle.completion.finally(() => onRegisterExtensionCancellation?.(handle.runId, null))
   }
 
   const runSkillRef = useRef(runSkill)
@@ -813,28 +351,4 @@ export function SlashMenu({
       ))}
     </ul>
   )
-}
-
-/**
- * Persist a pointer to the bullets an agent wrote so the sidebar can still open them
- * after a restart, and surface it live in the current session.
- */
-async function recordResultActivity(
-  repository: NativeEventRepository,
-  runId: string,
-  resultNodeId: string,
-  onActivity?: ActivityReporter,
-): Promise<void> {
-  const event: RuntimeActivityEvent = {
-    id: `result-${runId}`,
-    sequence: (await repository.agentActivityAfter(runId, 0, 200)).length + 1,
-    callId: runId,
-    phase: 'complete',
-    kind: 'output',
-    label: 'Open result',
-    nodeId: resultNodeId,
-    status: 'success',
-  }
-  await repository.appendAgentActivity(runId, event, new Date().toISOString())
-  onActivity?.(fromRuntimeEvent(event, runId))
 }

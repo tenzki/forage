@@ -73,6 +73,7 @@ interface SettingsState {
   setOAuthCredential: (credential: CodexOAuthCredential | null) => Promise<void>
   setModelId: (modelId: string) => Promise<void>
   setToolEnabled: (toolId: string, enabled: boolean) => Promise<void>
+  grantMcpToolAccess: (toolIds: string[], agentIds: string[]) => Promise<void>
   addCustomTool: (draft: CustomHttpToolDraft) => Promise<void>
   removeCustomTool: (toolId: string) => Promise<void>
   removeToolReferences: (toolIds: string[]) => Promise<void>
@@ -301,6 +302,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await saveField(ENABLED_TOOLS_FIELD, enabledToolIds)
     } catch (error) {
       set({ enabledToolIds: previous, error: message(error) })
+      throw error
+    }
+  },
+
+  grantMcpToolAccess: async (toolIds, agentIds) => {
+    const previous = { agents: get().agents, enabledToolIds: get().enabledToolIds }
+    if (!toolIds.length || toolIds.some((id) => !/^mcp_[ls]_[a-f0-9]{48}$/.test(id))) throw new Error('Choose MCP tools to enable.')
+    if (!agentIds.length || agentIds.some((id) => !previous.agents.some((agent) => agent.id === id))) throw new Error('Choose an existing agent.')
+    const agents = previous.agents.map((agent) => agentIds.includes(agent.id) ? { ...agent, toolIds: [...new Set([...agent.toolIds, ...toolIds])] } : agent)
+    const enabledToolIds = [...new Set([...previous.enabledToolIds, ...toolIds])]
+    if (enabledToolIds.length > 64 || agents.some((agent) => agent.toolIds.length > 64)) throw new Error('At most 64 tools can be enabled or assigned to an agent. Select fewer tools.')
+    try {
+      const store = await getStore()
+      await store.set(AGENTS_FIELD, agents)
+      await store.set(ENABLED_TOOLS_FIELD, enabledToolIds)
+      await store.save()
+      set({ agents, enabledToolIds, error: null })
+    } catch (error) {
+      set({ error: message(error) })
       throw error
     }
   },

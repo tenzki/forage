@@ -81,6 +81,14 @@ async function main(): Promise<void> {
   let stdinBuffer = ''
   let currentAbort: AbortController | null = null
   let currentRun: Promise<void> | null = null
+  const shutdown = () => {
+    currentAbort?.abort()
+    void (currentRun ?? Promise.resolve()).finally(() => process.exit(0))
+    setTimeout(() => process.exit(1), 6_000).unref()
+  }
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+  process.stdin.on('end', shutdown)
 
   process.stdin.setEncoding('utf8')
   process.stdin.resume()

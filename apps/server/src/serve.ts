@@ -11,8 +11,15 @@ import { OpenAIResponsesDispatcherClassifier, OpenAIResponsesModelAdapter } from
 import { ServerAgentRunner, ServerAgentWorker } from './serverRunner.js'
 import { OpenAIImageAssetGenerator } from './imageGeneration.js'
 import { PostgresOutlineChangeNotifier } from './outlineStream.js'
+import { loadBackendMcp } from './mcp.js'
 
 const config = loadServerConfig(process.env)
+const discoveredMcp = await loadBackendMcp(process.env.FORAGE_MCP_CONFIG)
+const mcp = config.agent.engine === 'pi' ? discoveredMcp : {
+  connections: [],
+  inventory: discoveredMcp.inventory.map((connection) => ({ ...connection, enabled: false, error: 'MCP tools require the Pi agent engine.' })),
+}
+const mcpToolIds = mcp.inventory.filter((connection) => connection.enabled && !connection.error).flatMap((connection) => connection.tools.map((tool) => tool.id))
 const pool = new Pool({ connectionString: config.databaseUrl, max: 10 })
 const credentialService = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
   encryptionKeys: config.agent.encryptionKeys,
@@ -31,7 +38,8 @@ const tools = createServerToolRegistry({
   imageGeneration: async () => ({ available: true }),
 })
 const repository = new PostgresServerRepository(pool, {
-  instanceId: config.instanceId, supportedAgentToolIds: tools.map((tool) => tool.id),
+  instanceId: config.instanceId, supportedAgentToolIds: [...tools.map((tool) => tool.id), ...mcpToolIds],
+  mcpInventory: mcp.inventory,
   agentMaxAttempts: config.agent.worker.maxAttempts,
   dispatcherForAgent: async ({ ownerId, outlineId, agent }) => {
     if (!agent.credentialRef) return undefined
@@ -48,7 +56,8 @@ const app = buildServer({
   repository,
   outlineChangeNotifier,
   credentialService,
-  supportedAgentToolIds: tools.map((tool) => tool.id),
+  supportedAgentToolIds: [...tools.map((tool) => tool.id), ...mcpToolIds],
+  mcpInventory: mcp.inventory,
   agentMaxAttempts: config.agent.worker.maxAttempts,
   agentEngine: config.agent.engine,
   conversationBudgetBytes: config.agent.conversations.maxBytes,
@@ -61,6 +70,7 @@ const app = buildServer({
 await outlineChangeNotifier.start()
 const workerId = `worker_${config.instanceId}_${process.pid}`.slice(0, 128)
 const runner = new ServerAgentRunner({
+  mcpConnections: mcp.connections,
   repository, credentials: credentialService,
   tools: (run, credential) => createServerToolRegistry({
     reader, webSearch: (query, signal) => webSearch.search(query, signal), ...(transcript ? { transcript } : {}),

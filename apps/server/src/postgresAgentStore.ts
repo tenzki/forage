@@ -1,6 +1,7 @@
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import {
   activityEventSchema,
+  hasMcpTools,
   portableAgentConfigurationSchema,
   supportedAgentConfigurationSchema,
   computeProfileSchema,
@@ -158,7 +159,7 @@ export class PostgresAgentStore implements AgentStore {
           admission.invocationId ?? null, admission.intentHash ?? null,
           input.source.nodeId ?? null, input.target.parentId, input,
           { agent: input.agent, skill: input.skill, effectiveToolIds: input.effectiveToolIds, policyId: admission.policyId ?? null },
-          input.configurationRevision, input.credentialRef, Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null,
+          input.configurationRevision, input.credentialRef, hasMcpTools(input.effectiveToolIds) ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null,
           thread?.callId ?? null, thread?.turn ?? null],
       )
       return admitted(result.rows[0]!, admission)

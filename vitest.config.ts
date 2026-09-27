@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => ({
       'packages/extension-api/**',
       'packages/extension-host/**',
       'packages/pi-runtime/**',
+      'packages/mcp-host/**',
       'extensions/**',
       'apps/desktop/src-tauri/resources/pi/sidecar/**',
     ],

@@ -318,6 +318,11 @@ pub async fn server_agent_compute_profile(state: State<'_, NativeState>) -> Resu
 }
 
 #[tauri::command]
+pub async fn server_mcp_inventory(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(&state, Method::GET, "mcp-inventory", None, MAX_AGENT_RESPONSE_BYTES).await
+}
+
+#[tauri::command]
 pub async fn server_agent_publish_compute_profile(
     state: State<'_, NativeState>,
     request: Value,

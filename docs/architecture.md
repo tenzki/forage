@@ -83,6 +83,8 @@ The flattened note index never authorizes or validates a write. Its source revis
 
 ## Agent execution
 
+Desktop skill invocation is owned by `apps/desktop/src/agent/skillExecution.ts`. The slash menu selects a skill and passes its ID, prompt, invocation bullet, and active editor to this service. The service owns context previews, tool admission (including MCP), credential resolution, local/backend routing, result placement, and a cancellable run handle. Preview preparation lives in `skillPreview.ts`; neither module depends on a React component. Other editor surfaces can use the same entry point. Backend execution still receives only invocation intent and resolves its own authority.
+
 The desktop supports two execution locations behind shared run and result contracts:
 
 - Local execution launches the Node.js sidecar, which embeds the Pi SDK and uses a user-owned OpenAI API key or short-lived ChatGPT OAuth credential. Each run receives only explicitly selected outline context and authorized tools.
@@ -114,6 +116,16 @@ At local admission, the desktop captures a catalog/configuration/source digest s
 Local image generation is provided by the explicitly enabled Image Generation extension, using its own API key or local Codex login. Core accepts bounded raster tool results and owns their image IDs and normal asset placement; it has no local image-provider adapter. Existing saved images remain readable without the extension. The server retains its separate image capability. See [ADR-0022](ADRs/ADR-0022-image-generation-extension.md).
 
 See [Extensions](extensions.md) for the Settings and development workflow.
+
+## MCP tools
+
+Desktop and backend agents can use arbitrary user-configured MCP servers through the shared `@forage/mcp-host` Node package. It owns stdio/Streamable HTTP connections, bounded discovery and results, cancellation, and cleanup. Discovered input schemas pass through the shared runtime-tool adapter into Pi. Each tool has an environment-specific permission ID bound to its connection and definition; discovery never enables tools, and changed definitions require renewed selection.
+
+Desktop Settings owns connection metadata and stores sensitive configuration in the native credential vault. Its connection form accepts a URL/token or launch command, with JSON import available as an advanced option. MCP Settings and the agent tool picker automatically load the inventory for the persisted execution mode. A model-credential-free discovery sidecar connects only after the user requests it. Backend operators supply `FORAGE_MCP_CONFIG`, with optional explicit environment substitutions for credentials; an authenticated inventory endpoint exposes metadata to Settings. Runs snapshot their selected definitions and reconnect on their execution host, with no desktop fallback or synchronized executable configuration. MCP-enabled turns disable automatic retries and backend admission limits them to one attempt to avoid replaying external writes.
+
+See [MCP setup and limits](mcp.md) and [ADR-0023](ADRs/ADR-0023-environment-owned-mcp-clients.md).
+
+In local mode, MCP Settings can discover user-level configurations from Codex, Claude Desktop, Claude Code, Cursor, and VS Code. The management sidecar reads bounded files and returns sanitized candidate metadata without launching configured servers. Import revalidates the source definition and copies the selected configuration into Forage's credential store; it never edits the source client. Explicit tool review and agent selection follow connection. Device configuration discovery does not run in server mode.
 
 ## External capture and assets
 

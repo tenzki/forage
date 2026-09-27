@@ -100,6 +100,20 @@ fn validate_local_credential_reference(reference: &str) -> Result<(), String> {
         return Ok(());
     }
 
+    if let Some(id) = reference
+        .strip_prefix("forage-mcp/")
+        .and_then(|value| value.strip_suffix("/configuration"))
+    {
+        if !id.is_empty()
+            && id.len() <= 80
+            && id.chars().next().is_some_and(|character| character.is_ascii_alphanumeric())
+            && id.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
+        {
+            return Ok(());
+        }
+        return Err("invalid local credential reference".to_string());
+    }
+
     let Some(scoped) = reference.strip_prefix("forage-extension/") else {
         return Err("invalid local credential reference".to_string());
     };
@@ -147,6 +161,21 @@ mod local_credential_reference_tests {
             "forage-extension/installation-1/api_token"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn accepts_only_connection_scoped_mcp_configuration_references() {
+        assert!(validate_local_credential_reference("forage-mcp/connection-1/configuration").is_ok());
+        for reference in [
+            "mcp-connection-1",
+            "forage-mcp//configuration",
+            "forage-mcp/../configuration",
+            "forage-mcp/connection-1/token",
+            "forage-mcp/connection-1/configuration/extra",
+            "forage-mcp/connection-1/nested/configuration",
+        ] {
+            assert!(validate_local_credential_reference(reference).is_err(), "accepted {reference}");
+        }
     }
 
     #[test]

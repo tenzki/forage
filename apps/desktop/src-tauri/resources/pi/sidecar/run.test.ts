@@ -1,6 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { discoverMcp } from '@forage/mcp-host'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fauxAssistantMessage,
@@ -74,6 +76,23 @@ describe('sidecar run on the shared Pi turn', () => {
 
   afterEach(() => {
     rmSync(agentDir, { recursive: true, force: true })
+  })
+
+  it('uses dynamically discovered MCP tools through Pi with their input schemas', async () => {
+    const config = { command: process.execPath, args: [fileURLToPath(new URL('../../../../../../packages/mcp-host/tests/fixture.mjs', import.meta.url))], env: { MCP_FIXTURE_STDIO: '1' } }
+    const connection = await discoverMcp({ id: 'custom', name: 'Custom', environment: 'local' }, config)
+    const tool = connection.tools[0]!
+    const events = await run([
+      fauxAssistantMessage(fauxToolCall(tool.id, { message: 'Local MCP worked' })),
+      (context) => {
+        expect(JSON.stringify(context.tools)).toContain('message')
+        expect(JSON.stringify(context.messages.filter((message) => message.role === 'toolResult'))).toContain('Local MCP worked')
+        return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: [{ text: 'Local MCP worked' }] }))
+      },
+    ], { ...payload, enabledToolIds: [tool.id], requiredToolIds: [tool.id], mcpConnections: [{ connection, config }] })
+    expect(settled(events)?.type).toBe('agent_settled')
+    expect(events.at(-1)?.type).toBe('agent_settled')
+    expect(events.some((event) => event.type === 'tool_execution_end' && event.toolName === tool.id && event.isError === false)).toBe(true)
   })
 
   it('applies the shared prompt rules and drops sources the run did not read', async () => {

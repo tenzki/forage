@@ -49,6 +49,7 @@ export class PostgresServerRepository implements ServerRepository {
   readonly instanceId: string
   readonly agentStore: PostgresAgentStore
   private readonly supportedAgentToolIds: string[]
+  private readonly mcpInventory: McpConnection[]
   private readonly agentMaxAttempts: number
   private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
 
@@ -56,12 +57,14 @@ export class PostgresServerRepository implements ServerRepository {
     private readonly pool: Pool,
     options: {
       instanceId: string; supportedAgentToolIds?: string[]; agentMaxAttempts?: number
+      mcpInventory?: McpConnection[]
       dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
     },
   ) {
     this.instanceId = options.instanceId
     this.agentStore = new PostgresAgentStore(pool)
     this.supportedAgentToolIds = options.supportedAgentToolIds ?? []
+    this.mcpInventory = options.mcpInventory ?? []
     this.agentMaxAttempts = options.agentMaxAttempts ?? 3
     this.dispatcherForAgent = options.dispatcherForAgent
   }
@@ -348,6 +351,7 @@ export class PostgresServerRepository implements ServerRepository {
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
         credentialRef, agent: resolvedAgent, skill, effectiveToolIds,
+        mcpSnapshot: selectMcpSnapshot(this.mcpInventory, effectiveToolIds),
         prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
         customTools: configuration.customTools,
       }
@@ -360,7 +364,7 @@ export class PostgresServerRepository implements ServerRepository {
         [runId, principal.ownerId, principal.outlineId,
           `capture:${noteId}:policy:${policies.revision}:skill:${skill.id}`, noteId, input,
           { agent: resolvedAgent, skill, effectiveToolIds, policyId: match.policyId }, configuration.revision,
-          credentialRef, this.agentMaxAttempts],
+          credentialRef, hasMcpTools(effectiveToolIds) ? 1 : this.agentMaxAttempts],
       )
     }
   }
@@ -918,3 +922,4 @@ function requireLiveCanonicalNode(
 function hashSecret(secret: string): string {
   return createHash('sha256').update(secret).digest('hex')
 }
+import { hasMcpTools, selectMcpSnapshot, type McpConnection } from '@forage/agent-runtime'

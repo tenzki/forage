@@ -1,5 +1,7 @@
 import { Plus } from 'lucide-react'
 import { Fragment, useId, useState } from 'react'
+import { mcpToolOptions } from '../../store/mcpStore'
+import { useMcpConnections } from './useMcpConnections'
 import { validateExtensionSkillConfiguration } from '@forage/agent-runtime'
 import {
   isExtensionSkill,
@@ -170,6 +172,7 @@ function SkillRow({ skill, agentName, onEdit, onRemove }: {
 export function AgentSettings({ extensionTools = [], extensionExecutors = [], reportError }: {
   extensionTools?: ExtensionToolOption[]; extensionExecutors?: ExtensionExecutorOption[]; reportError: (error: unknown) => void
 }) {
+  const { connections: mcpConnections, error: mcpError } = useMcpConnections()
   const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
   const customTools = useSettingsStore((state) => state.customTools)
@@ -187,6 +190,7 @@ export function AgentSettings({ extensionTools = [], extensionExecutors = [], re
     ...BUILTIN_TOOL_OPTIONS.map((tool) => ({ ...tool, group: 'Built-in', available: true })),
     ...customTools.map(({ id, name, description }) => ({ id, name, description, group: 'Custom HTTP', available: true })),
     ...extensionTools.map((tool) => ({ ...tool, group: `Extension · ${tool.sourceName}`, isExtension: true })),
+    ...mcpToolOptions(mcpConnections).map((tool) => ({ ...tool, group: 'MCP', isExtension: true })),
   ]
   const publish = async (section: 'agents' | 'skills') => {
     setSyncError(null)
@@ -201,6 +205,7 @@ export function AgentSettings({ extensionTools = [], extensionExecutors = [], re
       <ListRow title={agent.name} description={agent.description} meta={`${agent.toolIds.length} tool(s)`} actions={<><Button size="sm" onClick={() => setAgentDraft({ ...agent, toolIds: [...agent.toolIds] })}>Edit</Button><ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove ${agent.name}`} confirmAriaLabel={`Confirm removing ${agent.name}`} onConfirm={() => void perform(() => removeAgent(agent.id), () => publish('agents'))} /></>} />
       {agentDraft?.id === agent.id && <AgentForm key={agent.id} initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} />}
     </Fragment>)}</div>
+      {mcpError && <p className="settings-hint">MCP tools could not be loaded. Open MCP servers in Settings to reconnect.</p>}
       {syncError?.section === 'agents' && <p className="settings-error" role="alert">{syncError.message}</p>}
       {agentDraft && !agentDraft.id ? <AgentForm initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} /> : <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.filter((tool) => tool.available && !tool.isExtension).map((tool) => tool.id) })}>Add agent</Button>}
     </section>

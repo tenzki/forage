@@ -117,6 +117,7 @@ pub fn run() {
             sync_commands::server_agent_configuration,
             sync_commands::server_agent_publish_configuration,
             sync_commands::server_agent_compute_profile,
+            sync_commands::server_mcp_inventory,
             sync_commands::server_agent_publish_compute_profile,
             sync_commands::server_agent_readiness,
             sync_commands::server_outline_search,
