@@ -60,5 +60,5 @@ export const ownership = [
 
 export const footerLinks = [
   { title: 'Product', links: [{ label: 'How it works', href: '#how-it-works' }, { label: 'Agents & skills', href: '#skills' }, { label: 'Extensions', href: '#extensions' }, { label: site.download ? 'Get Forage' : 'Coming soon', href: site.download }] },
-  { title: 'Resources', links: [{ label: 'Documentation', href: site.documentation }, { label: 'Source code', href: site.repository }, { label: 'Release notes', href: `${site.repository}/releases` }] },
+  { title: 'Resources', links: [{ label: 'Documentation', href: site.documentation }, { label: 'GitHub', href: site.repository }, { label: 'Release notes', href: `${site.repository}/releases` }] },
 ] as const

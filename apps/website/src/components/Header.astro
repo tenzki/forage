@@ -2,7 +2,8 @@
 import Brand from './Brand.astro'
 import DownloadLink from './DownloadLink.astro'
 import Icon from './Icon.astro'
-const links = [{ href: '#how-it-works', label: 'The way it works' }, { href: '#your-space', label: 'Made for your mind' }]
+import { site } from '../data/site'
+const links = [{ href: '#how-it-works', label: 'The way it works' }, { href: '#your-space', label: 'Made for your mind' }, { href: site.repository, label: 'GitHub' }]
 ---
 <header class="border-b border-rule">
   <div class="page-shell relative flex min-h-[76px] items-center justify-between py-5 md:min-h-[100px] md:py-6">
