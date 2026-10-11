@@ -22,7 +22,9 @@ as described in the repository's agent instructions.
 Edit `src/data/site.ts` for download/documentation destinations, workflow steps,
 skill examples, and extensions. Adding another item to `extensions` creates an
 additional card; the layout adjusts automatically and retains the future slot.
-Downloads and release notes currently point to the repository's Releases page.
+Download calls to action display a non-clickable “Coming soon” while `site.download`
+is `null`. Set it to a download URL when ready to restore the macOS download buttons
+and footer link. Release notes point to the repository's Releases page.
 
 Set `WEBSITE_URL` to the final public origin when building to emit canonical and
 Open Graph URL metadata. The default deliberately does not invent a public domain.
