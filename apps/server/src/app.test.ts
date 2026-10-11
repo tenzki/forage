@@ -31,11 +31,12 @@ import { captureStepBatch, createOutlineSchema } from '@forage/document'
 import { canonicalJson, parseEventEnvelope, sha256Hex } from '@forage/domain'
 import { Transform } from '@tiptap/pm/transform'
 import { InMemoryProviderCredentialStore, ServerCredentialService } from './credentialService'
+import { getProviderModels } from '@forage/pi-runtime'
 
 const servers: Array<ReturnType<typeof buildServer>> = []
 const assetRoots: string[] = []
 
-async function testServer(options: { seed?: boolean } = {}) {
+async function testServer(options: { seed?: boolean; engine?: 'pi' | 'legacy' } = {}) {
   const repository = new InMemoryServerRepository({ instanceId: 'instance-test' })
   const bootstrap = await repository.bootstrapOwner('owner@test.invalid')
   const outlineId = 'outline_test'
@@ -51,11 +52,13 @@ async function testServer(options: { seed?: boolean } = {}) {
   const assetRoot = await mkdtemp(join(tmpdir(), 'forage-app-assets-'))
   assetRoots.push(assetRoot)
   const credentialService = new ServerCredentialService(new InMemoryProviderCredentialStore(), {
+    validateApiKey: async () => undefined,
     encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 3).toString('base64') }],
   })
   const app = buildServer({
     repository, credentialService, supportedAgentToolIds: ['web_read', 'youtube_transcript'],
     assetStorage: new FileSystemAssetStorage(assetRoot), logger: false,
+    agentEngine: options.engine,
   })
   servers.push(app)
   return { app, repository, outlineId, inboxId, ...bootstrap }
@@ -67,6 +70,45 @@ afterEach(async () => {
 })
 
 describe('Forage server', () => {
+  it.each(['anthropic', 'openrouter', 'opencode-go', 'openai'] as const)('admits an immutable %s compute snapshot and rejects conflicting or unavailable selections', async (provider) => {
+    const { app, repository, deviceToken, apiToken, outlineId, inboxId } = await testServer({ engine: 'pi' })
+    const headers = { authorization: `Bearer ${deviceToken}` }
+    const prefix = `/api/v1/outlines/${outlineId}`
+    const capabilities = await app.inject({ method: 'GET', url: `${prefix}/readiness`, headers })
+    expect(capabilities.json().supportedProviders.map((entry: { provider: string }) => entry.provider)).toEqual(['anthropic', 'openrouter', 'opencode-go', 'openai', 'openai-codex'])
+    const enrolled = await app.inject({ method: 'POST', url: `${prefix}/agent-credentials/api-key`, headers, payload: { provider, apiKey: 'private-provider-key-for-testing' } })
+    expect(enrolled.statusCode).toBe(201)
+    const credentialRef = enrolled.json().id
+    const inventory = await app.inject({ method: 'GET', url: `${prefix}/agent-credentials`, headers })
+    expect(inventory.json().credentials).toHaveLength(1)
+    expect(inventory.body).not.toContain('private-provider-key')
+    expect((await app.inject({ method: 'GET', url: `${prefix}/agent-credentials`, headers: { authorization: `Bearer ${apiToken}` } })).statusCode).toBe(403)
+    const modelIds = getProviderModels(provider).map((model) => model.id)
+    const profile = { version: 1, revision: 1, provider, modelId: modelIds[0], credentialRef }
+    const publish = (value: typeof profile, baseRevision = 0) => app.inject({ method: 'PUT', url: `${prefix}/compute-profile`, headers, payload: { baseRevision, profile: value } })
+    expect((await publish({ ...profile, modelId: 'not-a-real-model' })).statusCode).toBe(422)
+    expect(await repository.agentStore.currentComputeProfile(outlineId)).toBeNull()
+    expect((await publish(profile)).statusCode).toBe(200)
+    expect((await publish(profile)).statusCode).toBe(409)
+    expect((await app.inject({ method: 'PUT', url: `${prefix}/agent-configuration`, headers, payload: { baseRevision: 0, configuration: {
+      version: 2, revision: 1, agents: [{ id: 'agent', name: 'Agent', description: '', systemPrompt: 'Help.', toolIds: [] }],
+      skills: [{ id: 'ask', label: 'ask', description: '', systemPrompt: 'Answer.', agentId: 'agent', requiredToolIds: [] }], customTools: [], globallyEnabledToolIds: [],
+    } } })).statusCode).toBe(200)
+    const admitted = await app.inject({ method: 'POST', url: `${prefix}/agent-runs`, headers, payload: { version: 2, invocationId: 'provider-run', sourceNodeId: inboxId, skillId: 'ask', prompt: 'Help', acknowledgedOutlineRevision: 0 } })
+    expect(admitted.statusCode).toBe(202)
+    const runId = admitted.json().runId
+    expect((await repository.agentStore.getRun(outlineId, runId))?.input.computeProfile).toEqual(profile)
+    const next = { ...profile, revision: 2, modelId: modelIds[1] }
+    expect((await publish(next, 1)).statusCode).toBe(200)
+    expect((await repository.agentStore.getRun(outlineId, runId))?.input.computeProfile).toEqual(profile)
+    await app.inject({ method: 'POST', url: `${prefix}/agent-runs/${runId}/cancel`, headers })
+    const retried = await app.inject({ method: 'POST', url: `${prefix}/agent-runs/${runId}/retry`, headers })
+    expect(retried.statusCode).toBe(200)
+    expect((await repository.agentStore.getRun(outlineId, retried.json().runId))?.input.computeProfile).toEqual(next)
+    expect((await app.inject({ method: 'DELETE', url: `${prefix}/agent-credentials/${credentialRef}`, headers })).statusCode).toBe(200)
+    expect((await publish({ ...next, revision: 3 }, 2)).statusCode).toBe(422)
+    expect((await repository.agentStore.currentComputeProfile(outlineId))?.profile).toEqual(next)
+  })
   it('separates liveness, dependency readiness, and compatibility status', async () => {
     const { app } = await testServer()
     expect((await app.inject({ method: 'GET', url: '/health/live' })).statusCode).toBe(200)
@@ -217,6 +259,7 @@ describe('Forage server', () => {
       headers: { authorization: `Bearer ${deviceToken}` },
     })
     expect(readiness.statusCode).toBe(200)
+    expect(readiness.json().supportedProviders.map((entry: { provider: string }) => entry.provider)).toEqual(['openai', 'openai-codex'])
     expect(readiness.json()).toMatchObject({
       connection: { ready: true },
       outlineSync: { ready: true, revision: 0 },
@@ -231,6 +274,27 @@ describe('Forage server', () => {
       payload: { text: 'Editing still works' },
     })
     expect(note.statusCode).toBe(201)
+  })
+
+  it('refuses provider writes whose runtime paths have not shipped', async () => {
+    const { app, repository, deviceToken, outlineId } = await testServer()
+    const headers = { authorization: `Bearer ${deviceToken}` }
+    for (const provider of ['anthropic', 'openrouter', 'opencode-go']) {
+      for (const path of ['api-key', 'import']) {
+        const response = await app.inject({
+          method: 'POST', url: `/api/v1/outlines/${outlineId}/agent-credentials/${path}`, headers,
+          payload: { provider, apiKey: 'sk-test-provider-secret-value' },
+        })
+        expect(response.json()).toMatchObject({ error: { code: 'capability_unavailable' } })
+        expect(response.body).not.toContain('sk-test-provider-secret-value')
+      }
+      const response = await app.inject({
+        method: 'PUT', url: `/api/v1/outlines/${outlineId}/compute-profile`, headers,
+        payload: { baseRevision: 0, profile: { version: 1, revision: 1, provider, modelId: 'model', credentialRef: 'credential-1' } },
+      })
+      expect(response.json()).toMatchObject({ error: { code: 'capability_unavailable' } })
+      expect(await repository.agentStore.currentComputeProfile(outlineId)).toBeNull()
+    }
   })
 
   it('publishes server configuration, enrolls credentials, and manages a manual run without exposing secrets', async () => {

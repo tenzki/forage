@@ -54,6 +54,12 @@ describe('local executor credentials', () => {
     }, { load: async () => '{"accessToken":"only"}' })).rejects.toThrow(/invalid/i)
   })
 
+  it.each(['anthropic', 'openrouter', 'opencode-go'] as const)('resolves only the selected %s credential', async (provider) => {
+    const load = vi.fn(async () => 'secret')
+    await expect(resolveLocalCredential({ id: 'credential-1', provider, status: 'connected' }, { load })).resolves.toMatchObject({ provider, mode: 'api_key', apiKey: 'secret' })
+    expect(load).toHaveBeenCalledWith('credential-1')
+  })
+
   it('resolves only scoped secrets for sources in the admitted extension snapshot', async () => {
     const load = vi.fn(async (reference: string) => reference.endsWith('/token') ? 'secret-value' : '')
     const snapshot = {

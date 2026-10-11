@@ -8,6 +8,7 @@ import { ServerCredentialService } from './credentialService.js'
 import { BoundedPublicReader, createServerToolRegistry, DuckDuckGoSearchProvider } from './serverTools.js'
 import { SupadataTranscriptProvider } from './transcript.js'
 import { OpenAIResponsesDispatcherClassifier, OpenAIResponsesModelAdapter } from './serverModel.js'
+import { PiDispatcherClassifier } from './piDispatcher.js'
 import { ServerAgentRunner, ServerAgentWorker } from './serverRunner.js'
 import { OpenAIImageAssetGenerator } from './imageGeneration.js'
 import { PostgresOutlineChangeNotifier } from './outlineStream.js'
@@ -44,7 +45,7 @@ const repository = new PostgresServerRepository(pool, {
   dispatcherForAgent: async ({ ownerId, outlineId, agent }) => {
     if (!agent.credentialRef) return undefined
     const credential = await credentialService.resolve(agent.credentialRef, ownerId, outlineId)
-    return new OpenAIResponsesDispatcherClassifier({ credential, modelId: agent.modelId })
+    return config.agent.engine === 'pi' ? new PiDispatcherClassifier(credential, agent.modelId) : new OpenAIResponsesDispatcherClassifier({ credential, modelId: agent.modelId })
   },
 })
 await repository.reconcileNoteProjections()

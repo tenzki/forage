@@ -43,7 +43,7 @@ const WIZARD_STEPS: Array<{ id: WizardStep; label: string }> = [
   { id: 'credential', label: 'Credential' },
 ]
 
-export function ComputeSettings() {
+export function ComputeSettings({ onEnvironmentChanged }: { onEnvironmentChanged?: () => void } = {}) {
   const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
   const customTools = useSettingsStore((state) => state.customTools)
@@ -52,8 +52,9 @@ export function ComputeSettings() {
   const isLoaded = useSettingsStore((state) => state.isLoaded)
   const replaceAgentConfiguration = useSettingsStore((state) => state.replaceAgentConfiguration)
 
-  // Local stays selected until the native side confirms an enrolled server.
   const [mode, setMode] = useState<ComputeMode>('local')
+  const [connectionState, setConnectionState] = useState<'loading' | 'loaded' | 'unavailable'>('loading')
+  const [connectionRevision, setConnectionRevision] = useState(0)
   const [wizardActive, setWizardActive] = useState(false)
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [step, setStep] = useState<WizardStep>('connect')
@@ -79,8 +80,16 @@ export function ComputeSettings() {
 
   useEffect(() => {
     if (!isLoaded) return
-    void invoke<ServerConnectionInfo | null>('server_connection_info')
-      .then(async (value) => {
+    setConnectionState('loading')
+    void Promise.all([
+      invoke<'local' | 'server'>('event_store_storage_mode'),
+      invoke<ServerConnectionInfo | null>('server_connection_info'),
+    ])
+      .then(async ([persistedMode, value]) => {
+        if (persistedMode !== 'local' && persistedMode !== 'server') throw new Error('Unknown workspace mode')
+        if (persistedMode === 'server' && !value) throw new Error('Server connection unavailable')
+        setMode(persistedMode)
+        setConnectionState('loaded')
         if (!value) return
         setConnection(value)
         setMode('server')
@@ -132,8 +141,11 @@ export function ComputeSettings() {
           else setStatus(message(error))
         }
       })
-      .catch((error) => setStatus(message(error)))
-  }, [isLoaded])
+      .catch(() => {
+        setConnectionState('unavailable')
+        setStatus('Could not read the workspace connection. Restore it and retry. Execution location has not changed.')
+      })
+  }, [isLoaded, connectionRevision])
 
   function startWizard() {
     setStatus(null)
@@ -195,6 +207,7 @@ export function ComputeSettings() {
       await publishLocalConfiguration()
       await completeProvisioningSteps('outline', 'synchronization', 'configuration', 'mirror')
       await invoke('event_store_set_storage_mode', { mode: 'server' })
+      onEnvironmentChanged?.()
       setStatus(`Copied the outline and ${result.assetCount} image(s), then synced agent settings. Restart Forage to finish switching.`)
       setStep('verify')
     } catch (error) {
@@ -227,6 +240,7 @@ export function ComputeSettings() {
         setCredential(await transport.credential(compute.profile.credentialRef))
       } catch { setCredential(null) }
       await invoke('event_store_set_storage_mode', { mode: 'server' })
+      onEnvironmentChanged?.()
       setStatus('This device will load the server outline after a restart. Agent settings are synced.')
       setStep('verify')
     } catch (error) { setStatus(message(error)) } finally { setBusy(false) }
@@ -375,6 +389,7 @@ export function ComputeSettings() {
     try {
       const activeRemoteRuns = serverRunManager.remembered().filter((run) => !['completed', 'completed_unplaced', 'failed', 'cancelled', 'interrupted'].includes(run.status)).length
       await invoke('server_disconnect')
+      onEnvironmentChanged?.()
       setConnection(null)
       setCredential(null)
       setRevision(0)
@@ -394,9 +409,15 @@ export function ComputeSettings() {
   const setupComplete = Boolean(connection)
     && revision > 0
 
+  if (connectionState !== 'loaded') return <div className="auth-card compute-settings">
+    <h3>Workspace connection</h3>
+    <p role="status">{connectionState === 'loading' ? 'Loading workspace connection…' : status}</p>
+    {connectionState === 'unavailable' && <Button onClick={() => setConnectionRevision((value) => value + 1)}>Retry workspace connection</Button>}
+  </div>
+
   return (
     <div className="auth-card compute-settings">
-      <strong>Compute</strong>
+      <div><h3>Workspace connection</h3><p className="settings-hint">Keep your workspace on this Mac, or connect to a Forage server.</p></div>
       <SegmentedControl
         ariaLabel="Compute location"
         value={mode}
@@ -443,6 +464,7 @@ export function ComputeSettings() {
       ) : setupComplete && !wizardActive ? (
         <>
           <p className="settings-hint">Runs continue on {connection?.origin} while this app is closed. Server mode never falls back to local execution.</p>
+          <details><summary>Server connection details</summary>
           <code>{connection?.outlineId}</code>
           <p className="settings-hint">Credential: {credential?.status ?? 'not enrolled'} · Configuration revision: {revision}</p>
           {readiness && (
@@ -462,6 +484,7 @@ export function ComputeSettings() {
               ))}
             </ul>
           )}
+          </details>
           <div className="settings-actions">
             <Button variant="primary" disabled={busy} onClick={() => void testConnection()}>Test connection</Button>
             {credential?.status !== 'connected' && (

@@ -21,6 +21,7 @@ function unconnectedInvoke(options: { seedFails?: string } = {}) {
   let enrolled = false
   let provisioning: unknown = null
   vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+    if (command === 'event_store_storage_mode') return enrolled ? 'server' : 'local'
     if (command === 'server_connection_info') return enrolled ? connection : null
     if (command === 'server_enroll') { enrolled = true; return undefined }
     if (command === 'event_store_identity') return { outlineId: 'outline-1' }
@@ -58,6 +59,19 @@ function unconnectedInvoke(options: { seedFails?: string } = {}) {
 }
 
 describe('compute settings', () => {
+  it('does not present local compute when the persisted server connection cannot be read', async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'event_store_storage_mode') return 'server'
+      if (command === 'server_connection_info') throw new Error('secret native failure')
+      throw new Error('Unexpected command')
+    })
+    render(<ComputeSettings />)
+    expect(await screen.findByText(/Execution location has not changed/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Local' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Retry workspace connection' })).toBeTruthy()
+    expect(document.body.textContent).not.toContain('secret native failure')
+    expect(invoke).not.toHaveBeenCalledWith('server_disconnect')
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     useSettingsStore.setState({ agents: [], skills: [], customTools: [], enabledToolIds: [], modelId: 'gpt-5.5', isLoaded: true })
@@ -78,7 +92,7 @@ describe('compute settings', () => {
     const user = userEvent.setup()
     render(<ComputeSettings />)
 
-    await user.click(screen.getByRole('button', { name: 'Server' }))
+    await user.click(await screen.findByRole('button', { name: 'Server' }))
     expect(screen.getByTestId('compute-wizard-progress').textContent).toContain('Step 1 of 4')
     expect(screen.getByLabelText('Server URL')).toBeTruthy()
   })
@@ -95,7 +109,7 @@ describe('compute settings', () => {
     const user = userEvent.setup()
     render(<ComputeSettings />)
 
-    await user.click(screen.getByRole('button', { name: 'Server' }))
+    await user.click(await screen.findByRole('button', { name: 'Server' }))
     expect(screen.queryByLabelText('Outline ID')).toBeNull()
     await user.type(screen.getByLabelText('Server URL'), 'https://forage.example')
     await user.type(screen.getByLabelText('Device token'), 'device-token')
@@ -146,7 +160,7 @@ describe('compute settings', () => {
     const user = userEvent.setup()
     render(<ComputeSettings />)
 
-    await user.click(screen.getByRole('button', { name: 'Server' }))
+    await user.click(await screen.findByRole('button', { name: 'Server' }))
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(screen.getByRole('button', { name: 'Local' }).getAttribute('aria-pressed')).toBe('true')
@@ -155,6 +169,7 @@ describe('compute settings', () => {
 
   it('shows the summary instead of the wizard for a published server', async () => {
     vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'event_store_storage_mode') return 'server'
       if (command === 'server_connection_info') return connection
       if (command === 'server_agent_configuration') {
         return {
@@ -191,6 +206,7 @@ describe('compute settings', () => {
     const mirror = await confirmedConfigurationMirror(server)
     useSettingsStore.setState({ agents: [agent], skills: [skill] })
     vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+      if (command === 'event_store_storage_mode') return 'server'
       if (command === 'server_connection_info') return connection
       if (command === 'server_provisioning_state') return null
       if (command === 'server_agent_configuration') return { configuration: server, publishedAt: '2026-09-02T10:00:00.000Z' }
@@ -213,7 +229,7 @@ describe('compute settings', () => {
     const user = userEvent.setup()
     render(<ComputeSettings />)
 
-    await user.click(screen.getByRole('button', { name: 'Server' }))
+    await user.click(await screen.findByRole('button', { name: 'Server' }))
     await user.type(screen.getByLabelText('Server URL'), 'https://forage.example')
     await user.type(screen.getByLabelText('Device token'), 'device-token')
     await user.click(screen.getByRole('button', { name: 'Connect server' }))
@@ -229,7 +245,7 @@ describe('compute settings', () => {
     const user = userEvent.setup()
     render(<ComputeSettings />)
 
-    await user.click(screen.getByRole('button', { name: 'Server' }))
+    await user.click(await screen.findByRole('button', { name: 'Server' }))
     await user.type(screen.getByLabelText('Server URL'), 'https://forage.example')
     await user.type(screen.getByLabelText('Device token'), 'device-token')
     await user.click(screen.getByRole('button', { name: 'Connect server' }))
@@ -248,6 +264,7 @@ describe('compute settings', () => {
 
   it('does not repair missing configuration opportunistically during settings initialization', async () => {
     vi.mocked(invoke).mockImplementation(async (command, arguments_) => {
+      if (command === 'event_store_storage_mode') return 'server'
       if (command === 'server_connection_info') return connection
       if (command === 'server_agent_configuration') {
         throw new Error('conflict: No server agent configuration has been published.')

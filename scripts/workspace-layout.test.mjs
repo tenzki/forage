@@ -127,3 +127,16 @@ test('Turbo treats development processes as persistent and uncached', () => {
   assert.equal(turbo.tasks.dev.persistent, true)
   assert.equal(turbo.tasks.dev.cache, false)
 })
+
+test('desktop development caches sidecar builds and restores their bundled outputs', () => {
+  const desktopManifest = readJson('apps/desktop/package.json')
+  const turbo = readJson('turbo.json')
+
+  assert.equal(
+    desktopManifest.scripts.dev,
+    'pnpm exec turbo run build --filter=forage-sidecar && node scripts/sync-dev-sidecar.mjs && tauri dev',
+  )
+  assert.deepEqual(turbo.tasks['forage-sidecar#build'].dependsOn, ['^build'])
+  assert.deepEqual(turbo.tasks['forage-sidecar#build'].outputs, ['dist/**'])
+  assert.notEqual(turbo.tasks['forage-sidecar#build'].cache, false)
+})

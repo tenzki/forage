@@ -1,0 +1,917 @@
+.settings-screen {
+  container-type: inline-size;
+}
+
+.settings-screen .secondary-view-header {
+  min-height: 48px;
+  padding: 0 16px;
+  background: var(--color-paper-raised);
+}
+
+.settings-screen .secondary-view-back {
+  gap: 10px;
+  color: var(--color-ink);
+}
+
+.settings-screen .secondary-view-back:hover {
+  background: var(--color-paper-sunk);
+}
+
+.settings-screen .settings-panel.settings-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 640px);
+  align-items: start;
+  gap: 48px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 40px 56px 64px;
+}
+
+.settings-screen .settings-sidebar {
+  position: sticky;
+  top: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-screen .settings-sidebar .secondary-page-title {
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.3px;
+}
+
+.settings-screen .settings-nav-list {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-screen .settings-content,
+.settings-screen .settings-section,
+.settings-screen .settings-view {
+  min-width: 0;
+  padding-top: 0;
+}
+
+.settings-screen .settings-content {
+  gap: 24px;
+}
+
+.settings-screen .settings-section {
+  gap: 28px;
+}
+
+.settings-screen .settings-section > [data-slot='button'],
+.settings-screen .settings-section > .settings-block > [data-slot='button'] {
+  align-self: flex-start;
+}
+
+.settings-screen .settings-section h2 {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.settings-screen .settings-section h3 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.settings-screen .settings-section label {
+  margin-top: 0;
+  font-weight: 400;
+}
+
+.settings-screen .settings-section input:not([type='checkbox']):not([type='radio']),
+.settings-screen .settings-section select {
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: var(--color-rule);
+  border-radius: 6px;
+  background: var(--color-paper-raised);
+  font-size: 13px;
+}
+
+.settings-screen .settings-section select {
+  padding-right: 32px;
+}
+
+.settings-screen .settings-section input[type='checkbox'] {
+  min-height: 0;
+  padding: 0;
+}
+
+.settings-screen .settings-hint {
+  color: var(--color-moss);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-screen .settings-page-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.settings-screen .settings-page-heading > div,
+.settings-screen .settings-page-heading > h2 {
+  min-width: 0;
+}
+
+.settings-screen .general-settings > .settings-page-heading {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-screen .settings-block {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-screen .settings-divider {
+  border-top: 1px solid var(--color-rule-soft);
+  padding-top: 24px;
+}
+
+.settings-screen .settings-row-list {
+  overflow: hidden;
+  border: 1px solid var(--color-rule-soft);
+  border-radius: 6px;
+  background: var(--color-paper-raised);
+}
+
+.settings-screen .settings-preference-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .settings-preference-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-screen .settings-preference-row > div:first-child {
+  min-width: 0;
+}
+
+.settings-screen .settings-preference-row label {
+  color: var(--color-ink);
+  font-size: 14px;
+}
+
+.settings-screen .settings-preference-row .settings-hint {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.settings-screen .settings-font-control {
+  flex: 0 0 180px;
+}
+
+.settings-screen .settings-size-control {
+  flex: 0 0 100px;
+}
+
+.settings-screen .appearance-preview {
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-paper);
+}
+
+.settings-screen .settings-eyebrow {
+  margin-bottom: 12px;
+  color: var(--color-moss);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.settings-screen .appearance-preview ul {
+  list-style: disc;
+  padding-left: 20px;
+}
+
+.settings-screen .appearance-preview li {
+  padding: 4px 0;
+}
+
+.settings-screen .settings-fields-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.settings-screen .settings-back-link {
+  align-self: flex-start;
+  padding: 0;
+  color: var(--color-moss);
+  font-size: 12px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: normal;
+}
+
+.settings-screen .compute-settings,
+.settings-screen .agent-form,
+.settings-screen .skill-form,
+.settings-screen .mcp-access-form,
+.settings-screen .mcp-connection-form {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-screen .agent-form,
+.settings-screen .skill-form {
+  gap: 24px;
+}
+
+.settings-screen .agent-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-screen .agent-tool-list legend {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+.settings-screen .extension-detail > section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-screen .settings-inventory-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .settings-inventory-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-screen .settings-inventory-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.settings-screen .settings-server-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--color-sage);
+  color: var(--color-ink);
+}
+
+.settings-screen .settings-server-icon.is-detected {
+  background: var(--color-paper);
+}
+
+.settings-screen .settings-inventory-row strong {
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.settings-screen .provider-account-row {
+  padding: 12px 16px;
+}
+
+.settings-screen .provider-defaults {
+  margin-top: 12px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .compute-settings {
+  gap: 16px;
+  margin: 0;
+}
+
+.settings-screen .mcp-detail-heading .settings-server-icon {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+}
+
+.settings-screen .mcp-detail-heading h2 {
+  font-size: 24px;
+}
+
+.settings-screen .settings-connection-status {
+  border-radius: 9px;
+  padding: 3px 8px;
+  background: var(--color-sage);
+  color: var(--color-ink);
+  font-size: 11px;
+}
+
+.settings-screen .mcp-authorization-state {
+  border: 1px solid var(--color-rule-soft);
+  border-radius: 6px;
+  padding: 16px;
+  gap: 12px;
+}
+
+.settings-screen .settings-connection-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--color-paper);
+  color: var(--color-moss);
+}
+
+.settings-screen .settings-candidate-options {
+  color: var(--color-moss);
+  font-size: 11px;
+}
+
+.settings-screen .mcp-access-form {
+  gap: 12px;
+  margin: 0;
+}
+
+.settings-screen .settings-actions {
+  flex-wrap: wrap;
+}
+
+.settings-screen .mcp-access-form > details {
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .mcp-tool-row {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .mcp-tool-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-screen .mcp-tool-preview {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 180px) minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.settings-screen .mcp-tool-disclosure {
+  min-width: 0;
+  padding: 0;
+  color: var(--color-moss);
+}
+
+.settings-screen .mcp-tool-name {
+  font-size: 13px;
+}
+
+.settings-screen .mcp-tool-description {
+  color: var(--color-moss);
+  font-size: 12px;
+}
+
+.settings-screen .mcp-agent-access {
+  margin-top: 16px;
+}
+
+.settings-screen .mcp-agent-access legend {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+.settings-screen .settings-agent-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-screen .settings-agent-choice {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-rule-soft);
+  border-radius: 6px;
+  background: var(--color-paper-raised);
+  overflow-wrap: anywhere;
+}
+
+.settings-screen .settings-agent-choice[data-selected='true'] {
+  background: var(--color-sage);
+}
+
+.settings-screen .settings-agent-choice input {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  accent-color: var(--color-ink);
+}
+
+.settings-screen .settings-heading-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-screen .settings-group {
+  gap: 14px;
+}
+
+.settings-screen .settings-section + .settings-section,
+.settings-screen .settings-tools-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.settings-screen .settings-agent-overview,
+.settings-screen .settings-agent-overview > .settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.settings-screen .settings-editor,
+.settings-screen .extension-detail,
+.settings-screen .provider-setup,
+.settings-screen .provider-setup-form,
+.settings-screen .mcp-connection-form,
+.settings-screen .mcp-connection-form form > fieldset {
+  gap: 24px;
+}
+
+.settings-screen .agent-form,
+.settings-screen .skill-form,
+.settings-screen .mcp-connection-form {
+  margin: 0;
+}
+
+.settings-screen .settings-editor-fieldset,
+.settings-screen .agent-tool-list {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-screen .agent-form textarea,
+.settings-screen .skill-form textarea {
+  min-height: 120px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-screen .agent-tool-list > .settings-hint {
+  margin-bottom: 12px;
+}
+
+.settings-screen .settings-agent-tools {
+  display: block;
+}
+
+.settings-screen .settings-editable-field {
+  position: relative;
+}
+
+.settings-screen .settings-editable-field input {
+  padding-right: 34px;
+}
+
+.settings-screen .settings-editable-field > svg {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--color-moss);
+  pointer-events: none;
+}
+
+.settings-screen .settings-agent-tools > legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--color-ink);
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.settings-screen .settings-agent-tool {
+  border-bottom: 1px solid var(--color-rule-soft);
+}
+
+.settings-screen .settings-agent-tool-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.settings-screen .settings-agent-tool-name {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.settings-screen .settings-agent-tool-name > svg {
+  flex-shrink: 0;
+}
+
+.settings-screen .settings-agent-tool-source {
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--color-moss);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-screen .settings-agent-tool-description {
+  padding: 0 0 12px;
+  color: var(--color-ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-screen .settings-agent-tool-unavailable {
+  padding-bottom: 10px;
+}
+
+.settings-screen .settings-agent-mcp {
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-screen .settings-agent-server {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-screen .settings-agent-server > div:first-child > p {
+  font-size: 13px;
+}
+
+.settings-screen .settings-agent-server > div:last-child {
+  gap: 12px;
+}
+
+.settings-screen .settings-agent-mcp .settings-text-link {
+  color: var(--color-ink-soft);
+}
+
+.settings-screen .settings-tool-choice {
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-screen .settings-tool-choice > div:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.settings-screen .settings-tool-choice > div:first-child > p {
+  font-size: 13px;
+}
+
+.settings-screen .settings-tool-choice > div:first-child > div {
+  min-width: 0;
+  margin-top: 0;
+  font-size: 12px;
+}
+
+.settings-screen .settings-text-link {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0;
+  color: var(--color-violet);
+  font-size: 12px;
+}
+
+.settings-screen .settings-inherited-compute {
+  gap: 12px;
+  font-size: 13px;
+}
+
+.settings-screen .settings-inherited-compute .settings-text-link {
+  font-size: 13px;
+}
+
+.settings-screen .settings-footnote {
+  font-size: 12px;
+}
+
+.settings-screen .settings-tools-section > h3,
+.settings-screen .extension-group > h3 {
+  margin: 0;
+  color: var(--color-moss);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.settings-screen .extensions-settings {
+  gap: 36px;
+}
+
+.settings-screen .extensions-toolbar {
+  align-items: flex-end;
+  gap: 20px;
+}
+
+.settings-screen .extensions-toolbar > .settings-heading-copy {
+  flex: 1;
+}
+
+.settings-screen .extensions-toolbar > .settings-actions {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.settings-screen .settings-notices {
+  gap: 10px;
+}
+
+.settings-screen .extension-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.settings-screen .extension-group > h3 [data-slot='count-badge'] {
+  padding: 0 6px;
+  background: var(--color-paper-sunk);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.settings-screen .extension-group > h3 [data-slot='count-badge'][class*='bg-clay-soft'] {
+  background: var(--color-clay-soft);
+}
+
+.settings-screen .extension-detail-heading {
+  align-items: center;
+  gap: 14px;
+}
+
+.settings-screen .extension-detail-heading > .settings-heading-copy {
+  flex: 1;
+}
+
+.settings-screen .extension-detail-heading h2 {
+  font-size: 22px;
+}
+
+.settings-screen .extension-detail-heading .settings-server-icon {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+}
+
+.settings-screen .extension-detail .extension-agent-access h3 {
+  font-size: 13px;
+}
+
+.settings-screen .settings-extension-access-row,
+.settings-screen .settings-extension-executor {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 13px;
+}
+
+.settings-screen .settings-extension-access-row > div,
+.settings-screen .settings-extension-executor > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-screen .settings-extension-executor strong {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.settings-screen .settings-extension-access-row > button,
+.settings-screen .settings-extension-executor > button {
+  flex-shrink: 0;
+}
+
+.settings-screen .extension-configuration > button {
+  align-self: flex-start;
+}
+
+.settings-screen .extension-actions {
+  padding-top: 20px;
+}
+
+.settings-screen .settings-connection-method {
+  gap: 8px;
+}
+
+.settings-screen .settings-field-label {
+  color: var(--color-ink-soft);
+  font-size: 12px;
+}
+
+.settings-screen .settings-configuration-entry {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 16px;
+}
+
+.settings-screen .settings-configuration-entry.has-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+}
+
+.settings-screen .settings-diagnostic-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-screen .settings-diagnostic-row {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-rule-soft);
+  color: var(--color-moss);
+}
+
+.settings-screen .settings-diagnostic-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-screen .settings-diagnostic-row > div > p:first-child {
+  color: var(--color-ink);
+  font-size: 14px;
+}
+
+.settings-screen .settings-diagnostic-row .settings-hint {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.settings-screen .settings-diagnostic-row[data-state='setup-required'],
+.settings-screen .settings-diagnostic-row[data-state='unavailable'] {
+  color: var(--color-clay);
+}
+
+.settings-screen .diagnostics-settings pre {
+  overflow: auto;
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--color-paper-sunk);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.settings-screen .inbox-link-rules-header > strong {
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.settings-screen .inbox-link-rule-list {
+  border-radius: 6px;
+}
+
+@container (max-width: 900px) {
+  .settings-screen .settings-panel.settings-layout {
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 28px;
+    padding: 32px 28px 48px;
+  }
+}
+
+@container (max-width: 640px) {
+  .settings-screen .settings-panel.settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding: 24px 16px 40px;
+  }
+
+  .settings-screen .settings-sidebar {
+    position: static;
+  }
+
+  .settings-screen .settings-nav-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .settings-screen .settings-preference-row,
+  .settings-screen .settings-page-heading {
+    flex-wrap: wrap;
+  }
+
+  .settings-screen .settings-fields-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-screen .extensions-toolbar,
+  .settings-screen .settings-extension-access-row,
+  .settings-screen .settings-extension-executor {
+    flex-wrap: wrap;
+  }
+
+  .settings-screen .extensions-toolbar > .settings-heading-copy {
+    flex-basis: 100%;
+  }
+
+  .settings-screen .settings-configuration-entry,
+  .settings-screen .settings-configuration-entry.has-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .settings-screen .settings-configuration-entry > button {
+    justify-self: start;
+  }
+
+  .settings-screen .settings-agent-choices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-screen .mcp-tool-preview {
+    grid-template-columns: 20px minmax(0, 1fr) 34px;
+    gap: 6px 10px;
+  }
+
+  .settings-screen .mcp-tool-description {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .settings-screen .mcp-tool-preview > label {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}

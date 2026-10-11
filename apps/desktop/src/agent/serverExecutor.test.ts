@@ -16,6 +16,22 @@ function input(): RunInput {
 }
 
 describe('server agent executor', () => {
+  it('cancels provider setup through the native transport without accepting a late result', async () => {
+    const controller = new AbortController()
+    let finish!: (value: unknown) => void
+    const invoke = vi.fn((command: string) => command === 'server_agent_enroll_api_key'
+      ? new Promise<unknown>((resolve) => { finish = resolve })
+      : Promise.resolve(undefined))
+    const transport = new TauriServerAgentTransport(invoke)
+    const connecting = transport.enrollApiKey({ provider: 'anthropic', apiKey: 'private-anthropic-key' }, controller.signal)
+    controller.abort()
+    expect(invoke).toHaveBeenCalledWith('server_agent_cancel_provider_connection', expect.objectContaining({ requestId: expect.any(String) }))
+    finish({ id: 'credential', provider: 'anthropic', status: 'connected', createdAt: '2026-09-29T10:00:00.000Z', updatedAt: '2026-09-29T10:00:00.000Z' })
+    await expect(connecting).rejects.toHaveProperty('name', 'AbortError')
+    invoke.mockClear()
+    await expect(transport.enrollApiKey({ provider: 'anthropic', apiKey: 'private-anthropic-key' }, controller.signal)).rejects.toHaveProperty('name', 'AbortError')
+    expect(invoke).not.toHaveBeenCalled()
+  })
   const status = (configurationVersions?: number[]) => ({
     instanceId: 'server-1', apiVersions: [1], eventVersions: { 'agent.result_committed': [1] },
     agentOriginVersions: [1], minimumAgentClientVersion: '0.1.0', documentSchemaVersion: 1,

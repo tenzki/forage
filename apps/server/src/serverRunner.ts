@@ -57,6 +57,7 @@ export class ServerAgentRunner {
     interval.unref?.()
     try {
       const credential = await this.options.credentials.resolve(run.credentialReference, run.ownerId, run.outlineId)
+      if (run.input.computeProfile && credential.provider !== run.input.computeProfile.provider) throw new CredentialServiceError('authentication_required', 'Admitted provider credential does not match the compute snapshot.')
       const tools = typeof this.options.tools === 'function' ? this.options.tools(run, credential) : this.options.tools
       if (run.input.mcpSnapshot?.length) {
         if (this.options.engine === 'legacy') throw new AgentRuntimeError('mcp_unavailable', 'MCP tools require the Pi agent engine.')

@@ -96,7 +96,7 @@ fn command_error(error: impl std::fmt::Display) -> String {
 }
 
 fn validate_local_credential_reference(reference: &str) -> Result<(), String> {
-    if matches!(reference, "local-openai" | "local-openai-codex") {
+    if matches!(reference, "local-openai" | "local-openai-codex" | "local-anthropic" | "local-openrouter" | "local-opencode-go") {
         return Ok(());
     }
 
@@ -157,6 +157,9 @@ mod local_credential_reference_tests {
     fn accepts_model_and_scoped_extension_references() {
         assert!(validate_local_credential_reference("local-openai").is_ok());
         assert!(validate_local_credential_reference("local-openai-codex").is_ok());
+        for provider in ["anthropic", "openrouter", "opencode-go"] {
+            assert!(validate_local_credential_reference(&format!("local-{provider}")).is_ok());
+        }
         assert!(validate_local_credential_reference(
             "forage-extension/installation-1/api_token"
         )

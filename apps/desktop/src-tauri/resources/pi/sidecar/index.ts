@@ -17,6 +17,9 @@
  */
 
 import { createAuthenticatedModelRuntime, resolveModel } from '@forage/pi-runtime'
+import { modelProviderSchema } from '@forage/agent-runtime'
+import { mcpOAuthTokenResponseSchema } from '@forage/agent-runtime'
+import { randomUUID } from 'node:crypto'
 
 import { errorMessage, runCommand } from './run'
 
@@ -39,16 +42,13 @@ function emit(value: unknown): void {
 // ── main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const providerId = process.env.AI_CHAT_PROVIDER
+  const provider = modelProviderSchema.safeParse(process.env.AI_CHAT_PROVIDER)
+  const providerId = provider.success ? provider.data : undefined
   const accessToken = process.env.AI_CHAT_API_KEY?.trim()
-  const modelId = process.env.AI_CHAT_MODEL_ID?.trim() || 'gpt-5.5'
+  const modelId = process.env.AI_CHAT_MODEL_ID?.trim()
 
-  if (!providerId || !accessToken) {
-    emit({ type: 'process_error', error: 'Missing AI_CHAT_PROVIDER or AI_CHAT_API_KEY environment variable.' })
-    process.exit(1)
-  }
-  if (providerId !== 'openai' && providerId !== 'openai-codex') {
-    emit({ type: 'process_error', error: `Unsupported provider: ${providerId}` })
+  if (!providerId || !accessToken || !modelId) {
+    emit({ type: 'process_error', error: 'Missing or unsupported provider, model, or credential.' })
     process.exit(1)
   }
 
@@ -81,6 +81,23 @@ async function main(): Promise<void> {
   let stdinBuffer = ''
   let currentAbort: AbortController | null = null
   let currentRun: Promise<void> | null = null
+  const tokenRequests = new Map<string, (token?: string) => void>()
+  const requestToken = (connectionId: string, resource: string, signal: AbortSignal): Promise<string> => new Promise((resolve, reject) => {
+    signal.throwIfAborted()
+    const requestId = randomUUID()
+    const finish = (token?: string) => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      tokenRequests.delete(requestId)
+      if (token && !signal.aborted) resolve(token)
+      else reject(new Error('MCP: Authorization unavailable. Check MCP Settings before retrying explicitly.'))
+    }
+    const abort = () => finish()
+    const timer = setTimeout(() => finish(), 25_000)
+    tokenRequests.set(requestId, finish)
+    signal.addEventListener('abort', abort, { once: true })
+    emit({ type: 'mcp_oauth_token_request', requestId, connectionId, resource })
+  })
   const shutdown = () => {
     currentAbort?.abort()
     void (currentRun ?? Promise.resolve()).finally(() => process.exit(0))
@@ -99,9 +116,9 @@ async function main(): Promise<void> {
     stdinBuffer = lines.pop() ?? ''
     for (const line of lines) {
       if (!line.trim()) continue
-      let command: { type?: string; payload?: string }
+      let command: { type?: string; payload?: string; requestId?: string; accessToken?: string }
       try {
-        command = JSON.parse(line) as { type?: string; payload?: string }
+        command = JSON.parse(line) as typeof command
       } catch {
         // Ignore malformed input lines.
         continue
@@ -110,7 +127,12 @@ async function main(): Promise<void> {
     }
   })
 
-  async function handleCommand(command: { type?: string; payload?: string }): Promise<void> {
+  async function handleCommand(command: { type?: string; payload?: string; requestId?: string; accessToken?: string }): Promise<void> {
+    if (command.type === 'mcp_oauth_token_response') {
+      const parsed = mcpOAuthTokenResponseSchema.safeParse(command)
+      if (parsed.success) tokenRequests.get(parsed.data.requestId)?.(parsed.data.accessToken)
+      return
+    }
     if (command.type === 'abort') {
       if (currentAbort) {
         currentAbort.abort()
@@ -134,6 +156,7 @@ async function main(): Promise<void> {
       agentDir: process.env.PI_CODING_AGENT_DIR || '',
       signal: abortController.signal,
       emit,
+      mcpAuthorization: { accessToken: requestToken, unauthorized: (connectionId) => emit({ type: 'mcp_oauth_required', connectionId }) },
     })
     currentRun = run
     try {

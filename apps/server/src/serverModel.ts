@@ -13,7 +13,10 @@ interface ModelOptions {
 
 export class OpenAIResponsesModelAdapter implements ModelAdapter {
   private readonly fetch: typeof globalThis.fetch
-  constructor(private readonly options: ModelOptions) { this.fetch = options.fetch ?? globalThis.fetch }
+  constructor(private readonly options: ModelOptions) {
+    if (options.credential.provider !== 'openai' && options.credential.provider !== 'openai-codex') throw new ProviderError('invalid_input', 'This provider requires the Pi execution engine.', false)
+    this.fetch = options.fetch ?? globalThis.fetch
+  }
 
   async invoke(request: ModelRequest, signal: AbortSignal): Promise<ModelResponse> {
     const credential = this.options.credential
@@ -67,7 +70,10 @@ export class OpenAIResponsesModelAdapter implements ModelAdapter {
 
 export class OpenAIResponsesDispatcherClassifier implements DispatcherClassifier {
   private readonly fetch: typeof globalThis.fetch
-  constructor(private readonly options: ModelOptions) { this.fetch = options.fetch ?? globalThis.fetch }
+  constructor(private readonly options: ModelOptions) {
+    if (options.credential.provider !== 'openai' && options.credential.provider !== 'openai-codex') throw new ProviderError('invalid_input', 'This provider requires the Pi execution engine.', false)
+    this.fetch = options.fetch ?? globalThis.fetch
+  }
 
   async classify(
     input: { text: string; source: Record<string, string>; allowedSkillIds: string[] },

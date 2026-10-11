@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { Client, StreamableHTTPClientTransport, type CallToolResult, type Transport } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
+import { oauthFetch } from './oauthFetch'
 import {
-  AgentRuntimeError, MCP_MAX_TOOLS, mcpConnectionSchema, mcpServerConfigSchema, mcpToolSchema,
+  AgentRuntimeError, MCP_MAX_TOOLS, mcpConnectionAvailable, mcpConnectionSchema, mcpServerConfigSchema, mcpToolSchema,
   type McpConnection, type McpRunConnection, type McpServerConfig, type McpTool, type RuntimeTool,
 } from '@forage/agent-runtime'
 
@@ -20,8 +21,12 @@ export function canonicalJson(value: unknown): string {
 
 function digest(value: unknown): string { return createHash('sha256').update(canonicalJson(value)).digest('hex') }
 
-export function mcpToolId(environment: 'local' | 'server', connectionId: string, remoteName: string, fingerprint: string): string {
-  return `mcp_${environment === 'local' ? 'l' : 's'}_${digest([connectionId, remoteName, fingerprint]).slice(0, 48)}`
+function mcpBinding(config: McpServerConfig) {
+  return 'command' in config ? { command: config.command, args: config.args, cwd: config.cwd ?? '' } : { url: config.url }
+}
+
+export function mcpToolId(environment: 'local' | 'server', connectionId: string, remoteName: string, bindingFingerprint: string): string {
+  return `mcp_${environment === 'local' ? 'l' : 's'}_${digest([connectionId, remoteName, bindingFingerprint]).slice(0, 48)}`
 }
 
 export function mcpSecretValues(config: McpServerConfig): string[] {
@@ -73,13 +78,20 @@ export interface McpSession {
   close: () => Promise<void>
 }
 
+export interface McpAuthorization {
+  accessToken: (connectionId: string, resource: string, signal: AbortSignal) => Promise<string>
+  unauthorized?: (connectionId: string) => void
+  sensitiveValues?: readonly string[]
+}
+
 export async function connectMcp(
   identity: Pick<McpConnection, 'id' | 'name' | 'environment'>,
   rawConfig: McpServerConfig,
   signal: AbortSignal,
+  authorization?: McpAuthorization,
 ): Promise<McpSession> {
   const config = mcpServerConfigSchema.parse(rawConfig)
-  const secrets = mcpSecretValues(config)
+  const secrets = [...mcpSecretValues(config), ...(authorization?.sensitiveValues ?? [])]
   signal.throwIfAborted()
   const client = new Client({ name: 'forage', version: '0.1.0' }, {
     capabilities: {}, listMaxPages: 16,
@@ -95,8 +107,15 @@ export async function connectMcp(
     stdio.stderr?.on('data', () => undefined)
     transport = stdio
   } else {
+    const oauth = config.authentication?.method === 'oauth'
+    if (oauth && (identity.environment !== 'local' || !authorization)) throw new Error('MCP: Sign in again to use this server.')
     transport = new StreamableHTTPClientTransport(new URL(config.url), {
-      requestInit: { headers: config.headers }, fetch: boundedMcpFetch,
+      requestInit: { headers: config.headers }, fetch: oauth ? oauthFetch(config.url, signal, true) : boundedMcpFetch,
+      ...(oauth ? { authProvider: { token: async () => {
+        const token = await authorization!.accessToken(identity.id, config.url, signal)
+        if (!secrets.includes(token)) secrets.push(token)
+        return token
+      } } } : {}),
       onInsufficientScope: 'throw',
       reconnectionOptions: { maxRetries: 0, initialReconnectionDelay: 1_000, maxReconnectionDelay: 1_000, reconnectionDelayGrowFactor: 1 },
     })
@@ -123,15 +142,18 @@ export async function connectMcp(
     if (listed.tools.length > MCP_MAX_TOOLS) throw new Error('Too many MCP tools')
     const names = new Set<string>()
     const tools = listed.tools.map((tool) => {
+      const schemaText = JSON.stringify(tool.inputSchema)
+      if (secrets.some((secret) => tool.name.includes(secret) || schemaText.includes(secret) || schemaText.includes(JSON.stringify(secret).slice(1, -1)))) throw new Error('Unsupported secret-bearing tool schema')
       if (names.has(tool.name)) throw new Error('Duplicate MCP tool name')
       names.add(tool.name)
-      const binding = 'command' in config ? { command: config.command, args: config.args, cwd: config.cwd ?? '' } : { url: config.url }
+      const binding = mcpBinding(config)
       const definition = { name: tool.name, title: tool.title ?? tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema, binding }
       const fingerprint = digest(definition)
+      const bindingFingerprint = digest(binding)
       return mcpToolSchema.parse({
-        id: mcpToolId(identity.environment, identity.id, tool.name, fingerprint), remoteName: tool.name,
+        id: mcpToolId(identity.environment, identity.id, tool.name, bindingFingerprint), remoteName: tool.name,
         name: redact(tool.title ?? tool.name, secrets), description: redact(tool.description ?? '', secrets),
-        inputSchema: tool.inputSchema, fingerprint,
+        inputSchema: tool.inputSchema, fingerprint, bindingFingerprint,
       })
     })
     if (JSON.stringify(tools).length > 250_000) throw new Error('MCP tool inventory exceeds the size limit')
@@ -153,6 +175,7 @@ export async function connectMcp(
         } catch (error) {
           combined.throwIfAborted()
           if (error instanceof McpToolError) throw error
+          if ('url' in config && config.authentication?.method === 'oauth' && isAuthorizationFailure(error)) authorization?.unauthorized?.(identity.id)
           throw new Error('MCP tool call failed. It was not retried; external changes may already have occurred. Check the server and connection.')
         }
       },
@@ -161,6 +184,10 @@ export async function connectMcp(
     await close()
     signal.throwIfAborted()
     const detail = error instanceof Error ? error.message : ''
+    if ('url' in config && config.authentication?.method === 'oauth') {
+      if (isAuthorizationFailure(error)) { authorization?.unauthorized?.(identity.id); throw new Error('MCP: Sign in again to use this server.') }
+      if (detail.startsWith('MCP:')) throw error
+    }
     const reason = /401|403|auth|unauthorized/i.test(detail) ? 'Authentication failed. Check the configured headers or environment.'
       : /ENOENT|not found/i.test(detail) ? 'Command not found. Install the required runtime or use an absolute executable path.'
         : /timeout|timed out|abort/i.test(detail) ? 'Connection timed out.'
@@ -172,6 +199,13 @@ export async function connectMcp(
 
 class McpToolError extends Error {}
 
+function isAuthorizationFailure(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  return ('status' in error && (error.status === 401 || error.status === 403))
+    || ('code' in error && (error.code === 401 || error.code === 403))
+    || (error instanceof Error && /Unauthorized|InsufficientScope/.test(error.name))
+}
+
 export function mcpResultText(result: CallToolResult): string {
   const blocks: string[] = []
   if (result.structuredContent !== undefined) blocks.push(JSON.stringify(result.structuredContent))
@@ -182,14 +216,15 @@ export function mcpResultText(result: CallToolResult): string {
   return blocks.join('\n').slice(0, MAX_RESULT_CHARS) || '(No text returned.)'
 }
 
-export async function discoverMcp(identity: Pick<McpConnection, 'id' | 'name' | 'environment'>, config: McpServerConfig, signal = new AbortController().signal): Promise<McpConnection> {
-  const session = await connectMcp(identity, config, signal)
+export async function discoverMcp(identity: Pick<McpConnection, 'id' | 'name' | 'environment'>, config: McpServerConfig, signal = new AbortController().signal, authorization?: McpAuthorization): Promise<McpConnection> {
+  const session = await connectMcp(identity, config, signal, authorization)
   try { return mcpConnectionSchema.parse({ ...identity, enabled: true, tools: session.tools }) }
   finally { await session.close() }
 }
 
 export async function openMcpTools(
   connections: readonly McpRunConnection[], allowedToolIds: readonly string[], signal: AbortSignal,
+  authorization?: McpAuthorization,
 ): Promise<{ tools: RuntimeTool[]; close: () => Promise<void> }> {
   const sessions: McpSession[] = []
   const tools: RuntimeTool[] = []
@@ -200,18 +235,21 @@ export async function openMcpTools(
     for (const { connection, config } of connections) {
       const admitted = connection.tools.filter((tool) => allowed.has(tool.id))
       if (!admitted.length) continue
-      if (!connection.enabled || connection.error) throw new Error('MCP connection is unavailable.')
-      const session = await connectMcp(connection, config, signal)
+      if (!mcpConnectionAvailable(connection)) throw new Error('MCP connection is unavailable. Sign in or review access in Settings.')
+      const session = await connectMcp(connection, config, signal, authorization)
       sessions.push(session)
       for (const tool of admitted) {
         if (ids.has(tool.id)) throw new Error('Duplicate MCP tool identity.')
         ids.add(tool.id)
-        const discovered = session.tools.find((candidate) => candidate.id === tool.id)
-        if (!discovered || discovered.fingerprint !== tool.fingerprint || canonicalJson(discovered.inputSchema) !== canonicalJson(tool.inputSchema)) {
-          throw new Error('MCP tools changed. Refresh the connection and review its tools before retrying.')
+        const discovered = session.tools.find((candidate) => candidate.remoteName === tool.remoteName)
+        if (!discovered) throw new Error('An approved MCP tool is no longer available. Refresh its connection.')
+        const bindingChanged = tool.bindingFingerprint ? discovered.bindingFingerprint !== tool.bindingFingerprint
+          : digest({ name: tool.remoteName, title: tool.name, description: tool.description, inputSchema: tool.inputSchema, binding: mcpBinding(config) }) !== tool.fingerprint
+        if (bindingChanged) {
+          throw new Error('MCP connection binding changed. Reconnect the server before retrying.')
         }
-        tools.push({ id: tool.id, name: `${connection.name} · ${tool.name}`, description: tool.description,
-          inputSchema: tool.inputSchema, execute: (input, callSignal) => session.call(discovered, input, callSignal) })
+        tools.push({ id: tool.id, name: `${connection.name} · ${discovered.name}`, description: discovered.description,
+          inputSchema: discovered.inputSchema, execute: (input, callSignal) => session.call(discovered, input, callSignal) })
       }
     }
     for (const id of allowed) if (/^mcp_[ls]_/.test(id) && !ids.has(id)) throw new Error('An admitted MCP tool is unavailable. Refresh its connection.')

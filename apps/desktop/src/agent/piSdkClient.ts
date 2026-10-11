@@ -1,6 +1,8 @@
 import { appDataDir, resolveResource } from '@tauri-apps/api/path'
 import { Command, type Child } from '@tauri-apps/plugin-shell'
-import { extensionLogEntrySchema, extensionProgressSchema } from '@forage/agent-runtime'
+import { extensionLogEntrySchema, extensionProgressSchema, mcpConnectionAvailable, mcpOAuthTokenRequestSchema, mcpOAuthRequiredSchema, type McpRunConnection } from '@forage/agent-runtime'
+import { markMcpSignInRequired, resolveMcpAccessToken } from './mcpOAuthClient'
+import type { ModelProvider } from '@forage/agent-runtime'
 
 const STDERR_LIMIT = 16_000
 const STDOUT_LINE_LIMIT = 8_000_000
@@ -10,7 +12,7 @@ const ABORT_GRACE_MS = 6_500
 export type PiRpcEvent = Record<string, unknown> & { type: string }
 
 export interface PiProcessOptions {
-  provider: 'openai' | 'openai-codex'
+  provider: ModelProvider
   modelId: string
   apiKey: string
   /** ChatGPT workspace/account id used only by Codex subscription tools. */
@@ -65,6 +67,22 @@ export class PiRpcClient {
   private aborting = false
   private abortTimer: ReturnType<typeof setTimeout> | null = null
   private knownSecrets: string[] = []
+  private mcpBindings = new Map<string, string>()
+  private mcpRevisions = new Map<string, string | undefined>()
+  private mcpAbort = new AbortController()
+
+  setMcpAuthorization(connections: readonly McpRunConnection[]): void {
+    this.mcpAbort.abort()
+    this.mcpAbort = new AbortController()
+    this.mcpBindings.clear()
+    this.mcpRevisions.clear()
+    for (const { connection, config } of connections) {
+      if (connection.environment === 'local' && mcpConnectionAvailable(connection) && 'url' in config && config.authentication?.method === 'oauth') {
+        this.mcpBindings.set(connection.id, config.url)
+        this.mcpRevisions.set(connection.id, connection.authorizationRevision)
+      }
+    }
+  }
 
   async start(options: PiProcessOptions): Promise<void> {
     if (this.child) throw new Error('Pi subprocess is already running.')
@@ -127,6 +145,7 @@ export class PiRpcClient {
   }
 
   async abort(): Promise<void> {
+    this.mcpAbort.abort()
     if (!this.child) return
     this.aborting = true
     this.clearAbortTimer()
@@ -161,6 +180,8 @@ export class PiRpcClient {
   }
 
   async stop(): Promise<void> {
+    this.mcpAbort.abort()
+    this.mcpBindings.clear()
     this.stopping = true
     const child = this.child
     this.child = null
@@ -205,6 +226,25 @@ export class PiRpcClient {
       if (!line.trim()) continue
       try {
         const event = JSON.parse(line) as unknown
+        if (event && typeof event === 'object' && 'type' in event && event.type === 'mcp_oauth_token_request') {
+          const request = mcpOAuthTokenRequestSchema.parse(event)
+          const signal = this.mcpAbort.signal
+          const binding = this.mcpBindings.get(request.connectionId)
+          void (async () => {
+            let accessToken: string | undefined
+            if (binding === request.resource && !this.aborting && !this.stopping) {
+              accessToken = await resolveMcpAccessToken(request.connectionId, request.resource, signal, this.mcpRevisions.get(request.connectionId)).catch(() => undefined)
+              if (accessToken) this.knownSecrets.push(accessToken)
+            }
+            if (!signal.aborted) await this.write({ type: 'mcp_oauth_token_response', requestId: request.requestId, ...(accessToken ? { accessToken } : {}) }).catch(() => undefined)
+          })()
+          continue
+        }
+        if (event && typeof event === 'object' && 'type' in event && event.type === 'mcp_oauth_required') {
+          const request = mcpOAuthRequiredSchema.parse(event)
+          if (this.mcpBindings.has(request.connectionId)) markMcpSignInRequired(request.connectionId, this.mcpRevisions.get(request.connectionId))
+          continue
+        }
         if (!validProtocolEvent(event)) throw new Error('Invalid sidecar event.')
         this.route(event)
       } catch {
@@ -235,6 +275,7 @@ export class PiRpcClient {
   }
 
   private handleExit(error: Error): void {
+    this.mcpAbort.abort()
     this.child = null
     this.clearAbortTimer()
     for (const listener of this.listeners) listener({ type: 'process_error', error: error.message })

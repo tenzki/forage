@@ -87,7 +87,7 @@ Do not persist a new Allow MCP tools master bit or a wildcard grant. A server ro
 
 Unavailable saved references remain identifiable and cannot be silently dropped by unrelated edits. All draft editing remains distinct from effective authorization. A server change to tools while review is open invalidates affected selections and requires review again.
 
-Alternative: persist server-wide or extension-wide permission toggles. Rejected because such grants would unintentionally include future tools and conflict with current per-definition MCP identity.
+Alternative: persist server-wide or extension-wide permission toggles. Rejected because such grants would unintentionally include future tools and conflict with individual MCP tool identity. Existing approved tools automatically use updated definitions on the same binding; new tools still require selection (ADR-0025).
 
 ### 5. One extension detail template and explicit skill drafts
 

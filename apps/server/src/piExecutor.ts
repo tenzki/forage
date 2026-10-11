@@ -36,7 +36,7 @@ import { ProviderError } from './transcript.js'
 export type ServerPiModel = Pick<PiTurnAdapters, 'modelRuntime' | 'model'>
 
 export function modelAuth(credential: ResolvedModelCredential): ModelAuth {
-  if (credential.provider === 'openai') return { providerId: 'openai', accessToken: credential.apiKey }
+  if (credential.provider !== 'openai-codex') return { providerId: credential.provider, accessToken: credential.apiKey }
   return {
     providerId: 'openai-codex',
     accessToken: credential.accessToken,

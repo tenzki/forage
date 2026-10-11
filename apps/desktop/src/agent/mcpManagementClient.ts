@@ -2,8 +2,8 @@ import { resolveResource } from '@tauri-apps/api/path'
 import { Command, type Child } from '@tauri-apps/plugin-shell'
 import { mcpCandidateConfigurationSchema, mcpConnectionSchema, mcpDiscoverySchema, type McpConnection, type McpServerConfig } from '@forage/agent-runtime'
 
-export function discoverLocalMcp(id: string, name: string, config: McpServerConfig): Promise<McpConnection> {
-  return request({ id, name, config }, (response) => {
+export function discoverLocalMcp(id: string, name: string, config: McpServerConfig, accessToken?: string): Promise<McpConnection> {
+  return request({ id, name, config, ...(accessToken ? { accessToken } : {}) }, (response) => {
     const connection = mcpConnectionSchema.parse(response.connection)
     if (connection.id !== id || connection.environment !== 'local') throw new Error('Unexpected connection')
     return connection

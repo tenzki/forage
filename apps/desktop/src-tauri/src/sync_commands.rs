@@ -4,13 +4,42 @@ use crate::server_transport::PinnedServer;
 use base64::Engine;
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::State;
 
 const MAX_STATUS_BYTES: usize = 64 * 1024;
 const MAX_EVENT_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_AGENT_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+#[derive(Default)]
+struct ProviderRequests {
+    pending: BTreeMap<String, tokio::sync::oneshot::Sender<()>>,
+    cancelled: BTreeMap<String, Instant>,
+}
+
+static PROVIDER_REQUESTS: OnceLock<Mutex<ProviderRequests>> = OnceLock::new();
+
+fn register_provider_request(id: &str) -> Result<tokio::sync::oneshot::Receiver<()>, String> {
+    let mut requests = PROVIDER_REQUESTS.get_or_init(|| Mutex::new(ProviderRequests::default())).lock().map_err(|_| "provider request registry unavailable")?;
+    requests.cancelled.retain(|_, time| time.elapsed() < Duration::from_secs(30));
+    if requests.cancelled.remove(id).is_some() { return Err("Provider connection cancelled.".to_string()); }
+    if requests.pending.len() >= 32 || requests.pending.contains_key(id) { return Err("provider connection is already busy".to_string()); }
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    requests.pending.insert(id.to_string(), sender);
+    Ok(receiver)
+}
+
+struct ProviderRequestGuard(String);
+
+impl Drop for ProviderRequestGuard {
+    fn drop(&mut self) {
+        if let Ok(mut requests) = PROVIDER_REQUESTS.get_or_init(|| Mutex::new(ProviderRequests::default())).lock() {
+            requests.pending.remove(&self.0);
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn server_enroll(
@@ -390,15 +419,51 @@ pub async fn server_agent_publish_automation(
 pub async fn server_agent_enroll_api_key(
     state: State<'_, NativeState>,
     request: Value,
+    request_id: Option<String>,
 ) -> Result<Value, String> {
-    agent_request(
-        &state,
-        Method::POST,
-        "agent-credentials/api-key",
-        Some(request),
-        MAX_STATUS_BYTES,
-    )
-    .await
+    let operation = agent_request(&state, Method::POST, "agent-credentials/api-key", Some(request), MAX_STATUS_BYTES);
+    let Some(id) = request_id else { return operation.await; };
+    validate_agent_id(&id)?;
+    let receiver = register_provider_request(&id)?;
+    let _guard = ProviderRequestGuard(id);
+    tokio::select! {
+        biased;
+        _ = receiver => Err("Provider connection cancelled.".to_string()),
+        result = operation => result,
+    }
+}
+
+#[tauri::command]
+pub fn server_agent_cancel_provider_connection(request_id: String) -> Result<(), String> {
+    validate_agent_id(&request_id)?;
+    let mut requests = PROVIDER_REQUESTS.get_or_init(|| Mutex::new(ProviderRequests::default())).lock().map_err(|_| "provider request registry unavailable")?;
+    requests.cancelled.retain(|_, time| time.elapsed() < Duration::from_secs(30));
+    if let Some(sender) = requests.pending.remove(&request_id) { let _ = sender.send(()); }
+    else if requests.cancelled.len() < 32 { requests.cancelled.insert(request_id, Instant::now()); }
+    Ok(())
+}
+
+#[cfg(test)]
+mod provider_connection_tests {
+    use super::{register_provider_request, server_agent_cancel_provider_connection, ProviderRequestGuard};
+
+    #[test]
+    fn cancels_before_registration_and_while_pending() {
+        server_agent_cancel_provider_connection("provider-cancel-before".to_string()).unwrap();
+        assert!(register_provider_request("provider-cancel-before").is_err());
+        let mut receiver = register_provider_request("provider-cancel-during").unwrap();
+        assert!(register_provider_request("provider-cancel-during").is_err());
+        server_agent_cancel_provider_connection("provider-cancel-during".to_string()).unwrap();
+        assert!(receiver.try_recv().is_ok());
+    }
+
+    #[test]
+    fn removes_registry_entries_when_the_request_finishes() {
+        let _receiver = register_provider_request("provider-finished").unwrap();
+        drop(ProviderRequestGuard("provider-finished".to_string()));
+        assert!(register_provider_request("provider-finished").is_ok());
+        drop(ProviderRequestGuard("provider-finished".to_string()));
+    }
 }
 
 #[tauri::command]
@@ -460,6 +525,11 @@ pub async fn server_agent_credential(
         MAX_STATUS_BYTES,
     )
     .await
+}
+
+#[tauri::command]
+pub async fn server_agent_credentials(state: State<'_, NativeState>) -> Result<Value, String> {
+    agent_request(&state, Method::GET, "agent-credentials", None, MAX_STATUS_BYTES).await
 }
 
 #[tauri::command]

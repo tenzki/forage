@@ -125,6 +125,26 @@ describe('sidecar run on the shared Pi turn', () => {
     expect(settled(events)).toEqual({ type: 'agent_settled', outcome: 'outline' })
   })
 
+  it('gives Pi updated schemas for already-approved MCP tools without enabling new tools', async () => {
+    const config = { command: process.execPath, args: [fileURLToPath(new URL('../../../../../../packages/mcp-host/tests/fixture.mjs', import.meta.url))], env: { MCP_FIXTURE_STDIO: '1' } }
+    const connection = await discoverMcp({ id: 'custom', name: 'Custom', environment: 'local' }, config)
+    const tool = connection.tools[0]!
+    const currentConfig = { ...config, env: { MCP_FIXTURE_STDIO: '1', DESCRIPTION_REV: '2', INPUT_KIND: 'n', ADD_TOOL: '1' } }
+    const events = await run([
+      (context) => {
+        expect(context.tools?.map((candidate) => candidate.name)).toEqual([tool.id, 'emit_outline'])
+        expect(context.tools?.find((candidate) => candidate.name === tool.id)).toMatchObject({ description: 'Updated definition', parameters: { properties: { message: { type: 'number' } } } })
+        return fauxAssistantMessage(fauxToolCall(tool.id, { message: 42 }))
+      },
+      (context) => {
+        expect(JSON.stringify(context.messages.filter((message) => message.role === 'toolResult'))).toContain('42')
+        return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: [{ text: 'Updated MCP worked' }] }))
+      },
+    ], { ...payload, enabledToolIds: [tool.id], requiredToolIds: [tool.id], mcpConnections: [{ connection, config: currentConfig }] })
+    expect(settled(events)?.type).toBe('agent_settled')
+    expect(events.some((event) => event.type === 'tool_execution_end' && event.toolName === tool.id && event.isError === false)).toBe(true)
+  })
+
   it('reports first-turn text and resumes the stored call conversation with an answer', async () => {
     const thread = { callId: 'call-1', turn: 1 }
     const first = await run([fauxAssistantMessage(fauxText('Tides follow the moon.'))], { ...payload, thread })

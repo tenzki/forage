@@ -54,3 +54,16 @@ fn keeps_credentials_separated_by_reference() {
     assert_eq!(store.load_credential("local-openai").unwrap(), "api-key");
     assert_eq!(store.load_credential("device_1").unwrap(), "device-token");
 }
+
+#[test]
+fn keeps_all_provider_keys_isolated_and_removes_only_the_selected_key() {
+    let store = EventStore::open_in_memory().expect("open event store");
+    for provider in ["anthropic", "openrouter", "opencode-go", "openai"] {
+        store.store_credential(&format!("local-{provider}"), provider).unwrap();
+    }
+    store.remove_credential("local-anthropic").unwrap();
+    assert!(matches!(store.load_credential("local-anthropic"), Err(StoreError::CredentialMissing)));
+    for provider in ["openrouter", "opencode-go", "openai"] {
+        assert_eq!(store.load_credential(&format!("local-{provider}")).unwrap(), provider);
+    }
+}

@@ -47,7 +47,7 @@ Server detail SHALL place Refresh tools near the tool heading and display each t
 
 #### Scenario: Refresh reveals a changed definition
 - **WHEN** Refresh tools detects a new or changed tool definition
-- **THEN** the detail view identifies the need for review and retains existing authorization safeguards
+- **THEN** definition-only updates retain existing selections without another review, and new tools remain unchecked
 - **AND** refreshing alone grants no additional access
 
 ### Requirement: Truthful server identity

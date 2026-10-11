@@ -19,8 +19,46 @@ function response(status: number, body: unknown): Response {
 }
 
 describe('server credential service', () => {
-  it('enrolls API keys and exposes only sanitized metadata', async () => {
+  it.each(['anthropic', 'openrouter', 'opencode-go', 'openai'] as const)('validates and reconnects one scoped %s account without leaking secrets', async (provider) => {
+    const store = new InMemoryProviderCredentialStore()
+    const validateApiKey = vi.fn(async () => undefined)
+    const service = new ServerCredentialService(store, { encryptionKeys, validateApiKey })
+    const original = await service.enrollApiKey('owner', 'outline', 'private-provider-key-one', provider)
+    await service.disconnect(original.id, 'owner', 'outline')
+    const reconnected = await service.enrollApiKey('owner', 'outline', 'private-provider-key-two', provider)
+    expect(reconnected.id).toBe(original.id)
+    expect(validateApiKey).toHaveBeenCalledTimes(2)
+    expect(await service.accounts('owner', 'outline')).toHaveLength(1)
+    expect(await service.accounts('other-owner', 'outline')).toEqual([])
+    expect(JSON.stringify(await store.get(original.id))).not.toContain('private-provider-key')
+    expect(JSON.stringify(await service.accounts('owner', 'outline'))).not.toContain('private-provider-key')
+    await expect(service.resolve(original.id, 'owner', 'outline')).resolves.toEqual({ provider, apiKey: 'private-provider-key-two' })
+    await expect(service.resolve(original.id, 'other-owner', 'outline')).rejects.toThrow()
+  })
+
+  it('does not enroll a rejected or cancelled key', async () => {
+    const store = new InMemoryProviderCredentialStore()
+    const service = new ServerCredentialService(store, { encryptionKeys, validateApiKey: async () => { throw new Error('Rejected') } })
+    await expect(service.enrollApiKey('owner', 'outline', 'private-provider-key-one', 'anthropic')).rejects.toThrow()
+    expect(await service.accounts('owner', 'outline')).toEqual([])
+    const controller = new AbortController()
+    controller.abort()
+    const cancelled = new ServerCredentialService(store, { encryptionKeys, validateApiKey: async () => undefined })
+    await expect(cancelled.enrollApiKey('owner', 'outline', 'private-provider-key-one', 'anthropic', controller.signal)).rejects.toThrow()
+    expect(await service.accounts('owner', 'outline')).toEqual([])
+  })
+
+  it('retains the ChatGPT account reference when reauthorizing an existing identity', async () => {
     const service = new ServerCredentialService(new InMemoryProviderCredentialStore(), { encryptionKeys })
+    const original = await service.importCodexCredential('owner', 'outline', { accessToken: 'old', refreshToken: 'old-refresh', accountId: 'account', expiresAt: '2030-01-01T00:00:00.000Z' })
+    await service.disconnect(original.id, 'owner', 'outline')
+    const reconnected = await service.importCodexCredential('owner', 'outline', { accessToken: 'new', refreshToken: 'new-refresh', accountId: 'account', expiresAt: '2030-01-01T00:00:00.000Z' })
+    expect(reconnected.id).toBe(original.id)
+    expect(await service.accounts('owner', 'outline')).toHaveLength(1)
+    await expect(service.resolve(original.id, 'owner', 'outline')).resolves.toMatchObject({ provider: 'openai-codex', accessToken: 'new' })
+  })
+  it('enrolls API keys and exposes only sanitized metadata', async () => {
+    const service = new ServerCredentialService(new InMemoryProviderCredentialStore(), { encryptionKeys, validateApiKey: async () => undefined })
     const metadata = await service.enrollApiKey('owner', 'outline', 'sk-a-very-long-secret-api-key')
     expect(metadata.provider).toBe('openai')
     expect(JSON.stringify(metadata)).not.toContain('sk-a-very')

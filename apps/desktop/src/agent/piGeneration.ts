@@ -59,7 +59,7 @@ export async function generateWithPi(
     .map((tool) => [tool.id, `${connection.name} · ${tool.name}`.slice(0, 200)] as const)))
   const customTools = (input.customTools ?? [])
     .filter((tool) => enabledSet.has(tool.id))
-    .map(({ name, description, urlTemplate }) => ({ name, description, urlTemplate }))
+    .map(({ id, description, urlTemplate }) => ({ name: id, description, urlTemplate }))
   let text = ''
   let outline: PiOutlineNode[] | null = null
   const outlineWrites: Promise<void>[] = []
@@ -159,13 +159,14 @@ export async function generateWithPi(
   options.signal?.addEventListener('abort', abort, { once: true })
   try {
     await client.start({
-      provider: resolvedAuth.mode === 'subscription' ? 'openai-codex' : 'openai',
+      provider: auth.provider ?? (resolvedAuth.mode === 'subscription' ? 'openai-codex' : 'openai'),
       modelId: auth.modelId,
       apiKey: resolvedAuth.accessToken,
       accountId: resolvedAuth.mode === 'subscription' ? resolvedAuth.accountId : '',
       ...(resolvedAuth.mode === 'subscription' ? { oauthExpires: resolvedAuth.expires } : {}),
     })
     if (options.signal?.aborted) throw new DOMException('Generation cancelled.', 'AbortError')
+    client.setMcpAuthorization?.(input.mcpConnections ?? [])
     const payload = encodePayload({
       runId: input.runId ?? `run-${startedAt}`,
       instructions: [input.agent?.systemPrompt, input.skill.systemPrompt].filter(Boolean).join('\n\n'),

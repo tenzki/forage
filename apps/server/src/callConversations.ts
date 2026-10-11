@@ -24,7 +24,7 @@ export async function openCallConversation(
 
 /** The entries a settled turn stores: credential values and credential-shaped text redacted, with their size. */
 export function settledTurnEntries(entries: readonly unknown[], credential: ResolvedModelCredential): CallTurnEntries {
-  const secrets = credential.provider === 'openai' ? [credential.apiKey] : [credential.accessToken]
+  const secrets = credential.provider !== 'openai-codex' ? [credential.apiKey] : [credential.accessToken]
   const redacted = entries.map((entry) => redactValue(entry, secrets))
   return { entries: redacted, entryBytes: Buffer.byteLength(JSON.stringify(redacted), 'utf8') }
 }

@@ -1,4 +1,14 @@
-import { ArrowLeft, Puzzle } from 'lucide-react'
+import { Puzzle } from 'lucide-react'
+import { useSettingsNavigation } from './settingsNavigation'
+import { SettingsBackLink } from './SettingsBackLink'
+import { SkillForm } from './AgentEditors'
+import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { usePublishedDraft } from './saveEditorDraft'
+import { useEditorTools } from './useEditorTools'
+import { configurationWithDefaults } from './ExtensionSkillConfigurationForm'
+import { useDraftExit } from './useDraftExit'
+import type { SkillDraft } from '../../agent/definitions'
+import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
 import { useEffect, useMemo, useState } from 'react'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -11,6 +21,8 @@ import type {
 import { nativeLocalCredentialVault } from '../../agent/localCredentials'
 import {
   extensionConfigurationFor,
+  extensionExecutorOptions,
+  extensionToolOptions,
   statusLabel,
   useExtensionStore,
 } from '../../store/extensionStore'
@@ -20,6 +32,7 @@ import { Switch } from '../ui/Switch'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/Button'
 import { Callout } from '../ui/Callout'
+import { CountBadge } from '../ui/CountBadge'
 import { DefinitionRow, ListRow } from '../ui/ListRow'
 import { StatusPill, type StatusTone } from '../ui/StatusPill'
 import { Field, Input, Select, Textarea } from '../ui/Field'
@@ -61,8 +74,15 @@ function SettingsForm({ entry }: { entry: ExtensionCatalogEntry }) {
   const [clearedSecrets, setClearedSecrets] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [baseline, setBaseline] = useState(() => JSON.stringify(declaredValues(configuration?.settings, declarations)))
+  const exit = useDraftExit(JSON.stringify(values) !== baseline || Object.values(secretDrafts).some(Boolean) || clearedSecrets.length > 0, busy, () => undefined)
 
-  useEffect(() => setValues(declaredValues(configuration?.settings, declarations)), [configuration, declarations])
+  useEffect(() => {
+    if (JSON.stringify(values) !== baseline || Object.values(secretDrafts).some(Boolean) || clearedSecrets.length) return
+    const current = declaredValues(configuration?.settings, declarations)
+    setValues(current)
+    setBaseline(JSON.stringify(current))
+  }, [configuration, declarations])
   if (!declarations.length) return null
 
   const update = (key: string, value: string | number | boolean) => setValues((current) => ({ ...current, [key]: value }))
@@ -87,10 +107,11 @@ function SettingsForm({ entry }: { entry: ExtensionCatalogEntry }) {
       await configure(entry.source.installationId, values, references)
       setSecretDrafts({})
       setClearedSecrets([])
+      setBaseline(JSON.stringify(values))
       setSaved(true)
       window.setTimeout(() => setSaved(false), 1500)
-    } catch (saveError) {
-      setError(errorMessage(saveError))
+    } catch {
+      setError('Could not save configuration. Check required fields and retry.')
     }
   }
 
@@ -121,6 +142,7 @@ function SettingsForm({ entry }: { entry: ExtensionCatalogEntry }) {
       <Button variant="primary" disabled={busy || !configuration} onClick={() => void save()}>
         {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save configuration'}
       </Button>
+      {exit.dialog}
     </section>
   )
 }
@@ -172,9 +194,7 @@ function SettingField({ declaration, value, secretConfigured, secretDraft, onCha
 }
 
 function ExtensionDetail({ entry, onBack, onConfigureTools }: {
-  entry: ExtensionCatalogEntry
-  onBack: () => void
-  onConfigureTools: () => void
+  entry: ExtensionCatalogEntry; onBack: () => void; onConfigureTools: () => void
 }) {
   const enable = useExtensionStore((state) => state.enable)
   const disable = useExtensionStore((state) => state.disable)
@@ -182,66 +202,68 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
   const checkUpdates = useExtensionStore((state) => state.checkUpdates)
   const update = useExtensionStore((state) => state.update)
   const remove = useExtensionStore((state) => state.remove)
+  const catalog = useExtensionStore((state) => state.catalog)
   const updateAvailability = useExtensionStore((state) => state.updateAvailability[entry.source.installationId])
   const busy = useExtensionStore((state) => state.busyInstallationId === entry.source.installationId)
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
+  const loaded = useSettingsStore((state) => state.isLoaded)
+  const agents = useSettingsStore((state) => state.agents)
+  const saveSkill = useSettingsStore((state) => state.saveSkill)
+  const navigation = useSettingsNavigation()
+  const { environment, tools } = useEditorTools(extensionToolOptions(catalog))
+  const [skillDraft, setSkillDraft] = useState<SkillDraft | null>(null)
+  const persistSkill = usePublishedDraft(saveSkill, skillDraft)
   const [error, setError] = useState<string | null>(null)
   const declaration = entry.manifest
-  if (!declaration) return <p className="settings-error">This source has no readable Forage manifest.</p>
+  const executors = extensionExecutorOptions(catalog).map((executor) => environment === 'local' ? executor : { ...executor, available: false, unavailableReason: 'Device-local executors require confirmed local execution.' })
   const act = async (action: () => Promise<void>) => {
     setError(null)
-    try { await action() } catch (actionError) { setError(errorMessage(actionError)) }
+    try { await action() } catch { setError('The extension change could not be completed. Review setup and retry; no success is claimed.') }
   }
   const diagnostics = entry.diagnostics.map((diagnostic) => `[${diagnostic.severity}] ${diagnostic.code}: ${diagnostic.message}`).join('\n').slice(0, DIAGNOSTIC_COPY_LIMIT)
-
-  return (
-    <section className="settings-section extension-detail" aria-labelledby="extension-detail-heading">
-      <Button variant="ghost" icon={<ArrowLeft aria-hidden="true" />} className="extension-back" onClick={onBack}>All extensions</Button>
-      <div className="extension-detail-heading">
-        <div><h2 id="extension-detail-heading">{declaration.name}</h2><p>{declaration.description}</p></div>
-        <ExtensionStatusPill entry={entry} />
-      </div>
-      <dl className="m-0 flex flex-col">
-        <DefinitionRow term="Identity">{declaration.id}</DefinitionRow>
-        <DefinitionRow term="Version" mono={false}>{declaration.version}</DefinitionRow>
-        <DefinitionRow term="Source" mono={false}>{sourceLabel(entry)}</DefinitionRow>
-        <DefinitionRow term="Revision">{entry.provenance?.sourceRevision ?? 'Unavailable'}</DefinitionRow>
-        <DefinitionRow term="Contract" mono={false}>{entry.manifest ? 'Current Forage extension contract' : 'Invalid extension manifest'}</DefinitionRow>
-        <DefinitionRow term="Authorization" mono={false}>{entry.tools.filter((tool) => enabledToolIds.includes(tool.id)).length} of {entry.tools.length} tools globally enabled</DefinitionRow>
-      </dl>
-
-      <Callout tone="caution" title="Trusted local code">
-        <p>Enabling this source runs Node.js code with your user permissions. It can access local files, the network, process resources, and values supplied to its run process. The process boundary and tool switches are not a sandbox; disabling a tool does not disable lifecycle hooks.</p>
-      </Callout>
-
-      <section><h3>Declared tools</h3>{declaration.contributes.tools.length ? <ul>{declaration.contributes.tools.map((tool) => <li key={tool.id}><strong>{tool.name}</strong> <code>{tool.id}</code><small>{tool.description}</small></li>)}</ul> : <p className="settings-hint">No tools declared.</p>}</section>
-      <section><h3>Skill executors</h3>{declaredExecutors(entry).length ? <ul>{declaredExecutors(entry).map((executor) => {
-        const readiness = entry.executors?.find((candidate) => candidate.id === executor.id)
-        return <li key={executor.id}><strong>{executor.name}</strong> <code>{declaration.id}/{executor.id}</code><small>{executor.description} {executor.configuration.fields.length} configuration field(s). {readiness?.available ? 'Ready for explicit skill selection.' : 'Unavailable.'}</small></li>
-      })}</ul> : <p className="settings-hint">No skill executors declared.</p>}</section>
-      <section><h3>Lifecycle hooks</h3><p className="settings-hint">{declaration.contributes.hooks.join(', ') || 'No hooks declared.'}</p></section>
-      <section><h3>Declared settings</h3><p className="settings-hint">{declaration.contributes.settings.map((setting) => `${setting.label} (${setting.type}${setting.required ? ', required' : ''})`).join(' · ') || 'No settings declared.'}</p></section>
-
-      {entry.manifest && <SettingsForm entry={entry} />}
-
-      {entry.diagnostics.length > 0 && (
-        <section className="extension-diagnostics"><h3>Diagnostics</h3><pre>{diagnostics}</pre><Button onClick={() => void navigator.clipboard.writeText(diagnostics)}>Copy diagnostics</Button></section>
-      )}
-      {error && <p className="settings-error" role="alert">{error}</p>}
-      <div className="settings-actions extension-actions">
-        {entry.status === 'needs_review' && entry.manifest && <ConfirmButton disabled={busy} label="Review & enable" confirmLabel="Trust and enable" onConfirm={() => void act(() => enable(entry.source.installationId))} />}
+  const closeSkill = () => { setSkillDraft(null); navigation?.restore({ section: 'extensions', page: 'extension', entityId: entry.source.installationId }, onBack) }
+  if (skillDraft) return <section className="settings-section settings-editor"><h2>Create skill</h2><SkillForm key={skillDraft.id} initial={skillDraft} agents={agents} tools={tools} executors={executors} onSave={persistSkill} onCancel={closeSkill} /></section>
+  return <section className="settings-section extension-detail" aria-labelledby="extension-detail-heading">
+    <SettingsBackLink label="Extensions" onBack={navigation ? navigation.back : onBack} />
+    <div className="extension-detail-heading"><span className="settings-server-icon" aria-hidden="true"><Puzzle size={22} /></span><div className="settings-heading-copy"><h2 id="extension-detail-heading">{declaration?.name ?? entry.source.installationId}</h2><p className="settings-hint">{declaration?.description ?? 'This source has no readable Forage manifest.'}</p></div><ExtensionStatusPill entry={entry} /></div>
+    <p className="settings-hint settings-footnote">Version {declaration?.version ?? 'unavailable'} · {sourceLabel(entry)}</p>
+    {declaration?.contributes.settings.length ? <SettingsForm key={entry.source.installationId} entry={entry} /> : <section><h3>Configuration</h3><p className="settings-hint">{declaration ? 'No setup required.' : 'Configuration is unavailable until the manifest can be read.'}</p></section>}
+    <section className="settings-divider"><h3>Tools</h3>{entry.tools.length ? entry.tools.map((tool) => <SwitchFieldInput key={tool.id} className="settings-tool-choice" label={tool.name} hint={entry.status === 'ready' && tool.available && environment === 'local' ? tool.description : 'Unavailable: review trust, configuration, compatibility, and execution environment.'} checked={enabledToolIds.includes(tool.id)} disabled={busy || !loaded || entry.status !== 'ready' || !tool.available || environment !== 'local'} onCheckedChange={(checked) => void act(async () => {
+      await useSettingsStore.getState().setToolEnabled(tool.id, checked)
+      try { await publishLocalAgentConfiguration() } catch { setError('Tool policy was saved on this device, but not published to the server. Retry publication in Connection.') }
+    })} />) : <p className="settings-hint">No agent tools. Use a declared action in a skill, if available.</p>}
+    </section>
+    {entry.tools.length > 0 && <section className="extension-agent-access"><h3>Agent access</h3><div className="settings-block">{agents.map((agent) => <div key={agent.id} className="settings-extension-access-row"><div><p>{agent.name}</p><p className="settings-hint settings-footnote">{entry.tools.filter((tool) => agent.toolIds.includes(tool.id)).length} of {entry.tools.length} tools selected</p></div><Button size="sm" onClick={() => navigation ? navigation.open('agents', 'agent', undefined, agent.id) : onConfigureTools()}>Edit {agent.name} tools</Button></div>)}</div>{!agents.length && <p>No agents configured.</p>}<Button variant="ghost" className="settings-text-link" onClick={onConfigureTools}>Manage agents</Button></section>}
+    <section className="settings-divider"><h3>Use in a skill</h3>{declaredExecutors(entry).length ? declaredExecutors(entry).map((executor) => {
+      const option = executors.find((candidate) => candidate.extensionId === declaration?.id && candidate.executorId === executor.id)
+      return <div key={executor.id} className="settings-extension-executor"><div><strong>{executor.name}</strong><p className="settings-hint settings-footnote">{executor.description}</p>{!option?.available && <p className="settings-hint settings-footnote">{option?.unavailableReason ?? 'Requires configuration before running.'}</p>}</div><Button aria-label={`Create skill using ${executor.name}`} disabled={!declaration || !option?.available || busy} onClick={() => {
+        const create = () => {
+        setSkillDraft({ id: `draft_${crypto.randomUUID()}`, label: '', description: '', execution: 'extension', executor: { extensionId: declaration!.id, executorId: executor.id }, configuration: configurationWithDefaults(executor.configuration) })
+        navigation?.open('extensions', 'skill', () => { setSkillDraft(null); onBack() })
+        }
+        if (navigation) navigation.requestLeave(create); else create()
+      }}>Create skill</Button></div>
+    }) : <p className="settings-hint">No skill actions declared.</p>}</section>
+    <details><summary>Extension details</summary>
+      <dl className="m-0 flex flex-col"><DefinitionRow term="Identity">{declaration?.id ?? 'Unavailable'}</DefinitionRow><DefinitionRow term="Source" mono={false}>{sourceLabel(entry)}</DefinitionRow><DefinitionRow term="Revision">{entry.provenance?.sourceRevision ?? 'Unavailable'}</DefinitionRow><DefinitionRow term="Compatibility" mono={false}>{declaration ? 'Current Forage extension contract; readiness remains gated by status.' : 'Invalid or missing manifest'}</DefinitionRow><DefinitionRow term="Lifecycle hooks" mono={false}>{declaration?.contributes.hooks.join(', ') || 'No hooks declared.'}</DefinitionRow></dl>
+      <Callout tone="caution" title="Trusted local code"><p>Enabling runs Node.js code with your user permissions, including access to files, network, and supplied values. Tool switches are not a sandbox and do not disable lifecycle hooks.</p></Callout>
+      {entry.diagnostics.length > 0 && <section className="extension-diagnostics"><h3>Diagnostics</h3><pre>{diagnostics}</pre><Button onClick={() => void (async () => { try { await navigator.clipboard.writeText(diagnostics) } catch { setError('Clipboard unavailable. Select the diagnostic text instead.') } })()}>Copy diagnostics</Button></section>}
+    </details>
+    {entry.status === 'needs_review' && <p className="settings-hint">Review trusted local code in Extension details before enabling.</p>}
+    {error && <p className="settings-error" role="alert">{error}</p>}
+      <div className="settings-actions settings-divider extension-actions">
+        {entry.status === 'needs_review' && declaration && <ConfirmButton disabled={busy} label="Review & enable" confirmLabel="Trust and enable" onConfirm={() => void act(() => enable(entry.source.installationId))} />}
         {['ready', 'needs_configuration'].includes(entry.status) && <ConfirmButton disabled={busy} label="Disable" confirmLabel="Confirm disable" onConfirm={() => void act(() => disable(entry.source.installationId))} />}
-        {entry.status === 'disabled' && entry.manifest && <ConfirmButton disabled={busy} label="Enable" confirmLabel="Confirm enable" onConfirm={() => void act(() => enable(entry.source.installationId))} />}
-        {entry.manifest && <ConfirmButton disabled={busy} label="Reload" confirmLabel="Confirm reload" onConfirm={() => void act(() => reload(entry.source.installationId))} />}
+        {entry.status === 'disabled' && declaration && <ConfirmButton disabled={busy} label="Enable" confirmLabel="Confirm enable" onConfirm={() => void act(() => enable(entry.source.installationId))} />}
+        {declaration && <ConfirmButton disabled={busy} label="Reload" confirmLabel="Confirm reload" onConfirm={() => void act(() => reload(entry.source.installationId))} />}
         {(entry.source.kind === 'npm' || entry.source.kind === 'git') && <Button disabled={busy} onClick={() => void act(() => checkUpdates(entry.source.installationId))}>Check for updates</Button>}
         {updateAvailability?.available && <ConfirmButton disabled={busy} label={`Update${updateAvailability.revision ? ` to ${updateAvailability.revision}` : ''}`} confirmLabel="Confirm update" onConfirm={() => void act(() => update(entry.source.installationId))} />}
         <Button disabled={busy} onClick={() => void act(() => revealItemInDir(entry.source.canonicalPath))}>Open source folder</Button>
-        {entry.tools.length > 0 && <Button disabled={busy} onClick={onConfigureTools}>Configure tools</Button>}
         {entry.source.kind !== 'drop-in' && <ConfirmButton disabled={busy} label="Remove" confirmLabel="Confirm remove" variant="danger" onConfirm={() => void act(() => remove(entry.source.installationId).then(onBack))} />}
       </div>
-      {busy && <p className="settings-hint" aria-live="polite">Applying extension change…</p>}
-    </section>
-  )
+
+    {busy && <p className="settings-hint" aria-live="polite">Applying extension change…</p>}
+  </section>
 }
 
 function InstallPreviewCard({ preview, busy, onBack, onInstall }: {
@@ -283,6 +305,15 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
   const confirmInstall = useExtensionStore((state) => state.install)
   const installBusy = useExtensionStore((state) => state.busyInstallationId === 'install-preview' || state.busyInstallationId === null && state.isLoading)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const navigation = useSettingsNavigation()
+  const selectExtension = (id: string | null) => {
+    const select = () => {
+    setSelectedId(id)
+    if (id) navigation?.open('extensions', 'extension', () => setSelectedId(null), id)
+    else if (navigation?.route.page === 'extension') navigation.back()
+    }
+    if (navigation) navigation.requestLeave(select); else select()
+  }
   const [showInstall, setShowInstall] = useState(false)
   const [sourceKind, setSourceKind] = useState<ExtensionSourceRequest['kind']>('local')
   const [sourceValue, setSourceValue] = useState('')
@@ -293,13 +324,21 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
 
   useEffect(() => { if (!isLoaded && !isLoading) void refresh().catch(() => undefined) }, [isLoaded, isLoading, refresh])
   const selected = catalog?.entries.find((entry) => entry.source.installationId === selectedId)
+  useEffect(() => {
+    if (isLoaded && selectedId && !selected) {
+      setSelectedId(null)
+      navigation?.clearGuard()
+      navigation?.back()
+      setActionError('This extension is no longer available. Returned to Extensions.')
+    }
+  }, [isLoaded, selectedId, selected, navigation])
   const groups = useMemo(() => [
     ['Needs attention', catalog?.entries.filter((entry) => ['needs_review', 'needs_configuration', 'error'].includes(entry.status)) ?? []],
     ['Enabled', catalog?.entries.filter((entry) => entry.status === 'ready') ?? []],
     ['Disabled', catalog?.entries.filter((entry) => entry.status === 'disabled') ?? []],
   ] as const, [catalog])
 
-  if (selected) return <ExtensionDetail entry={selected} onBack={() => setSelectedId(null)} onConfigureTools={onConfigureTools} />
+  if (selected) return <ExtensionDetail entry={selected} onBack={() => selectExtension(null)} onConfigureTools={onConfigureTools} />
 
   const requestedSource = (): ExtensionSourceRequest => sourceKind === 'npm'
     ? { kind: 'npm', spec: sourceValue.trim() }
@@ -344,9 +383,11 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
 
   return (
     <section className="settings-section extensions-settings" aria-labelledby="extensions-heading">
-      <div className="extensions-toolbar"><div><h2 id="extensions-heading">Extensions</h2><p className="settings-hint">Inventory reads Forage manifests only. It does not execute code or contact package registries.</p></div><div className="settings-actions"><Button onClick={() => setShowInstall((shown) => !shown)}>Install</Button><Button disabled={!extensionsDirectory} onClick={() => void openExtensionsFolder()}>Open folder</Button><Button disabled={isLoading} onClick={() => void refresh().catch(() => undefined)}>{isLoading ? 'Refreshing…' : 'Refresh'}</Button></div></div>
+      <div className="extensions-toolbar"><div className="settings-heading-copy"><h2 id="extensions-heading">Extensions</h2><p className="settings-hint">Inventory reads Forage manifests only. It does not execute code or contact package registries.</p></div><div className="settings-actions"><Button size="sm" onClick={() => setShowInstall((shown) => !shown)}>Install</Button><Button size="sm" disabled={!extensionsDirectory} onClick={() => void openExtensionsFolder()}>Open folder</Button><Button size="sm" disabled={isLoading} onClick={() => void refresh().catch(() => undefined)}>{isLoading ? 'Refreshing…' : 'Refresh'}</Button></div></div>
+      <div className="settings-block settings-notices">
       <Callout tone="caution" title="Extensions are trusted local code"><p>Review the manifest and source before enabling. Installation, enablement, configuration, and model tool authorization are separate decisions.</p></Callout>
       <Callout tone="info" title="Local execution only."><p>When server execution is authoritative, local extension tools and skill executors are unavailable and Forage will not fall back to this device.</p></Callout>
+      </div>
       {showInstall && <div className="custom-tool-form extension-install-flow">
         <strong>Install or register an extension</strong>
         {!preview ? <>
@@ -372,7 +413,7 @@ export function ExtensionsSettings({ onConfigureTools }: { onConfigureTools: () 
       </div>}
       {(actionError || error) && <p className="settings-error" role="alert">{actionError || error}</p>}
       {!isLoading && catalog?.entries.length === 0 && <div className="extension-empty"><strong>No extensions found</strong><p>Put a manifest-bearing directory in the Extensions folder or register a local development directory.</p></div>}
-      {groups.map(([label, entries]) => entries.length > 0 && <section key={label} className="extension-group" aria-label={label}><h3>{label} <span>{entries.length}</span></h3><div className="tool-list">{entries.map((entry) => { const declaration = entry.manifest; return <ListRow key={entry.source.installationId} leading={<Puzzle />} title={declaration?.name ?? entry.source.installationId} description={declaration ? `${declaration.version} · ${sourceLabel(entry)}` : sourceLabel(entry)} meta={`${entry.tools.length} tool(s) · ${entry.executors?.length ?? 0} executor(s) · ${declaration?.contributes.hooks.length ?? 0} hook(s)`} status={<ExtensionStatusPill entry={entry} />} onClick={() => setSelectedId(entry.source.installationId)} /> })}</div></section>)}
+{groups.map(([label, entries]) => entries.length > 0 && <section key={label} className="extension-group" aria-label={label}><h3>{label} <CountBadge tone={label === 'Needs attention' ? 'attention' : 'default'}>{entries.length}</CountBadge></h3><div className="settings-row-list">{entries.map((entry) => { const declaration = entry.manifest; return <ListRow key={entry.source.installationId} leading={<Puzzle />} title={declaration?.name ?? entry.source.installationId} description={declaration ? `${declaration.version} · ${sourceLabel(entry)} · ${declaration.description}` : sourceLabel(entry)} meta={`${entry.tools.length} tool(s) · ${entry.executors?.length ?? 0} executor(s) · ${declaration?.contributes.hooks.length ?? 0} hook(s)`} status={<ExtensionStatusPill entry={entry} />} onClick={() => selectExtension(entry.source.installationId)} /> })}</div></section>)}
     </section>
   )
 }

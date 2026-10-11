@@ -2,12 +2,14 @@ import { create } from 'zustand'
 import { load } from '@tauri-apps/plugin-store'
 import { invoke } from '@tauri-apps/api/core'
 import {
-  mcpConnectionSchema, mcpImportSchema, mcpInventorySchema, mcpServerConfigSchema,
+  mcpConnectionAvailable, mcpConnectionSchema, mcpImportSchema, mcpInventorySchema, mcpServerConfigSchema, retainMcpToolIds,
+  type McpOAuthProgress,
   type McpConnection, type McpDiscovery, type McpRunConnection, type McpServerConfig, type McpSnapshot,
 } from '@forage/agent-runtime'
 import { nativeLocalCredentialVault } from '../agent/localCredentials'
 import { discoverLocalMcp, resolveLocalMcpCandidate, scanLocalMcp } from '../agent/mcpManagementClient'
 import { useSettingsStore } from './settingsStore'
+import { authorizeLocalMcp, cancelMcpAuthorization, invalidateMcpAuthorization, onMcpSignInRequired, onMcpAuthorizationAllowed, resolveMcpManagementAccessToken } from '../agent/mcpOAuthClient'
 
 const reference = (id: string) => `forage-mcp/${id}/configuration`
 export interface McpStoreDependencies {
@@ -19,6 +21,8 @@ export interface McpStoreDependencies {
   serverInventory: () => Promise<unknown>
   scan: typeof scanLocalMcp
   resolveCandidate: typeof resolveLocalMcpCandidate
+  authorize?: typeof authorizeLocalMcp
+  invalidateAuthorization?: typeof invalidateMcpAuthorization
 }
 const defaults: McpStoreDependencies = {
   read: async () => (await load('mcp-connections.json', { autoSave: false })).get('connections'),
@@ -28,7 +32,10 @@ const defaults: McpStoreDependencies = {
     await store.save()
   },
   vault: nativeLocalCredentialVault,
-  discover: discoverLocalMcp,
+  discover: async (id, name, config) => discoverLocalMcp(id, name, config,
+    'url' in config && config.authentication?.method === 'oauth' ? await resolveMcpManagementAccessToken(id, config.url, useMcpStore.getState().connections.find((connection) => connection.id === id)?.authorizationRevision) : undefined),
+  authorize: authorizeLocalMcp,
+  invalidateAuthorization: invalidateMcpAuthorization,
   deauthorize: async (ids) => {
     for (const id of ids) await useSettingsStore.getState().setToolEnabled(id, false)
   },
@@ -43,14 +50,19 @@ interface McpState {
   loaded: boolean
   busy: boolean
   error: string | null
+  authorizationProgress: McpOAuthProgress | null
+  signIn: (id: string) => Promise<McpConnection>
+  reviewAccess: (id: string) => Promise<void>
+  requireSignIn: (id: string, revision?: string) => Promise<void>
+  cancelAuthorization: () => Promise<void>
   discovery: McpDiscovery | null
   scanning: boolean
   discoveryError: string | null
   scanConnections: () => Promise<void>
   connectCandidate: (id: string, values: Record<string, string>, name: string) => Promise<McpConnection>
   load: () => Promise<void>
-  addConnection: (name: string, config: McpServerConfig) => Promise<void>
-  importConnections: (json: string) => Promise<void>
+  addConnection: (name: string, config: McpServerConfig) => Promise<McpConnection>
+  importConnections: (json: string) => Promise<McpConnection[]>
   refresh: (id: string) => Promise<void>
   setEnabled: (id: string, enabled: boolean) => Promise<void>
   remove: (id: string) => Promise<void>
@@ -87,14 +99,41 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
       const serialized = JSON.stringify(config)
       if (new TextEncoder().encode(serialized).length > 100_000) throw new Error('MCP configuration exceeds the size limit.')
       const id = crypto.randomUUID()
-      const connection = { ...await dependencies.discover(id, name, config), ...(discoveryId ? { discoveryId } : {}) }
-      await dependencies.vault.store(reference(id), serialized)
+      const oauth = 'url' in config && config.authentication?.method === 'oauth'
+      if (oauth && !dependencies.authorize) throw new Error('MCP: Browser sign-in is unavailable.')
+      const connection = { ...await (oauth ? dependencies.authorize!(id, name, config, (authorizationProgress) => set({ authorizationProgress })) : dependencies.discover(id, name, config)), ...(oauth ? { authorizationRevision: crypto.randomUUID() } : {}),
+        ...('url' in config && config.authentication ? { authentication: config.authentication.method } : {}), ...(discoveryId ? { discoveryId } : {}) }
+      if (!oauth) await dependencies.vault.store(reference(id), serialized)
       try { await save([...get().connections, connection]) }
-      catch (error) { await dependencies.vault.remove(reference(id)).catch(() => undefined); throw error }
+      catch (error) {
+        if (oauth) await dependencies.invalidateAuthorization?.(id).catch(() => undefined)
+        else await dependencies.vault.remove(reference(id)).catch(() => undefined)
+        throw error
+      }
       return connection
     }
     return {
-      connections: [], serverConnections: [], loaded: false, busy: false, error: null,
+      connections: [], serverConnections: [], loaded: false, busy: false, error: null, authorizationProgress: null,
+      cancelAuthorization: async () => { await cancelMcpAuthorization(); set({ authorizationProgress: null }) },
+      requireSignIn: (id, revision) => perform(async () => {
+        await save(get().connections.map((connection) => connection.id === id && connection.authentication === 'oauth' && (!revision || connection.authorizationRevision === revision)
+          ? { ...connection, authorizationStatus: 'sign_in_required' } : connection))
+      }),
+      reviewAccess: (id) => perform(async () => {
+        await save(get().connections.map((connection) => connection.id === id && connection.authorizationStatus === 'review_required'
+          ? { ...connection, authorizationStatus: 'connected' } : connection))
+      }),
+      signIn: (id) => perform(async () => {
+        const previous = get().connections.find((connection) => connection.id === id)
+        if (!previous || previous.authentication !== 'oauth' || !dependencies.authorize) throw new Error('MCP: Browser sign-in is unavailable.')
+        await save(get().connections.map((connection) => connection.id === id ? { ...connection, authorizationStatus: 'sign_in_required' } : connection))
+        const next = retainMcpToolIds(previous, await dependencies.authorize(id, previous.name, await configFor(id), (authorizationProgress) => set({ authorizationProgress })))
+        const changed = previous.tools.filter((tool) => !next.tools.some((candidate) => candidate.id === tool.id))
+        await dependencies.deauthorize(changed.map((tool) => tool.id))
+        const connection: McpConnection = { ...next, enabled: previous.enabled, authentication: 'oauth', authorizationStatus: 'review_required', authorizationRevision: crypto.randomUUID(), ...(previous.discoveryId ? { discoveryId: previous.discoveryId } : {}) }
+        await save(get().connections.map((before) => before.id === id ? connection : before))
+        return connection
+      }),
       discovery: null, scanning: false, discoveryError: null,
       scanConnections: async () => {
         if (get().scanning) return
@@ -124,7 +163,7 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
         if (!parsedConfig.success) throw new Error('Check the server URL, command, and credential fields. Remote URLs require HTTPS; localhost may use HTTP.')
         await ensureLoaded()
         if (get().connections.length >= 32) throw new Error('At most 32 MCP connections are supported.')
-        await connect(parsedName.data, parsedConfig.data)
+        return connect(parsedName.data, parsedConfig.data)
       }),
       importConnections: (json) => perform(async () => {
         if (json.length > 100_000) throw new Error('MCP configuration exceeds the size limit.')
@@ -133,18 +172,20 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
         catch { throw new Error('Enter mcpServers JSON with command/args/env or url/headers. Remote URLs require HTTPS; localhost may use HTTP.') }
         await ensureLoaded()
         if (get().connections.length + Object.keys(imported.mcpServers).length > 32) throw new Error('At most 32 MCP connections are supported.')
-        for (const [name, config] of Object.entries(imported.mcpServers)) {
-          await connect(name, config)
-        }
+        const connected: McpConnection[] = []
+        for (const [name, config] of Object.entries(imported.mcpServers)) connected.push(await connect(name, config))
+        return connected
       }),
       refresh: (id) => perform(async () => {
         const previous = get().connections.find((connection) => connection.id === id)
         if (!previous) throw new Error('MCP connection no longer exists.')
         try {
-          const next = await dependencies.discover(id, previous.name, await configFor(id))
-          const changedIds = previous.tools.filter((tool) => next.tools.find((candidate) => candidate.id === tool.id)?.fingerprint !== tool.fingerprint).map((tool) => tool.id)
+          const next = retainMcpToolIds(previous, await dependencies.discover(id, previous.name, await configFor(id)))
+          const changedIds = previous.tools.filter((tool) => !next.tools.some((candidate) => candidate.id === tool.id)).map((tool) => tool.id)
           await dependencies.deauthorize(changedIds)
-          await save(get().connections.map((connection) => connection.id === id ? { ...next, enabled: previous.enabled } : connection))
+          await save(get().connections.map((connection) => connection.id === id ? { ...next, enabled: previous.enabled,
+            ...(previous.authentication ? { authentication: previous.authentication } : {}), ...(previous.authorizationStatus ? { authorizationStatus: previous.authorizationStatus } : {}), ...(previous.authorizationRevision ? { authorizationRevision: previous.authorizationRevision } : {}),
+            ...(previous.discoveryId ? { discoveryId: previous.discoveryId } : {}) } : connection))
         } catch (error) {
           await save(get().connections.map((connection) => connection.id === id ? { ...connection, error: 'Connection unavailable. Refresh to reconnect.' } : connection))
           throw error
@@ -154,6 +195,7 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
         await save(get().connections.map((connection) => connection.id === id ? { ...connection, enabled } : connection))
       }),
       remove: (id) => perform(async () => {
+        if (get().connections.find((connection) => connection.id === id)?.authentication === 'oauth') await dependencies.invalidateAuthorization?.(id)
         await dependencies.deauthorize(get().connections.find((connection) => connection.id === id)?.tools.map((tool) => tool.id) ?? [])
         await save(get().connections.filter((connection) => connection.id !== id))
         await dependencies.vault.remove(reference(id))
@@ -169,8 +211,10 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
         const output: McpRunConnection[] = []
         for (const admitted of snapshot) {
           const current = get().connections.find((connection) => connection.id === admitted.id)
-          if (!current?.enabled || current.error || admitted.environment !== 'local'
-            || admitted.tools.some((tool) => !current.tools.some((candidate) => candidate.id === tool.id && candidate.fingerprint === tool.fingerprint))) {
+          if (!current || !mcpConnectionAvailable(current) || admitted.environment !== 'local'
+            || admitted.authorizationRevision && admitted.authorizationRevision !== current.authorizationRevision
+            || admitted.tools.some((tool) => !current.tools.some((candidate) => candidate.id === tool.id && candidate.remoteName === tool.remoteName
+              && (!tool.bindingFingerprint || candidate.bindingFingerprint === tool.bindingFingerprint)))) {
             throw new Error('MCP connection changed or is disabled. Refresh it before retrying.')
           }
           output.push({ connection: admitted, config: await configFor(admitted.id) })
@@ -182,12 +226,17 @@ export function createMcpStore(dependencies: McpStoreDependencies = defaults) {
 }
 
 export const useMcpStore = createMcpStore()
+onMcpSignInRequired((id, revision) => useMcpStore.getState().requireSignIn(id, revision))
+onMcpAuthorizationAllowed((id, revision) => {
+  const connection = useMcpStore.getState().connections.find((entry) => entry.id === id)
+  return !!connection && mcpConnectionAvailable(connection) && (!revision || revision === connection.authorizationRevision)
+})
 
 export function mcpToolOptions(connections: readonly McpConnection[]) {
   return connections.flatMap((connection) => connection.tools.map((tool) => ({
     id: tool.id, name: `${connection.name} · ${tool.name}`, description: tool.description,
     sourceName: connection.name, environment: connection.environment,
-    available: connection.enabled && !connection.error,
-    unavailableReason: connection.error ?? (connection.enabled ? undefined : 'Connection disabled'),
+    available: mcpConnectionAvailable(connection),
+    unavailableReason: connection.authorizationStatus === 'sign_in_required' ? 'Sign in required' : connection.authorizationStatus === 'review_required' ? 'Review access required' : connection.error ?? (connection.enabled ? undefined : 'Connection disabled'),
   })))
 }

@@ -7,7 +7,7 @@
 ## 2. Desktop connections
 
 - [x] 2.1 Add a credential-free discovery sidecar and native packaging permissions; verify subprocess discovery tests and sidecar build.
-- [x] 2.2 Add device-local connection metadata and vault-backed configuration, import/connect/refresh/disable/remove, and changed-tool deauthorization; verify store tests.
+- [x] 2.2 Add device-local connection metadata and vault-backed configuration, import/connect/refresh/disable/remove, approval retention across definition updates, and removed-tool deauthorization; verify store tests.
 - [x] 2.3 Add MCP Settings and agent tool selection; verify UI tests for arbitrary configuration, errors, and independent enablement.
 - [x] 2.4 Admit MCP inventory and execute authorized tools in local runs, including secret resolution and cleanup; verify local runner and sidecar tests.
 

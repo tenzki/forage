@@ -148,6 +148,8 @@ For the system share-sheet workflow, see [Capture to Inbox with Apple Shortcuts]
 
 ## Server agent executor
 
+Connection Settings can enroll Anthropic, OpenRouter, OpenCode Go, and OpenAI API keys, or connect ChatGPT with device-code OAuth. Pi-engine readiness advertises the exact supported provider/model catalog; the legacy engine advertises only OpenAI and ChatGPT. Account inventory and revision-checked compute edits remain server-owned, with no automatic transfer of desktop secrets. Apply migration `0007_model_providers.sql` before enabling the new providers. See [provider connections](provider-connections.md) for validation endpoints, cancellation, and older-server limitations.
+
 Server mode executes both manual slash commands and eligible Inbox automation on the authoritative server. It never falls back to the desktop executor during an outage. PostgreSQL is the durable queue; no Redis service is required. Runs use bounded leases, `FOR UPDATE SKIP LOCKED` claims, append-only activity, limited retry attempts, durable cancellation, and exactly one result identity. Manual admission receives only an invocation ID, source ID, skill ID, prompt, and acknowledged outline revision; the server resolves everything else lazily and snapshots it immutably.
 
 Validated structured output is stored before placement. Successful placement adds the complete generated subtree in one `agent.result_committed` event at the latest outline revision. If its stable target is missing or trashed, the run becomes `completed_unplaced` and the output remains available for one later placement under a searched live destination. Closing the popup, closing Forage, or disconnecting does not cancel server work; remembered run cursors resume on reconnect.

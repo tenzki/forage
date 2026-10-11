@@ -38,14 +38,53 @@ describe('MCP connections', () => {
     expect(run.tools[0]!.id).toMatch(/^mcp_l_[a-f0-9]{48}$/)
   })
 
-  it('does not start servers with no admitted tools and rejects missing or changed definitions', async () => {
+  it('does not start servers with no admitted tools and rejects missing tools', async () => {
     const connection = await discoverMcp(identity, config)
     const none = await openMcpTools([{ connection, config: { command: '/does/not/exist', args: [], env: {} } }], [], new AbortController().signal)
     expect(none.tools).toEqual([])
     const tool = connection.tools[0]!
-    await expect(openMcpTools([{ connection, config: { ...config, env: { ...('env' in config ? config.env : {}), DESCRIPTION: 'Changed schema description' } } }], [tool.id], new AbortController().signal))
-      .rejects.toThrow('MCP tools changed')
+    await expect(openMcpTools([{ connection, config: { ...config, env: { MCP_FIXTURE_STDIO: '1', OMIT_ECHO: '1' } } }], [tool.id], new AbortController().signal))
+      .rejects.toThrow('no longer available')
     await expect(openMcpTools([], [tool.id], new AbortController().signal)).rejects.toThrow('unavailable')
+  })
+
+  it('uses current definitions without changing approvals or exposing unapproved tools', async () => {
+    const connection = await discoverMcp(identity, config)
+    const tool = connection.tools[0]!
+    const changedConfig = { ...config, env: { MCP_FIXTURE_STDIO: '1', DESCRIPTION_REV: '2', INPUT_KIND: 'n', ADD_TOOL: '1' } }
+    const updated = await discoverMcp(identity, changedConfig)
+    expect(updated.tools[0]!.id).toBe(tool.id)
+    expect(updated.tools[0]!.fingerprint).not.toBe(tool.fingerprint)
+    expect(updated.tools).toHaveLength(4)
+    const run = await openMcpTools([{ connection, config: changedConfig }], [tool.id], new AbortController().signal)
+    cleanup.push(run.close)
+    expect(run.tools).toHaveLength(1)
+    expect(run.tools[0]).toMatchObject({ id: tool.id, description: 'Updated definition', inputSchema: { properties: { message: { type: 'number' } } } })
+    expect(await run.tools[0]!.execute({ message: 42 }, new AbortController().signal)).toContain('42')
+  })
+
+  it('supports saved legacy permission IDs while keeping the live session identity private', async () => {
+    const connection = await discoverMcp(identity, config)
+    const current = connection.tools[0]!
+    const { bindingFingerprint: _binding, ...legacyDefinition } = current
+    const legacy = { ...legacyDefinition, id: mcpToolId('local', connection.id, current.remoteName, current.fingerprint) }
+    const run = await openMcpTools([{ connection: { ...connection, tools: [legacy] }, config: { ...config, env: { MCP_FIXTURE_STDIO: '1', DESCRIPTION_REV: '2' } } }], [legacy.id], new AbortController().signal)
+    cleanup.push(run.close)
+    expect(run.tools[0]!.id).toBe(legacy.id)
+    expect(run.tools[0]!.description).toBe('Updated definition')
+    expect(await run.tools[0]!.execute({ message: 'legacy approval' }, new AbortController().signal)).toContain('legacy approval')
+  })
+
+  it('does not carry approvals across changed command bindings', async () => {
+    const connection = await discoverMcp(identity, config)
+    const changedConfig = { ...config, args: [...('args' in config ? config.args : []), 'different-binding'] }
+    const updated = await discoverMcp(identity, changedConfig)
+    expect(updated.tools[0]!.id).not.toBe(connection.tools[0]!.id)
+    await expect(openMcpTools([{ connection, config: changedConfig }], [connection.tools[0]!.id], new AbortController().signal))
+      .rejects.toThrow('binding changed')
+    const { bindingFingerprint: _binding, ...legacy } = connection.tools[0]!
+    await expect(openMcpTools([{ connection: { ...connection, tools: [legacy] }, config: changedConfig }], [legacy.id], new AbortController().signal))
+      .rejects.toThrow('binding changed')
   })
 
   it('preserves failures, redacts configured secrets, and cancels outstanding calls', async () => {

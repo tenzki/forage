@@ -1,170 +1,22 @@
 import { Plus } from 'lucide-react'
-import { Fragment, useId, useState } from 'react'
-import { mcpToolOptions } from '../../store/mcpStore'
-import { useMcpConnections } from './useMcpConnections'
-import { validateExtensionSkillConfiguration } from '@forage/agent-runtime'
-import {
-  isExtensionSkill,
-  type AgentDefinition,
-  type AgentDraft,
-  type ExtensionSkillDraft,
-  type SkillDefinition,
-  type SkillDraft,
-} from '../../agent/definitions'
+import { useEffect, useId, useState } from 'react'
+import { isExtensionSkill, type AgentDraft, type SkillDraft, type SkillDefinition } from '../../agent/definitions'
 import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
-import { BUILTIN_TOOL_OPTIONS, type ToolOption } from '../../agent/tools'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { ExtensionExecutorOption, ExtensionToolOption } from '../../store/extensionStore'
-import { SwitchFieldInput } from '../ui/SwitchFieldInput'
+import { AgentForm, SkillForm } from './AgentEditors'
+import { useEditorTools } from './useEditorTools'
+import { usePublishedDraft } from './saveEditorDraft'
+import { useSettingsNavigation } from './settingsNavigation'
 import { ConfirmButton } from './ConfirmButton'
-import {
-  configurationWithDefaults,
-  configurationWithoutUndeclaredFields,
-  ExtensionSkillConfigurationForm,
-  type ConfigurationIssue,
-} from './ExtensionSkillConfigurationForm'
 import { Button } from '../ui/Button'
 import { ListRow } from '../ui/ListRow'
-import { Field, Input, Select, Textarea } from '../ui/Field'
-
-interface SelectorTool extends ToolOption {
-  group: string
-  available: boolean
-  isExtension?: boolean
-  unavailableReason?: string
-}
-
-const EMPTY_AGENT: AgentDraft = { name: '', description: '', systemPrompt: '', toolIds: [] }
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
-
-function useInlineSave<T>(onSave: (draft: T) => Promise<void>) {
-  const [error, setError] = useState<string | null>(null)
-  return {
-    error,
-    save: async (draft: T) => {
-      setError(null)
-      try { await onSave(draft) } catch (saveError) { setError(errorMessage(saveError)) }
-    },
-  }
-}
-
-function AgentForm({ initial, tools, onSave, onCancel }: {
-  initial: AgentDraft; tools: SelectorTool[]; onSave: (draft: AgentDraft) => Promise<void>; onCancel: () => void
-}) {
-  const [draft, setDraft] = useState(initial)
-  const { error, save } = useInlineSave(onSave)
-  const update = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => setDraft((before) => ({ ...before, [key]: value }))
-  return <div className="custom-tool-form agent-form" role="group" aria-label="Agent editor">
-    <Field label="Agent name"><Input autoFocus aria-label="Agent name" value={draft.name} onChange={(event) => update('name', event.target.value)} /></Field>
-    <Field label="Description"><Input aria-label="Agent description" value={draft.description} onChange={(event) => update('description', event.target.value)} /></Field>
-    <Field label="Instructions"><Textarea aria-label="Agent instructions" value={draft.systemPrompt} onChange={(event) => update('systemPrompt', event.target.value)} /></Field>
-    <fieldset className="agent-tool-list"><legend>Allowed tools</legend>{groupTools(tools).map(([group, entries]) => <div className="agent-tool-group" key={group}><strong>{group}</strong>{entries.map((tool) => <SwitchFieldInput
-      key={tool.id} checked={draft.toolIds.includes(tool.id)} label={tool.name}
-      hint={tool.available ? tool.description : `${tool.description} Unavailable: ${tool.unavailableReason ?? 'provider missing'}`}
-      disabled={!tool.available} onCheckedChange={(checked) => update('toolIds', checked ? [...draft.toolIds, tool.id] : draft.toolIds.filter((id) => id !== tool.id))}
-    />)}</div>)}</fieldset>
-    {error && <p className="settings-error" role="alert">{error}</p>}
-    <div className="settings-actions"><Button variant="primary" onClick={() => void save(draft)}>Save agent</Button><Button onClick={onCancel}>Cancel</Button></div>
-  </div>
-}
-
-function executorValue(executor: { extensionId: string; executorId: string }): string {
-  return `${executor.extensionId}/${executor.executorId}`
-}
-
-function SkillForm({ initial, agents, tools, executors, onSave, onCancel }: {
-  initial: SkillDraft; agents: AgentDefinition[]; tools: SelectorTool[]; executors: ExtensionExecutorOption[]
-  onSave: (draft: SkillDraft) => Promise<void>; onCancel: () => void
-}) {
-  const [draft, setDraft] = useState(initial)
-  const [configurationIssues, setConfigurationIssues] = useState<ConfigurationIssue[]>([])
-  const { error, save } = useInlineSave(async (candidate: SkillDraft) => {
-    if (candidate.execution === 'extension') {
-      const executor = executors.find((option) => option.extensionId === candidate.executor.extensionId && option.executorId === candidate.executor.executorId)
-      if (!executor?.available) throw new Error(executor?.unavailableReason ?? 'The selected extension executor is unavailable. Its saved configuration has been retained.')
-      const configuration = configurationWithoutUndeclaredFields(executor.configuration, candidate.configuration)
-      const validation = validateExtensionSkillConfiguration(executor.configuration, configuration)
-      if (!validation.valid) {
-        setConfigurationIssues(validation.issues)
-        throw new Error('Fix the highlighted extension configuration fields before saving.')
-      }
-      await onSave({ ...candidate, configuration })
-      return
-    }
-    await onSave(candidate)
-  })
-  const selectedExecutor = draft.execution === 'extension'
-    ? executors.find((option) => option.extensionId === draft.executor.extensionId && option.executorId === draft.executor.executorId)
-    : undefined
-  const retainedExecutor = draft.execution === 'extension' && !selectedExecutor
-    ? {
-      ...draft.executor, name: `${draft.executor.extensionId}/${draft.executor.executorId}`,
-      description: 'This configured executor is missing or unavailable.', sourceName: 'Unavailable reference',
-      installationId: '', allowEmptyPrompt: false, configuration: { fields: [] }, available: false,
-      unavailableReason: 'The extension is not installed.',
-    } satisfies ExtensionExecutorOption
-    : undefined
-  const executionOptions = [...executors, ...(retainedExecutor ? [retainedExecutor] : [])]
-  const updateCommon = (key: 'label' | 'description', value: string) => setDraft((before) => ({ ...before, [key]: value }))
-  const requiredToolIds = draft.execution === 'extension' ? [] : (draft.requiredToolIds ?? [])
-  const agentTools = draft.execution === 'extension' ? [] : tools.filter((tool) => agents.find((agent) => agent.id === draft.agentId)?.toolIds.includes(tool.id))
-  const chooseAgent = (agentId: string) => {
-    const allowed = agents.find((agent) => agent.id === agentId)?.toolIds ?? []
-    setDraft((before) => before.execution === 'extension' ? before : ({ ...before, agentId, requiredToolIds: (before.requiredToolIds ?? []).filter((id) => allowed.includes(id)) }))
-  }
-  const chooseExecution = (value: string) => {
-    setConfigurationIssues([])
-    if (value === 'llm') {
-      setDraft((before): SkillDraft => ({
-        ...(before.id ? { id: before.id } : {}), label: before.label, description: before.description,
-        execution: 'llm', systemPrompt: '', agentId: agents[0]?.id ?? '', requiredToolIds: [],
-      }))
-      return
-    }
-    const executor = executors.find((option) => executorValue(option) === value)
-    if (!executor?.available) return
-    setDraft((before): ExtensionSkillDraft => ({
-      ...(before.id ? { id: before.id } : {}), label: before.label, description: before.description,
-      execution: 'extension', executor: { extensionId: executor.extensionId, executorId: executor.executorId },
-      configuration: configurationWithDefaults(executor.configuration),
-    }))
-  }
-  return <div className="custom-tool-form agent-form" role="group" aria-label="Skill editor">
-    <Field label="Slash command"><Input autoFocus mono aria-label="Slash command" value={draft.label} onChange={(event) => updateCommon('label', event.target.value)} /></Field>
-    <Field label="Description"><Input aria-label="Skill description" value={draft.description} onChange={(event) => updateCommon('description', event.target.value)} /></Field>
-    <Field label="Execution"><Select aria-label="Skill execution" value={draft.execution === 'extension' ? executorValue(draft.executor) : 'llm'} onChange={(event) => chooseExecution(event.target.value)}>
-      <option value="llm">LLM agent</option>
-      {executionOptions.map((executor) => <option key={executorValue(executor)} value={executorValue(executor)} disabled={!executor.available}>
-        {executor.sourceName} · {executor.name}{executor.available ? '' : ' (unavailable)'}
-      </option>)}
-    </Select></Field>
-    {draft.execution === 'extension' ? <>
-      {selectedExecutor?.description && <p className="settings-hint">{selectedExecutor.description}</p>}
-      {(selectedExecutor ?? retainedExecutor) && <ExtensionSkillConfigurationForm
-        form={(selectedExecutor ?? retainedExecutor)!.configuration}
-        configuration={draft.configuration}
-        issues={configurationIssues}
-        onChange={(configuration) => { setConfigurationIssues([]); setDraft((before) => before.execution === 'extension' ? { ...before, configuration } : before) }}
-      />}
-      {!selectedExecutor?.available && <p className="settings-error" role="alert">{selectedExecutor?.unavailableReason ?? retainedExecutor?.unavailableReason}</p>}
-    </> : <>
-      <Field label="Agent"><Select aria-label="Skill agent" value={draft.agentId} onChange={(event) => chooseAgent(event.target.value)}>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</Select></Field>
-      <Field label="Workflow instructions"><Textarea aria-label="Skill instructions" value={draft.systemPrompt} onChange={(event) => setDraft((before) => before.execution === 'extension' ? before : { ...before, systemPrompt: event.target.value })} /></Field>
-      <fieldset className="agent-tool-list"><legend>Required tools</legend>{agentTools.map((tool) => <SwitchFieldInput
-      key={tool.id} checked={requiredToolIds.includes(tool.id)} label={tool.name} hint={tool.description} disabled={!tool.available}
-      onCheckedChange={(checked) => setDraft((before) => before.execution === 'extension' ? before : { ...before, requiredToolIds: checked ? [...requiredToolIds, tool.id] : requiredToolIds.filter((id) => id !== tool.id) })}
-      />)}</fieldset>
-    </>}
-    {error && <p className="settings-error" role="alert">{error}</p>}
-    <div className="settings-actions"><Button variant="primary" onClick={() => void save(draft)}>Save skill</Button><Button onClick={onCancel}>Cancel</Button></div>
-  </div>
-}
 
 function SkillRow({ skill, agentName, onEdit, onRemove }: {
   skill: SkillDefinition; agentName: string; onEdit?: () => void; onRemove: () => void
 }) {
   return <ListRow title={`/${skill.label}`} description={skill.description} meta={agentName} actions={<>
-    {onEdit && <Button size="sm" onClick={onEdit}>Edit</Button>}
+    {onEdit && <Button id={`edit-skill-${skill.id}`} size="sm" onClick={onEdit}>Edit</Button>}
     <ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove /${skill.label}`} confirmAriaLabel={`Confirm removing /${skill.label}`} onConfirm={onRemove} />
   </>} />
 }
@@ -172,60 +24,67 @@ function SkillRow({ skill, agentName, onEdit, onRemove }: {
 export function AgentSettings({ extensionTools = [], extensionExecutors = [], reportError }: {
   extensionTools?: ExtensionToolOption[]; extensionExecutors?: ExtensionExecutorOption[]; reportError: (error: unknown) => void
 }) {
-  const { connections: mcpConnections, error: mcpError } = useMcpConnections()
   const agents = useSettingsStore((state) => state.agents)
   const skills = useSettingsStore((state) => state.skills)
-  const customTools = useSettingsStore((state) => state.customTools)
   const saveAgent = useSettingsStore((state) => state.saveAgent)
-  const removeAgent = useSettingsStore((state) => state.removeAgent)
   const saveSkill = useSettingsStore((state) => state.saveSkill)
-  const removeSkill = useSettingsStore((state) => state.removeSkill)
-  const reset = useSettingsStore((state) => state.resetAgentConfiguration)
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null)
   const [skillDraft, setSkillDraft] = useState<SkillDraft | null>(null)
-  const [syncError, setSyncError] = useState<{ section: 'agents' | 'skills'; message: string } | null>(null)
-  const agentsHeadingId = useId()
-  const skillsHeadingId = useId()
-  const tools: SelectorTool[] = [
-    ...BUILTIN_TOOL_OPTIONS.map((tool) => ({ ...tool, group: 'Built-in', available: true })),
-    ...customTools.map(({ id, name, description }) => ({ id, name, description, group: 'Custom HTTP', available: true })),
-    ...extensionTools.map((tool) => ({ ...tool, group: `Extension · ${tool.sourceName}`, isExtension: true })),
-    ...mcpToolOptions(mcpConnections).map((tool) => ({ ...tool, group: 'MCP', isExtension: true })),
-  ]
-  const publish = async (section: 'agents' | 'skills') => {
-    setSyncError(null)
-    try { await publishLocalAgentConfiguration() } catch (error) { setSyncError({ section, message: `Saved on this device, but not published to the server: ${errorMessage(error)}` }) }
+  const [message, setMessage] = useState<string | null>(null)
+  const navigation = useSettingsNavigation()
+  const { tools, connections, environment } = useEditorTools(extensionTools, [...(agentDraft?.toolIds ?? []), ...agents.flatMap((agent) => agent.toolIds)])
+  const persistAgent = usePublishedDraft(saveAgent, agentDraft)
+  const persistSkill = usePublishedDraft(saveSkill, skillDraft)
+  const headingId = useId()
+  const close = () => {
+    setAgentDraft(null); setSkillDraft(null)
+    if (navigation?.route.section === 'agents' && navigation.route.page) navigation.back()
   }
-  const perform = async (action: () => Promise<void>, done?: () => void | Promise<void>) => {
-    try { await action() } catch (error) { reportError(error); return }
-    await done?.()
+  const editAgent = (draft: AgentDraft) => {
+    const action = () => { setSkillDraft(null); setAgentDraft(draft); navigation?.open('agents', 'agent', () => setAgentDraft(null), draft.id) }
+    if (navigation) navigation.requestLeave(action); else action()
   }
+  const editSkill = (draft: SkillDraft) => {
+    const action = () => { setAgentDraft(null); setSkillDraft(draft); navigation?.open('agents', 'skill', () => setSkillDraft(null), draft.id) }
+    if (navigation) navigation.requestLeave(action); else action()
+  }
+  useEffect(() => {
+    const missing = agentDraft?.id && !agentDraft.id.startsWith('draft_') && !agents.some((agent) => agent.id === agentDraft.id)
+      || skillDraft?.id && !skillDraft.id.startsWith('draft_') && !skills.some((skill) => skill.id === skillDraft.id)
+    if (missing) { setAgentDraft(null); setSkillDraft(null); navigation?.clearGuard(); navigation?.back(); setMessage('This saved item is no longer available. Returned to Agents.') }
+  }, [agents, skills, agentDraft, skillDraft, navigation])
+  useEffect(() => {
+    if (navigation?.route.section === 'agents' && navigation.route.page === 'agent' && navigation.route.entityId && !agentDraft) {
+      const agent = agents.find((candidate) => candidate.id === navigation.route.entityId)
+      if (agent) setAgentDraft({ ...agent, toolIds: [...agent.toolIds] })
+      else { navigation.back(); setMessage('This saved item is no longer available. Returned to Agents.') }
+    }
+  }, [navigation, agents, agentDraft])
+  const perform = async (operation: () => Promise<void>) => {
+    try {
+      await operation()
+      try { await publishLocalAgentConfiguration() } catch { setMessage('Saved on this device, but not published to the server. Retry publication in Connection.') }
+    } catch (error) { reportError(error) }
+  }
+  const executors = extensionExecutors.map((executor) => environment !== 'local' ? { ...executor, available: false, unavailableReason: 'Device-local extension executors require confirmed local execution.' } : executor)
+  if (agentDraft) return <section className="settings-section settings-editor" aria-label="Agents"><div className="settings-heading-copy"><h2>Edit agent</h2><p className="settings-hint">{agentDraft.name || 'Create a named assistant with its own instructions and tools.'}</p></div><AgentForm key={agentDraft.id} initial={agentDraft} tools={tools} connections={connections} onSave={persistAgent} onCancel={close} /></section>
+  if (skillDraft) return <section className="settings-section settings-editor" aria-label="Skills"><div className="settings-heading-copy"><h2>Edit skill</h2><p className="settings-hint">{skillDraft.label ? `/${skillDraft.label}` : 'Create a workflow using an agent or extension.'}</p></div><SkillForm key={skillDraft.id} initial={skillDraft} agents={agents} tools={tools} executors={executors} onSave={persistSkill} onCancel={close} /></section>
   return <>
-    <section className="settings-section" aria-labelledby={agentsHeadingId}><h2 id={agentsHeadingId}>Agents</h2><div className="tool-list">{agents.map((agent) => <Fragment key={agent.id}>
-      <ListRow title={agent.name} description={agent.description} meta={`${agent.toolIds.length} tool(s)`} actions={<><Button size="sm" onClick={() => setAgentDraft({ ...agent, toolIds: [...agent.toolIds] })}>Edit</Button><ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove ${agent.name}`} confirmAriaLabel={`Confirm removing ${agent.name}`} onConfirm={() => void perform(() => removeAgent(agent.id), () => publish('agents'))} /></>} />
-      {agentDraft?.id === agent.id && <AgentForm key={agent.id} initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} />}
-    </Fragment>)}</div>
-      {mcpError && <p className="settings-hint">MCP tools could not be loaded. Open MCP servers in Settings to reconnect.</p>}
-      {syncError?.section === 'agents' && <p className="settings-error" role="alert">{syncError.message}</p>}
-      {agentDraft && !agentDraft.id ? <AgentForm initial={agentDraft} tools={tools} onSave={async (draft) => { await saveAgent(draft); setAgentDraft(null); await publish('agents') }} onCancel={() => setAgentDraft(null)} /> : <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setAgentDraft({ ...EMPTY_AGENT, toolIds: tools.filter((tool) => tool.available && !tool.isExtension).map((tool) => tool.id) })}>Add agent</Button>}
+    <section className="settings-section settings-group" aria-labelledby={headingId}><div className="settings-heading-copy"><h2 id={headingId}>Agents</h2><p className="settings-hint">Named assistants with their own instructions and allowed tools.</p></div>
+      <div className="settings-row-list">{agents.map((agent) => <ListRow key={agent.id} title={agent.name} description={agent.description} meta={`${agent.toolIds.length} tool(s)`} actions={<>
+        <Button id={`edit-agent-${agent.id}`} size="sm" onClick={() => editAgent({ ...agent, toolIds: [...agent.toolIds] })}>Edit</Button>
+        <ConfirmButton variant="danger" size="sm" label="Remove" confirmLabel="Confirm remove" ariaLabel={`Remove ${agent.name}`} confirmAriaLabel={`Confirm removing ${agent.name}`} onConfirm={() => void perform(() => useSettingsStore.getState().removeAgent(agent.id))} />
+      </>} />)}</div>
+      <Button variant="add" icon={<Plus aria-hidden="true" />} onClick={() => editAgent({ id: `draft_${crypto.randomUUID()}`, name: '', description: '', systemPrompt: '', toolIds: [] })}>Add agent</Button>
     </section>
-    <section className="settings-section" aria-labelledby={skillsHeadingId}><h2 id={skillsHeadingId}>Skills</h2><p className="settings-hint">Choose an LLM agent or an installed extension executor. Extensions provide declarative fields but never install commands or skills.</p><div className="tool-list">{skills.map((skill) => <Fragment key={skill.id}>
-      <SkillRow skill={skill}
-        agentName={isExtensionSkill(skill) ? `Extension · ${skill.executor.extensionId}/${skill.executor.executorId}` : agents.find((agent) => agent.id === skill.agentId)?.name ?? 'Missing agent'}
-        onEdit={() => setSkillDraft(isExtensionSkill(skill) ? { ...skill, configuration: structuredClone(skill.configuration) } : { ...skill })}
-        onRemove={() => void perform(() => removeSkill(skill.id), () => publish('skills'))}
-      />
-      {skillDraft?.id === skill.id && <SkillForm key={skill.id} initial={skillDraft} agents={agents} tools={tools} executors={extensionExecutors} onSave={async (draft) => { await saveSkill(draft); setSkillDraft(null); await publish('skills') }} onCancel={() => setSkillDraft(null)} />}
-    </Fragment>)}</div>
-      {syncError?.section === 'skills' && <p className="settings-error" role="alert">{syncError.message}</p>}
-      {skillDraft && !skillDraft.id ? <SkillForm initial={skillDraft} agents={agents} tools={tools} executors={extensionExecutors} onSave={async (draft) => { await saveSkill(draft); setSkillDraft(null); await publish('skills') }} onCancel={() => setSkillDraft(null)} /> : <Button variant="add" icon={<Plus aria-hidden="true" />} className="self-start" onClick={() => setSkillDraft({ label: '', description: '', execution: 'llm', systemPrompt: '', agentId: agents[0]?.id ?? '', requiredToolIds: [] })}>Add skill</Button>}
-      <ConfirmButton label="Restore built-in agents and skills" confirmLabel="Confirm restore built-ins" className="reset-agents" onConfirm={() => void perform(reset, () => publish('skills'))} />
+    <section className="settings-section settings-group" aria-label="Skills"><div className="settings-heading-copy"><h2>Skills</h2>
+      <p className="settings-hint">Workflows using an agent or extension. Extensions never install skills automatically.</p></div>
+      <div className="settings-row-list">{skills.map((skill) => <SkillRow key={skill.id} skill={skill} agentName={isExtensionSkill(skill) ? `Extension · ${skill.executor.extensionId}/${skill.executor.executorId}` : agents.find((agent) => agent.id === skill.agentId)?.name ?? 'Missing agent'} onEdit={() => editSkill(isExtensionSkill(skill) ? { ...skill, configuration: structuredClone(skill.configuration) } : { ...skill })} onRemove={() => void perform(() => useSettingsStore.getState().removeSkill(skill.id))} />)}</div>
+      <div className="settings-actions">
+      <Button variant="add" icon={<Plus aria-hidden="true" />} onClick={() => editSkill({ id: `draft_${crypto.randomUUID()}`, label: '', description: '', execution: 'llm', systemPrompt: '', agentId: agents[0]?.id ?? '', requiredToolIds: [] })}>Add skill</Button>
+      <ConfirmButton label="Restore built-in agents and skills" confirmLabel="Confirm restore built-ins" onConfirm={() => void perform(useSettingsStore.getState().resetAgentConfiguration)} />
+      </div>
     </section>
+    {message && <p role="alert" className="settings-error">{message}</p>}
   </>
-}
-
-function groupTools(tools: SelectorTool[]): Array<[string, SelectorTool[]]> {
-  const groups = new Map<string, SelectorTool[]>()
-  for (const tool of tools) groups.set(tool.group, [...(groups.get(tool.group) ?? []), tool])
-  return [...groups.entries()]
 }

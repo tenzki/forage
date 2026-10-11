@@ -28,7 +28,7 @@ Candidate IDs bind the source definition and resolved configuration. Connect re-
 
 ### Admission and inventory stability
 
-Tool permission IDs include a digest of the connection ID, exact remote tool name, definition fingerprint, and command/endpoint binding, obeying the existing 64-character limit. Identical definitions keep stable IDs; changed definitions receive new IDs and therefore require renewed authorization even across backend restarts. Local and backend IDs use separate namespaces to avoid accidentally authorizing a different environment's connection. Discovery does not enable tools. A run carries the selected tool inventory; connecting for execution verifies that inventory before exposing tools. New tools are never inserted into an active run. Remove/disable retains portable references as unavailable.
+Tool permission IDs include a digest of the connection ID, exact remote tool name, and command/endpoint binding, obeying the existing 64-character limit. Definition fingerprints remain metadata rather than permission identity. Approved tools automatically use current validated definitions; approval trusts future semantic changes on the same binding. Local refresh retains legacy IDs by remote name without rewriting saved selections, while backend upgrades from definition-hashed IDs require one initial selection of the stable IDs. Local and backend IDs use separate namespaces. Discovery does not enable tools. A run carries approved identities; connecting for execution verifies binding and remote-name availability, then exposes current descriptions and input schemas under saved permission IDs. Legacy snapshots reconstruct their original definition fingerprint against the resolved binding, failing closed when redaction prevents that check. New tools are never inserted into an active run. Remove/disable retains portable references as unavailable. See ADR-0025.
 
 ### Lifecycle and results
 
@@ -41,7 +41,7 @@ MCP tools may mutate external systems. Do not automatically retry an MCP call af
 ## Risks / Trade-offs
 
 - [Arbitrary local commands are trusted code] → Explicit connect action and explanation; minimal child environment; no sandbox claim.
-- [Servers change tools] → Compare inventories at discovery refresh and execution; fail changed tools closed.
+- [Servers change tools] → Load current validated definitions for approved remote names; keep new tools disabled and fail missing names or changed bindings closed. Approval trusts future semantic changes.
 - [External actions complete before cancellation or failure] → No automatic replay for MCP-enabled turns; document uncertain outcomes.
 - [Remote authentication diversity] → State header-auth compatibility and OAuth limitation in UI and docs.
 - [Many discovered tools overflow model or current policy bounds] → Bounded discovery and at most the existing 64 authorized tools per agent; discovery alone never sends all tools to the model.

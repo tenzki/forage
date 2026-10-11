@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { credentialMetadataSchema, deviceAuthorizationStartResponseSchema, deviceAuthorizationStatusSchema, type CredentialMetadata } from '@forage/protocol'
 import { decryptSecret, encryptSecret, type EncryptedSecret, type EncryptionKey } from './credentialCrypto.js'
+import { apiKeyProviderSchema, validateProviderConnection, type ApiKeyProvider, type ModelProvider } from '@forage/agent-runtime'
 
-type Provider = 'openai-codex' | 'openai'
+type Provider = ModelProvider
 type Status = CredentialMetadata['status']
 
 export interface ProviderCredentialRecord {
@@ -13,6 +14,8 @@ export interface ProviderCredentialRecord {
 
 export interface ProviderCredentialStore {
   insert(record: ProviderCredentialRecord): Promise<void>
+  list(ownerId: string, outlineId: string): Promise<ProviderCredentialRecord[]>
+  enroll(record: ProviderCredentialRecord): Promise<ProviderCredentialRecord>
   get(id: string): Promise<ProviderCredentialRecord | null>
   mutate<T>(id: string, operation: (record: ProviderCredentialRecord) => Promise<{ record: ProviderCredentialRecord; result: T }>): Promise<T>
 }
@@ -20,6 +23,20 @@ export interface ProviderCredentialStore {
 export class InMemoryProviderCredentialStore implements ProviderCredentialStore {
   private readonly records = new Map<string, ProviderCredentialRecord>()
   private readonly locks = new Map<string, Promise<void>>()
+
+  async list(ownerId: string, outlineId: string): Promise<ProviderCredentialRecord[]> {
+    return [...this.records.values()].filter((record) => record.ownerId === ownerId && record.outlineId === outlineId).map((record) => structuredClone(record))
+  }
+
+  async enroll(record: ProviderCredentialRecord): Promise<ProviderCredentialRecord> {
+    const existing = [...this.records.values()].find((entry) => entry.ownerId === record.ownerId && entry.outlineId === record.outlineId && entry.provider === record.provider)
+    if (existing) return this.mutate(existing.id, async () => {
+      const changed = { ...record, id: existing.id, createdAt: existing.createdAt }
+      return { record: changed, result: structuredClone(changed) }
+    })
+    this.records.set(record.id, structuredClone(record))
+    return structuredClone(record)
+  }
 
   async insert(record: ProviderCredentialRecord): Promise<void> {
     if (this.records.has(record.id)) throw new Error('Credential already exists.')
@@ -64,12 +81,13 @@ interface DeviceSecret { kind: 'device'; deviceAuthId: string; userCode: string;
 type StoredSecret = CodexSecret | ApiKeySecret | DeviceSecret
 
 export type ResolvedModelCredential =
-  | { provider: 'openai'; apiKey: string }
+  | { provider: ApiKeyProvider; apiKey: string }
   | { provider: 'openai-codex'; accessToken: string; accountId: string; expiresAt: string }
 
 interface CredentialServiceOptions {
   encryptionKeys: EncryptionKey[]
   fetch?: typeof globalThis.fetch
+  validateApiKey?: typeof validateProviderConnection
   oauth?: {
     deviceUrl: string
     deviceTokenUrl: string
@@ -89,15 +107,17 @@ export class ServerCredentialService {
     this.fetch = options.fetch ?? globalThis.fetch
   }
 
-  async enrollApiKey(ownerId: string, outlineId: string, apiKey: string): Promise<CredentialMetadata> {
-    if (apiKey.trim().length < 20) throw new CredentialServiceError('provider_rejected', 'OpenAI API key is invalid.')
+  async enrollApiKey(ownerId: string, outlineId: string, apiKey: string, provider: ApiKeyProvider = 'openai', signal?: AbortSignal): Promise<CredentialMetadata> {
+    apiKeyProviderSchema.parse(provider)
+    if (apiKey.trim().length < 20) throw new CredentialServiceError('provider_rejected', 'Provider API key is invalid.')
+    await (this.options.validateApiKey ?? validateProviderConnection)(provider, apiKey, { fetch: this.fetch, signal })
+    signal?.throwIfAborted()
     const now = new Date().toISOString()
     const record: ProviderCredentialRecord = {
-      id: `credential_${randomUUID()}`, ownerId, outlineId, provider: 'openai', status: 'connected',
+      id: `credential_${randomUUID()}`, ownerId, outlineId, provider, status: 'connected',
       encrypted: this.encrypt({ kind: 'api_key', apiKey: apiKey.trim() }), createdAt: now, updatedAt: now,
     }
-    await this.store.insert(record)
-    return metadata(record)
+    return metadata(await this.store.enroll(record))
   }
 
   async startDeviceAuthorization(ownerId: string, outlineId: string) {
@@ -124,7 +144,7 @@ export class ServerCredentialService {
   }
 
   async pollDeviceAuthorization(id: string, ownerId: string, outlineId: string) {
-    return this.store.mutate(id, async (record) => {
+    const status = await this.store.mutate(id, async (record) => {
       this.requireOwner(record, ownerId, outlineId)
       if (record.status === 'connected') return { record, result: deviceAuthorizationStatusSchema.parse({ state: 'connected', authorizationId: id, credential: metadata(record) }) }
       if (record.status !== 'pending' || !record.encrypted) return { record, result: deviceAuthorizationStatusSchema.parse({ state: 'failed', authorizationId: id }) }
@@ -169,6 +189,12 @@ export class ServerCredentialService {
       }
       return { record: changed, result: deviceAuthorizationStatusSchema.parse({ state: 'connected', authorizationId: id, credential: metadata(changed) }) }
     })
+    if (status.state !== 'connected') return status
+    const completed = await this.store.get(id)
+    if (!completed) throw new CredentialServiceError('authentication_required', 'Credential is unavailable.')
+    const enrolled = await this.store.enroll(completed)
+    if (enrolled.id !== id) await this.disconnect(id, ownerId, outlineId)
+    return deviceAuthorizationStatusSchema.parse({ ...status, credential: metadata(enrolled) })
   }
 
   async resolve(id: string, ownerId: string, outlineId: string): Promise<ResolvedModelCredential> {
@@ -176,7 +202,11 @@ export class ServerCredentialService {
       this.requireOwner(record, ownerId, outlineId)
       if (record.status !== 'connected' || !record.encrypted) throw new CredentialServiceError('authentication_required', 'Provider authentication is required.')
       const secret = this.decrypt(record.encrypted)
-      if (secret.kind === 'api_key') return { record, result: { credential: { provider: 'openai' as const, apiKey: secret.apiKey } } }
+      if (secret.kind === 'api_key') {
+        const provider = apiKeyProviderSchema.parse(record.provider)
+        return { record, result: { credential: { provider, apiKey: secret.apiKey } } }
+      }
+      if (record.provider !== 'openai-codex') throw new CredentialServiceError('authentication_required', 'Provider credential does not match its authentication type.')
       if (secret.kind !== 'codex') throw new CredentialServiceError('authentication_required', 'Provider authentication is incomplete.')
       if (new Date(secret.expiresAt).getTime() > Date.now() + 60_000) {
         return { record, result: { credential: resolvedCodex(secret) } }
@@ -211,6 +241,13 @@ export class ServerCredentialService {
     return metadata(record)
   }
 
+  async accounts(ownerId: string, outlineId: string): Promise<CredentialMetadata[]> {
+    return (await this.store.list(ownerId, outlineId)).filter((record) =>
+      (apiKeyProviderSchema.safeParse(record.provider).success || record.provider === 'openai-codex')
+      && record.status !== 'pending' && record.status !== 'disconnected',
+    ).map(metadata)
+  }
+
   async disconnect(id: string, ownerId: string, outlineId: string): Promise<CredentialMetadata> {
     return this.store.mutate(id, async (record) => {
       this.requireOwner(record, ownerId, outlineId)
@@ -226,8 +263,7 @@ export class ServerCredentialService {
       encrypted: this.encrypt({ kind: 'codex', ...secret }), accountLabel: secret.accountId, expiresAt: secret.expiresAt,
       createdAt: now, updatedAt: now,
     }
-    await this.store.insert(record)
-    return metadata(record)
+    return metadata(await this.store.enroll(record))
   }
 
   async importCodexCredentialForTest(ownerId: string, outlineId: string, secret: Omit<CodexSecret, 'kind'>): Promise<string> {

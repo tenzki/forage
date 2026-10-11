@@ -1,8 +1,10 @@
 /// <reference types="vite/client" />
 import { createRoot } from 'react-dom/client'
 import { disableNativeTextAssistance } from './nativeTextAssistance'
+import { initializeTheme } from './themeCache'
 import './style.css'
 
+initializeTheme()
 disableNativeTextAssistance()
 
 const root = createRoot(document.getElementById('app')!)

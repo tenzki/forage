@@ -17,6 +17,7 @@ import {
 } from './codexAuth'
 import type { AgentDefinition } from './definitions'
 import type { LegacySkillDefinition, LlmSkillDefinition } from '@forage/agent-runtime'
+import { apiKeyProviderSchema, type ApiKeyProvider } from '@forage/agent-runtime'
 import {
   resolveTools,
   type CustomHttpToolConfig,
@@ -47,6 +48,7 @@ export interface GenerateInput {
 }
 
 export interface CodexAuthConfig {
+  provider?: ApiKeyProvider | 'openai-codex'
   mode: CodexAuthMode
   apiKey: string
   oauthCredential: CodexOAuthCredential | null
@@ -98,6 +100,7 @@ export async function resolveCodexAuth(
   signal?: AbortSignal,
 ): Promise<ResolvedCodexAuth> {
   if (auth.mode === 'api_key') {
+    if (auth.provider) apiKeyProviderSchema.parse(auth.provider)
     if (!auth.apiKey.trim()) {
       throw new Error('No OpenAI API key set. Open Settings and add your API key.')
     }
@@ -106,6 +109,7 @@ export async function resolveCodexAuth(
   if (!auth.oauthCredential) {
     throw new Error('Not signed in to ChatGPT. Open Settings and connect your subscription.')
   }
+  if (auth.provider && auth.provider !== 'openai-codex') throw new Error('Provider does not support subscription authentication.')
   const credential = await validCodexCredential(auth.oauthCredential, signal)
   if (credential !== auth.oauthCredential) await auth.onCredentialRefresh?.(credential)
   return {
@@ -216,6 +220,7 @@ export async function generate(
   input: GenerateInput,
   { onDelta, onToolActivity, signal }: GenerateOptions,
 ): Promise<string> {
+  if (auth.provider && auth.provider !== 'openai' && auth.provider !== 'openai-codex') throw new Error('This provider requires the Pi execution engine.')
   const apiKey = await resolveAccessToken(auth, signal)
   const provider = providerFor(auth.mode)
   const model = resolveModel(auth.mode, auth.modelId)

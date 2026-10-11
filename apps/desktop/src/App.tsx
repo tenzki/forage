@@ -38,6 +38,7 @@ import {
 } from './editor/persistentHistory'
 import { createDomainEvents } from './persistence/domainEvents'
 import { useSettingsStore } from './store/settingsStore'
+import { useAppearance } from './appearance'
 import type { JsonValue, OutlineShortcut, TrashEntry } from './types/tree'
 import { newNodeId } from './types/tree'
 import {
@@ -115,6 +116,9 @@ function inlineHistoryKey(transaction: Transaction): string | null {
 }
 
 export default function App() {
+  const settingsExit = useRef<((action?: () => void) => void) | null>(null)
+  const leaveSettings = (action: () => void) => settingsExit.current ? settingsExit.current(action) : action()
+  useAppearance()
   const [loaded, setLoaded] = useState(false)
   const [initialContent, setInitialContent] = useState<JsonValue | null>(null)
   const liveDoc = useRef<JsonValue | null>(null)
@@ -479,7 +483,8 @@ export default function App() {
       if (modifier && event.key === ',') {
         event.preventDefault()
         setShortcutsOpen(false)
-        setView((current) => (current === 'settings' ? 'outliner' : 'settings'))
+        if (settingsExit.current) settingsExit.current()
+        else setView((current) => (current === 'settings' ? 'outliner' : 'settings'))
       } else if (modifier && (event.key === '?' || (event.shiftKey && event.key === '/'))) {
         event.preventDefault()
         setShortcutsOpen((open) => !open)
@@ -708,13 +713,13 @@ export default function App() {
           activeView={view}
           shortcutsOpen={shortcutsOpen}
           onChange={handleShortcutsChange}
-          onOpenOutline={() => { setViewError(null); setView('outliner') }}
-          onOpenInbox={openInbox}
-          onOpenDailyNotes={openDailyNotes}
+          onOpenOutline={() => leaveSettings(() => { setViewError(null); setView('outliner') })}
+          onOpenInbox={() => leaveSettings(openInbox)}
+          onOpenDailyNotes={() => leaveSettings(openDailyNotes)}
           onOpenShortcuts={() => setShortcutsOpen(true)}
           onOpenSettings={() => { setViewError(null); setView('settings') }}
-          onOpenTrash={() => { setViewError(null); setView('trash') }}
-          onOpenTasks={openTasks}
+          onOpenTrash={() => leaveSettings(() => { setViewError(null); setView('trash') })}
+          onOpenTasks={() => leaveSettings(openTasks)}
           storageStatus={storageStatus}
         />
         <section className="outline-workspace">
@@ -760,7 +765,7 @@ export default function App() {
             <InternalLinkMenu editor={editor} />
           </div>
           {viewError && <div className="action-error" role="alert">{viewError}<button onClick={() => setViewError(null)}>Dismiss</button></div>}
-          {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} />}
+          {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} registerExit={(exit) => { settingsExit.current = exit }} />}
           {view === 'trash' && editor && (
             <TrashPanel
               editor={editor}

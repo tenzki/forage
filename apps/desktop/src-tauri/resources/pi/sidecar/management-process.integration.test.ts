@@ -84,7 +84,7 @@ describe('real extension management sidecar process', () => {
 
     const run = spawn(process.execPath, [path.join(sidecarRoot, 'dist/index.mjs')], {
       cwd: sidecarRoot,
-      env: { ...process.env, AI_CHAT_PROVIDER: 'openai', AI_CHAT_API_KEY: 'packaged-smoke-key' },
+      env: { ...process.env, AI_CHAT_PROVIDER: 'openai', AI_CHAT_MODEL_ID: 'gpt-5', AI_CHAT_API_KEY: 'packaged-smoke-key' },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     processes.push(run)

@@ -1,5 +1,16 @@
 # Verification
 
+## Automatic approved-tool updates follow-up — 2026-09-30
+
+ADR-0025 replaces definition-bound approval with stable connection/name/binding identities. Runs expose current validated definitions only for approved names; local refresh retains legacy IDs, disables removed tools, and leaves new tools ungranted. Definition-only updates no longer invalidate Settings/agent selections. OAuth account-change review and no external-action replay are unchanged.
+
+- MCP host: `./node_modules/.bin/vitest run --config vitest.config.ts` in `packages/mcp-host`: **3 files, 41 tests passed**. Includes current-schema execution, newly appearing tool exclusion, stable IDs, legacy permission IDs, and changed-binding rejection for both new and legacy snapshots.
+- Root: `./node_modules/.bin/vitest run packages/agent-runtime/src/mcp.test.ts apps/desktop/src/store/mcpStore.test.ts apps/desktop/src/components/Settings/McpSettings.test.tsx apps/desktop/src/components/Settings/AgentEditors.test.tsx apps/desktop/src/store/settingsMcpAccess.test.ts apps/server/src/mcp.test.ts apps/server/src/serverRunner.test.ts apps/desktop/src/agent/piGeneration.test.ts apps/desktop/src/agent/skillExecution.test.ts --exclude '**/.claude/**' --maxWorkers=3`: **9 files, 107 tests passed**.
+- Sidecar: `./node_modules/.bin/vitest run mcp-management.test.ts run.test.ts mcp-oauth.integration.test.ts payload.test.ts --maxWorkers=2 --testTimeout=15000`: **4 files, 22 tests passed**, including scripted Pi execution against a changed schema and source/bundled management/OAuth fixtures. The first higher-concurrency run hit an existing 5-second management-fixture timeout; the lower-concurrency rerun passed without changing that test.
+- TypeScript checks passed for agent-runtime, MCP host, desktop, and sidecar. The normal server check is blocked by the existing `Headers` iterable typing at `packages/mcp-host/src/oauthFetch.ts:62`; the server configuration omits `DOM.Iterable`. The diagnostic server check with `--lib ES2022,DOM,DOM.Iterable` passed, but is not a clean normal server gate.
+- Sidecar `node build.mjs` and desktop `vite build` passed, with existing dependency annotation/chunk-size warnings. Strict OpenSpec validation passed for `add-mcp-client`, `add-local-mcp-oauth`, and `redesign-settings`; `git diff --check` passed.
+- No native/browser session or live provider call was performed. Local legacy approvals require no renewed selection. Backend upgrades from the old definition-hashed IDs need one initial selection of the new stable IDs; later definition updates/restarts preserve them.
+
 Verified on 2026-09-27.
 
 ## Passed checks

@@ -11,6 +11,9 @@
         { "url": "https://auth.openai.com/**" },
         { "url": "https://chatgpt.com/**" },
         { "url": "https://api.openai.com/**" },
+        { "url": "https://api.anthropic.com/v1/models" },
+        { "url": "https://openrouter.ai/api/v1/key" },
+        { "url": "https://opencode.ai/zen/go/v1/usage" },
         { "url": "https://html.duckduckgo.com/**" },
         { "url": "https://r.jina.ai/**" },
         { "url": "https://api.github.com/**" },
@@ -31,7 +34,7 @@
           "cmd": "node",
           "sidecar": false,
           "args": [
-            { "validator": "^.+sidecar/dist/(?:index|management|mcp-management|executor)\\.mjs$" }
+            { "validator": "^.+sidecar/dist/(?:index|management|mcp-management|mcp-oauth|executor)\\.mjs$" }
           ]
         },
         {

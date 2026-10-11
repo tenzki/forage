@@ -4,6 +4,37 @@ import { CredentialServiceError, type ProviderCredentialRecord, type ProviderCre
 export class PostgresProviderCredentialStore implements ProviderCredentialStore {
   constructor(private readonly pool: Pool) {}
 
+  async list(ownerId: string, outlineId: string): Promise<ProviderCredentialRecord[]> {
+    const result = await this.pool.query<CredentialRow>('SELECT * FROM agent_provider_credentials WHERE owner_id=$1 AND outline_id=$2 ORDER BY created_at,id', [ownerId, outlineId])
+    return result.rows.map(fromRow)
+  }
+
+  async enroll(record: ProviderCredentialRecord): Promise<ProviderCredentialRecord> {
+    const client = await this.pool.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [JSON.stringify([record.ownerId, record.outlineId, record.provider])])
+      const selected = await client.query<CredentialRow>(
+        `SELECT * FROM agent_provider_credentials credential WHERE owner_id=$1 AND outline_id=$2 AND provider=$3
+         ORDER BY EXISTS (SELECT 1 FROM agent_compute_profiles profile WHERE profile.credential_reference=credential.id) DESC, created_at,id LIMIT 1 FOR UPDATE`,
+        [record.ownerId, record.outlineId, record.provider],
+      )
+      const previous = selected.rows[0] ? fromRow(selected.rows[0]) : null
+      const changed = previous ? { ...record, id: previous.id, createdAt: previous.createdAt } : record
+      if (previous) await update(client, changed)
+      else await client.query(
+        `INSERT INTO agent_provider_credentials
+         (id,owner_id,outline_id,provider,status,ciphertext,nonce,key_version,account_label,expires_at,created_at,updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, values(changed),
+      )
+      await client.query('COMMIT')
+      return changed
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally { client.release() }
+  }
+
   async insert(record: ProviderCredentialRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO agent_provider_credentials

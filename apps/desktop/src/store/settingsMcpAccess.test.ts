@@ -34,4 +34,19 @@ describe('MCP access grant', () => {
     expect(useSettingsStore.getState().enabledToolIds).toEqual(['web_search'])
     expect(useSettingsStore.getState().agents[0]!.toolIds).toEqual(['web_search'])
   })
+  it('saves scoped global policy without selecting agents and preserves other references', async () => {
+    useSettingsStore.setState({ enabledToolIds: ['web_search', id], agents: [{ id: 'selected', name: 'Selected', description: '', systemPrompt: 'Help.', toolIds: [id] }] })
+    await useSettingsStore.getState().grantMcpToolAccess([], [], [id])
+    expect(useSettingsStore.getState().enabledToolIds).toEqual(['web_search'])
+    expect(useSettingsStore.getState().agents[0]!.toolIds).toEqual([id])
+    expect(disk.save).toHaveBeenCalledTimes(1)
+  })
+  it('atomically saves scoped policy and explicit additions without affecting other servers', async () => {
+    const other = `mcp_s_${'b'.repeat(48)}`
+    useSettingsStore.setState({ enabledToolIds: [other] })
+    await useSettingsStore.getState().grantMcpToolAccess([id], ['selected'], [id])
+    expect(useSettingsStore.getState().enabledToolIds).toEqual([other, id])
+    expect(useSettingsStore.getState().agents[1]!.toolIds).toEqual([])
+    await expect(useSettingsStore.getState().grantMcpToolAccess([other], [], [id])).rejects.toThrow('Choose MCP tools')
+  })
 })

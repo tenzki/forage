@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./test-support": "./src/scripted-model.test-support.ts"
+    "./test-support": "./src/scripted-model.test-support.ts",
+    "./provider-catalog": "./src/provider-catalog.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

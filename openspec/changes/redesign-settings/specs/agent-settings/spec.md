@@ -42,5 +42,5 @@ The editor SHALL expose applicable connected MCP servers with per-server access 
 - **AND** the connection and other agents' access remain unchanged
 
 #### Scenario: Server inventory changes
-- **WHEN** a connected server gains tools or changes an authorized definition
-- **THEN** those definitions are not included by the server-level switch until explicitly reviewed under MCP policy
+- **WHEN** a connected server gains tools or updates an approved tool definition
+- **THEN** new tools remain unselected while existing approved remote names retain their selections and use current definitions under MCP policy

@@ -12,6 +12,18 @@ const endpoint = z.string().url().max(2_000).refine((value) => {
     && (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
 }, 'Use HTTPS, or HTTP on localhost, without credentials, a query, or a fragment')
 
+export const mcpHttpAuthenticationSchema = z.union([
+  z.object({ method: z.enum(['manual', 'none']) }).strict(),
+  z.object({
+    method: z.literal('oauth'),
+    clientId: z.string().min(1).max(2_000).optional(),
+    clientMetadataUrl: z.string().url().max(2_000).refine((value) => {
+      const url = new URL(value)
+      return url.protocol === 'https:' && !url.username && !url.password && !url.hash && url.pathname !== '/'
+    }).optional(),
+  }).strict().refine((value) => !value.clientId || !value.clientMetadataUrl, 'Choose one public-client registration method'),
+])
+
 export const mcpServerConfigSchema = z.union([
   z.object({
     command: z.string().trim().min(1).max(2_000),
@@ -25,7 +37,9 @@ export const mcpServerConfigSchema = z.union([
     headers: strings.refine((headers) => Object.keys(headers).every((key) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key))
       && Object.values(headers).every((value) => !/[\r\n]/.test(value)), 'Invalid HTTP headers').default({}),
     type: z.enum(['http', 'streamable-http']).optional(),
-  }).strict(),
+    authentication: mcpHttpAuthenticationSchema.optional(),
+  }).strict().refine((config) => !['oauth', 'none'].includes(config.authentication?.method ?? '')
+    || !Object.keys(config.headers).some((key) => key.toLowerCase() === 'authorization'), 'Authentication method conflicts with Authorization header'),
 ])
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>
 
@@ -58,6 +72,7 @@ export const mcpToolSchema = z.object({
   description: z.string().max(8_000),
   inputSchema: z.custom<Record<string, unknown>>(validateMcpInputSchema, 'Unsupported or oversized MCP input schema'),
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  bindingFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict()
 export type McpTool = z.infer<typeof mcpToolSchema>
 
@@ -69,8 +84,22 @@ export const mcpConnectionSchema = z.object({
   tools: z.array(mcpToolSchema).max(MCP_MAX_TOOLS),
   error: z.string().max(500).optional(),
   discoveryId: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-}).strict()
+  authentication: z.enum(['manual', 'none', 'oauth']).optional(),
+  authorizationStatus: z.enum(['connected', 'sign_in_required', 'review_required']).optional(),
+  authorizationRevision: z.string().uuid().optional(),
+}).strict().refine((connection) => connection.environment === 'local' || connection.authentication !== 'oauth', 'Desktop OAuth is local only')
+  .refine((connection) => !connection.authorizationStatus || connection.authentication === 'oauth', 'Authorization status requires OAuth')
+  .refine((connection) => connection.authentication !== 'oauth' || !!connection.authorizationStatus, 'OAuth authorization status is required')
 export type McpConnection = z.infer<typeof mcpConnectionSchema>
+
+export function retainMcpToolIds(previous: McpConnection, next: McpConnection): McpConnection {
+  if (previous.id !== next.id || previous.environment !== next.environment) return next
+  return { ...next, tools: next.tools.map((tool) => {
+    const saved = previous.tools.find((candidate) => candidate.remoteName === tool.remoteName)
+    return saved && (!saved.bindingFingerprint || saved.bindingFingerprint === tool.bindingFingerprint)
+      ? { ...tool, id: saved.id } : tool
+  }) }
+}
 export const mcpCandidateSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/),
   name: z.string().min(1).max(80),
@@ -94,15 +123,20 @@ export type McpSnapshot = z.infer<typeof mcpSnapshotSchema>
 export const mcpRunConnectionsSchema = z.array(z.object({
   connection: mcpConnectionSchema,
   config: mcpServerConfigSchema,
-}).strict()).max(32)
+}).strict().refine(({ connection, config }) => !('url' in config) || config.authentication?.method !== 'oauth' || connection.environment === 'local', 'Desktop OAuth is local only')
+  .refine(({ connection, config }) => !connection.authentication || 'url' in config && config.authentication?.method === connection.authentication, 'MCP authentication binding changed')).max(32)
 export type McpRunConnection = z.infer<typeof mcpRunConnectionsSchema>[number]
 
 export function selectMcpSnapshot(connections: readonly McpConnection[], toolIds: readonly string[]): McpSnapshot {
   const allowed = new Set(toolIds)
-  return connections.filter((connection) => connection.enabled && !connection.error).flatMap((connection) => {
+  return connections.filter(mcpConnectionAvailable).flatMap((connection) => {
     const tools = connection.tools.filter((tool) => allowed.has(tool.id))
     return tools.length ? [{ ...connection, tools }] : []
   })
+}
+
+export function mcpConnectionAvailable(connection: McpConnection): boolean {
+  return connection.enabled && !connection.error && (!connection.authorizationStatus || connection.authorizationStatus === 'connected')
 }
 
 export function hasMcpTools(toolIds: readonly string[]): boolean {

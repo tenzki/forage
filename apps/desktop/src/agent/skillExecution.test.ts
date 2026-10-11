@@ -11,6 +11,7 @@ import { LocalAgentExecutor } from './localExecutor'
 import { nativeLocalCredentialVault } from './localCredentials'
 import { serverRunManager } from './serverRunManager'
 import { skillExecution } from './skillExecution'
+import { runInputSchema } from '@forage/agent-runtime'
 
 const allowedTool = {
   id: `mcp_l_${'a'.repeat(48)}`, remoteName: 'search', name: 'Search',
@@ -27,7 +28,8 @@ describe('skill execution application service', () => {
   beforeEach(() => {
     useSettingsStore.setState({
       ...initialSettings,
-      authMode: 'api_key', modelId: 'test-model',
+      authMode: 'api_key', modelId: 'gpt-5',
+      localCompute: { provider: 'openai', modelId: 'gpt-5', credentialRef: 'local-openai' },
       localCredentials: [{ id: 'local-openai', provider: 'openai', status: 'connected' }],
       agents: [{ id: 'agent', name: 'Agent', description: '', systemPrompt: 'Help.', toolIds: [allowedTool.id] }],
       skills: [{ id: 'ask', label: 'ask', description: '', execution: 'llm', agentId: 'agent', systemPrompt: 'Answer.', requiredToolIds: [] }],
@@ -87,6 +89,59 @@ describe('skill execution application service', () => {
     })
     expect(onError).toHaveBeenLastCalledWith(null)
     expect(onActivity).toHaveBeenCalledWith(expect.objectContaining({ phase: 'complete', answer: 'Because.' }))
+  })
+
+  it.each([false, true])('normalizes UUID custom-tool references alongside MCP tools without changing saved permissions (required: %s)', async (required) => {
+    const customTool = { id: '550e8400-e29b-41d4-a716-446655440000', name: 'public_weather', description: 'Read public weather', urlTemplate: 'https://api.open-meteo.com/v1/forecast?latitude={{latitude}}' }
+    const agent = { ...useSettingsStore.getState().agents[0]!, toolIds: ['web_search', 'web_fetch', 'search_outline', allowedTool.id, customTool.id] }
+    const skill = { ...useSettingsStore.getState().skills[0]!, requiredToolIds: required ? [customTool.id] : [] }
+    useSettingsStore.setState({ agents: [agent], skills: [skill], customTools: [customTool], enabledToolIds: ['web_search', 'search_outline', allowedTool.id, customTool.id] })
+    const invoke = vi.spyOn(LocalAgentExecutor.prototype, 'invoke').mockImplementation(async (input) => {
+      runInputSchema.parse(input)
+      return { runId: input.runId, cancel: vi.fn(async () => {}), completion: Promise.resolve({ version: 1, type: 'answer', text: 'Because.' }) }
+    })
+    const onError = vi.fn()
+    await skillExecution.execute(request(), { onError }).completion
+
+    expect(onError).toHaveBeenLastCalledWith(null)
+    expect(invoke.mock.calls[0]![0]).toMatchObject({
+      agent: { toolIds: ['web_search', 'web_fetch', 'search_outline', allowedTool.id, customTool.name] },
+      effectiveToolIds: ['web_search', 'search_outline', allowedTool.id, customTool.name],
+      skill: { requiredToolIds: required ? [customTool.name] : [] },
+      customTools: [{ ...customTool, id: customTool.name }],
+      mcpSnapshot: [{ id: 'fixture', tools: [allowedTool] }],
+    })
+    expect(useSettingsStore.getState().agents).toEqual([agent])
+    expect(useSettingsStore.getState().skills).toEqual([skill])
+    expect(useSettingsStore.getState().customTools).toEqual([customTool])
+  })
+
+  it('does not admit a globally disabled custom tool while preserving its saved reference', async () => {
+    const customTool = { id: '550e8400-e29b-41d4-a716-446655440000', name: 'public_weather', description: 'Read public weather', urlTemplate: 'https://api.open-meteo.com/v1/forecast?latitude={{latitude}}' }
+    useSettingsStore.setState({
+      agents: [{ ...useSettingsStore.getState().agents[0]!, toolIds: [allowedTool.id, customTool.id] }],
+      customTools: [customTool],
+    })
+    const invoke = vi.spyOn(LocalAgentExecutor.prototype, 'invoke').mockImplementation(async (input) => {
+      runInputSchema.parse(input)
+      return { runId: input.runId, cancel: vi.fn(async () => {}), completion: Promise.resolve({ version: 1, type: 'answer', text: 'Because.' }) }
+    })
+    const onError = vi.fn()
+    await skillExecution.execute(request(), { onError }).completion
+    expect(onError).toHaveBeenLastCalledWith(null)
+    expect(invoke.mock.calls[0]![0]).toMatchObject({ agent: { toolIds: [allowedTool.id, customTool.name] }, effectiveToolIds: [allowedTool.id], customTools: [] })
+    expect(useSettingsStore.getState().agents[0]!.toolIds).toEqual([allowedTool.id, customTool.id])
+  })
+
+  it('rejects a custom tool alias that would reuse an MCP permission identity', async () => {
+    const customTool = { id: '550e8400-e29b-41d4-a716-446655440000', name: allowedTool.id, description: 'Conflicting tool', urlTemplate: 'https://api.open-meteo.com/v1/forecast?latitude={{latitude}}' }
+    useSettingsStore.setState({ customTools: [customTool] })
+    const invoke = vi.spyOn(LocalAgentExecutor.prototype, 'invoke')
+    const onError = vi.fn()
+    await skillExecution.execute(request(), { onError }).completion
+    expect(onError).toHaveBeenLastCalledWith(expect.stringContaining('conflicts with another tool'))
+    expect(invoke).not.toHaveBeenCalled()
+    expect(useSettingsStore.getState().agents[0]!.toolIds).toEqual([allowedTool.id])
   })
 
   it('submits backend intent without loading local credentials or tool inventory', async () => {

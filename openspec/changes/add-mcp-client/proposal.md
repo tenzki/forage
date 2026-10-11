@@ -7,7 +7,7 @@ Users should be able to connect their own MCP servers and use discovered tools f
 - Add generic MCP connections for local stdio commands and remote Streamable HTTP endpoints, with dynamic tool discovery and no provider catalog requirement.
 - Add connection management, connection testing, inventory refresh, and tool selection in desktop Settings, including visibility into backend MCP tools.
 - Bridge discovered schemas and tool calls into Pi's custom-tool API through a shared Node MCP host.
-- Keep individual MCP tools subject to global and per-agent authorization, preserve stable connection/tool identities, and reject changed run inventories.
+- Keep individual MCP tools subject to global and per-agent authorization, preserve stable connection/tool identities, and automatically load current definitions for approved tools without enabling new tools.
 - Store connection configuration and credentials under local or backend authority; never synchronize executable commands or secrets with portable agent configuration.
 - Bound discovery, requests, results, and cleanup. Do not silently retry external mutations.
 

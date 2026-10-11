@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { mcpSnapshotSchema } from './mcp'
+import { modelProviderSchema, providerModelIdSchema } from './providers'
 import type { ExtensionSkillContextNode } from '@forage/extension-api'
 import {
   extensionExecutorIdSchema,
@@ -40,7 +41,7 @@ export const portableAgentDefinitionSchema = z.object({
 /** @deprecated Read-only compatibility shape for configuration version 1. */
 export const legacyAgentDefinitionSchema = portableAgentDefinitionSchema.extend({
   modelId: z.string().trim().max(128).refine(
-    (value) => !value || /^[A-Za-z0-9._:/-]+$/.test(value),
+    (value) => !value || /^[A-Za-z0-9~._:/-]+$/.test(value),
     'Invalid model identifier',
   ),
   credentialRef: runtimeIdSchema.optional(),
@@ -200,8 +201,8 @@ export const supportedAgentConfigurationSchema = z.union([
 export const computeProfileSchema = z.object({
   version: z.literal(1),
   revision: z.number().int().positive(),
-  provider: z.enum(['openai-codex', 'openai']),
-  modelId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:/-]+$/),
+  provider: modelProviderSchema,
+  modelId: providerModelIdSchema,
   credentialRef: runtimeIdSchema,
 }).strict()
 
@@ -276,7 +277,7 @@ export type RunStatus = z.infer<typeof runStatusSchema>
 
 export const credentialReferenceSchema = z.object({
   id: runtimeIdSchema,
-  provider: z.enum(['openai-codex', 'openai']),
+  provider: modelProviderSchema,
 }).strict()
 
 const sourcePropertiesSchema = z.record(z.string().max(100), z.string().max(2_000))
@@ -314,6 +315,7 @@ export const runInputSchema = z.object({
   configurationRevision: z.number().int().nonnegative(),
   credentialRef: runtimeIdSchema,
   agent: agentDefinitionSchema,
+  computeProfile: computeProfileSchema.optional(),
   skill: z.union([legacySkillDefinitionSchema, llmSkillDefinitionSchema]),
   effectiveToolIds: uniqueToolIdsSchema,
   prompt: z.string().trim().min(1).max(20_000),
@@ -325,6 +327,9 @@ export const runInputSchema = z.object({
   thread: runThreadSchema.optional(),
   invocationOutline: z.array(z.string().max(40_000)).max(100).optional(),
 }).strict().superRefine((input, context) => {
+  if (input.computeProfile && (input.computeProfile.credentialRef !== input.credentialRef || input.computeProfile.modelId !== input.agent.modelId)) {
+    context.addIssue({ code: 'custom', path: ['computeProfile'], message: 'Compute snapshot does not match the admitted selection' })
+  }
   if (input.skill.agentId !== input.agent.id) {
     context.addIssue({ code: 'custom', path: ['skill', 'agentId'], message: 'Skill does not reference the snapshotted agent' })
   }

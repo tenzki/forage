@@ -4,6 +4,7 @@
 - **Date:** 2026-09-27
 - **Deciders:** Forage maintainers
 - **Supersedes:** ADR-0007 only for explicitly configured MCP endpoints and commands
+- **Amended by:** [ADR-0025](ADR-0025-automatic-mcp-tool-updates.md) for stable permission identities and automatic definition updates
 
 ## Context
 

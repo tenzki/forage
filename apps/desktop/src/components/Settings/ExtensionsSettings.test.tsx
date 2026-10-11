@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
@@ -8,6 +8,17 @@ import type { ExtensionCatalog, ExtensionConfiguration, ExtensionManagementRespo
 import { ExtensionsSettings } from './ExtensionsSettings'
 import { useExtensionStore } from '../../store/extensionStore'
 import { useSettingsStore } from '../../store/settingsStore'
+import { useMcpStore } from '../../store/mcpStore'
+import { validateSkillDraft } from '../../agent/definitions'
+import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
+import { SettingsNavigationProvider, useSettingsRouter } from './settingsNavigation'
+
+function NavigatedExtensions() {
+  const navigation = useSettingsRouter()
+  return <SettingsNavigationProvider value={navigation}><div className="settings-content"><ExtensionsSettings onConfigureTools={() => navigation.select('agents')} /></div></SettingsNavigationProvider>
+}
+
+vi.mock('../../agent/serverConfigurationSync', () => ({ publishLocalAgentConfiguration: vi.fn(async () => 'local_only') }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openPath: vi.fn(async () => undefined), revealItemInDir: vi.fn(async () => undefined) }))
@@ -77,6 +88,8 @@ type InstallPreview = NonNullable<Extract<ExtensionManagementResponse, { ok: tru
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(invoke).mockImplementation(async (command) => command === 'event_store_storage_mode' ? 'local' : undefined)
+  useMcpStore.setState({ connections: [], loaded: true })
   useExtensionStore.setState({
     catalog: catalog(), configuration, extensionsDirectory: '/extensions', isLoaded: true, isLoading: false,
     busyInstallationId: null, error: null,
@@ -98,6 +111,137 @@ beforeEach(() => {
 })
 
 describe('Extensions settings', () => {
+  it('uses the design back link and returns to the extension inventory', async () => {
+    const user = userEvent.setup()
+    render(<NavigatedExtensions />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    const back = screen.getByRole('button', { name: 'Back to Extensions' })
+    expect(back.textContent).toBe('←Extensions')
+    expect(back.classList.contains('settings-back-link')).toBe(true)
+    await user.click(back)
+    expect(screen.getByRole('heading', { name: 'Extensions' })).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Weather Tools/ }))
+  })
+
+  it('restores focus to Create skill after canceling its shared editor', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    render(<NavigatedExtensions />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    const create = screen.getByRole('button', { name: 'Create skill using Weather summary' })
+    await waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false))
+    await user.click(create)
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Create skill using Weather summary' }))
+  })
+
+  it('manages global tool policy on details without granting agent access', async () => {
+    const user = userEvent.setup()
+    const setToolEnabled = vi.fn(async (id: string, enabled: boolean) => { useSettingsStore.setState({ enabledToolIds: enabled ? [id] : [] }) })
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    useSettingsStore.setState({ setToolEnabled, enabledToolIds: [], isLoaded: true })
+    const agents = structuredClone(useSettingsStore.getState().agents)
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    const tool = screen.getByRole('checkbox', { name: 'Weather lookup' })
+    await waitFor(() => expect((tool as HTMLInputElement).disabled).toBe(false))
+    await user.click(tool)
+    expect(setToolEnabled).toHaveBeenCalledWith('weather_lookup', true)
+    expect(useSettingsStore.getState().agents).toEqual(agents)
+    expect(useExtensionStore.getState().enable).not.toHaveBeenCalled()
+  })
+  it.each(['System One', 'Text Stats'])('uses the same detail hierarchy and metadata-only contributions for %s', async (name) => {
+    const user = userEvent.setup()
+    const fixture = catalog('ready')
+    fixture.entries[0]!.manifest = { ...manifest, name, contributes: { tools: [], settings: [], hooks: [], executors: [] } }
+    fixture.entries[0]!.tools = []
+    fixture.entries[0]!.executors = []
+    useExtensionStore.setState({ catalog: fixture })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: new RegExp(name) }))
+    expect(screen.getByRole('heading', { name })).toBeTruthy()
+    for (const heading of ['Configuration', 'Tools', 'Use in a skill']) expect(screen.getByRole('heading', { name: heading })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Agent access' })).toBeNull()
+    expect(screen.getByText('No setup required.')).toBeTruthy()
+    expect(screen.getByText('No skill actions declared.')).toBeTruthy()
+    expect(screen.getByText('Extension details').closest('details')!.open).toBe(false)
+    expect(screen.queryByRole('button', { name: /Copy report/i })).toBeNull()
+    expect(useExtensionStore.getState().enable).not.toHaveBeenCalled()
+  })
+
+  it('keeps invalid manifests and bounded diagnostic errors inside the same inspectable template', async () => {
+    const user = userEvent.setup()
+    const fixture = catalog()
+    fixture.entries[0]!.manifest = undefined
+    fixture.entries[0]!.status = 'error'
+    fixture.entries[0]!.tools = []
+    fixture.entries[0]!.executors = []
+    fixture.entries[0]!.diagnostics = [{ code: 'incompatible', severity: 'error', message: 'Unsupported extension contract.' }]
+    useExtensionStore.setState({ catalog: fixture })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /weather-install/ }))
+    expect(screen.getByRole('heading', { name: 'weather-install' })).toBeTruthy()
+    expect(screen.getByText(/Configuration is unavailable/)).toBeTruthy()
+    await user.click(screen.getByText('Extension details'))
+    expect(screen.getByText(/Unsupported extension contract/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Copy diagnostics' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Copy report/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review & enable' })).toBeNull()
+  })
+
+  it('opens the ordinary skill draft without creating anything on activation or cancellation', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    const save = vi.fn(async () => undefined)
+    useSettingsStore.setState({ saveSkill: save })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    const create = screen.getByRole('button', { name: 'Create skill using Weather summary' })
+    await waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false))
+    await user.click(create)
+    expect(screen.getByRole('group', { name: 'Skill editor' })).toBeTruthy()
+    expect((screen.getByLabelText('Skill execution') as HTMLSelectElement).value).toBe('dev.example.weather/weather_summary')
+    expect(save).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(save).not.toHaveBeenCalled()
+    expect(useSettingsStore.getState().skills).toEqual([selectedExecutorSkill])
+  })
+
+  it('blocks tool authorization and skill creation while required source configuration is missing', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('needs_configuration') })
+    useSettingsStore.setState({ enabledToolIds: ['weather_lookup'], isLoaded: true })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    expect((screen.getByRole('checkbox', { name: 'Weather lookup' }) as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Create skill using Weather summary' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getAllByText(/Required settings are missing/).length).toBeGreaterThan(0)
+    expect(useSettingsStore.getState().skills).toEqual([selectedExecutorSkill])
+  })
+
+  it('validates slash labels and duplicates before saving a generic extension skill', async () => {
+    const user = userEvent.setup()
+    useExtensionStore.setState({ catalog: catalog('ready') })
+    const save = vi.fn(async (draft: Parameters<typeof validateSkillDraft>[0]) => {
+      const skill = validateSkillDraft(draft, useSettingsStore.getState().agents)
+      if (useSettingsStore.getState().skills.some((item) => item.label === skill.label && item.id !== skill.id)) throw new Error('This slash label already exists.')
+      useSettingsStore.setState({ skills: [...useSettingsStore.getState().skills, skill] })
+    })
+    useSettingsStore.setState({ saveSkill: save })
+    render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
+    await user.click(await screen.findByRole('button', { name: 'Create skill using Weather summary' }))
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Slash commands must use 2–32 lowercase letters, numbers, or hyphens.')
+    await user.type(screen.getByLabelText('Slash command'), 'weather-filter')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(await screen.findByText('This slash label already exists.')).toBeTruthy()
+    await user.clear(screen.getByLabelText('Slash command'))
+    await user.type(screen.getByLabelText('Slash command'), 'weather-new')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(useSettingsStore.getState().skills.find((skill) => skill.label === 'weather-new')).toMatchObject({ execution: 'extension', executor: { extensionId: manifest.id, executorId: 'weather_summary' } })
+    expect(publishLocalAgentConfiguration).toHaveBeenCalled()
+  })
   it('shows manifest-only inventory, detail provenance, trust warning, and tool navigation', async () => {
     const user = userEvent.setup()
     const onConfigureTools = vi.fn()
@@ -110,9 +254,9 @@ describe('Extensions settings', () => {
     expect(screen.getByText(/Trusted local code/)).toBeTruthy()
     expect(screen.getByText('revision-1')).toBeTruthy()
     expect(screen.getByText(/Weather lookup/)).toBeTruthy()
-    expect(screen.getByText(/Weather summary/)).toBeTruthy()
-    expect(screen.getByText(/Unavailable/)).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Configure tools' }))
+    expect(screen.getByRole('button', { name: 'Create skill using Weather summary' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Create skill using Weather summary' }) as HTMLButtonElement).disabled).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Manage agents' }))
     expect(onConfigureTools).toHaveBeenCalledOnce()
   })
 
@@ -134,8 +278,8 @@ describe('Extensions settings', () => {
     render(<ExtensionsSettings onConfigureTools={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: /Weather Tools/ }))
-    expect(screen.getByText(/1 configuration field/)).toBeTruthy()
-    expect(screen.getByText(/Ready for explicit skill selection/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Create skill using Weather summary' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByText(/configuration field\(s\)/)).toBeNull()
   })
 
   it('preserves an explicit executor selection through reload, disable, and removal', async () => {

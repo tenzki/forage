@@ -6,6 +6,9 @@ import {
   portableAgentConfigurationSchema,
   migrateAgentConfiguration,
   computeProfileSchema,
+  modelProviderSchema,
+  apiKeyProviderSchema,
+  providerCapabilitiesSchema,
   callIdSchema,
   MAX_ANSWER_CHARS,
   runStatusSchema,
@@ -132,7 +135,7 @@ export const automationPolicyPublishRequestSchema = z.object({
 
 export const credentialMetadataSchema = z.object({
   id: boundedId,
-  provider: z.enum(['openai-codex', 'openai']),
+  provider: modelProviderSchema,
   status: z.enum(['pending', 'connected', 'authentication_required', 'disconnected']),
   accountLabel: z.string().trim().min(1).max(300).optional(),
   expiresAt: timestamp.optional(),
@@ -143,7 +146,7 @@ export const credentialMetadataSchema = z.object({
 export type CredentialMetadata = z.infer<typeof credentialMetadataSchema>
 
 export const apiKeyEnrollmentRequestSchema = z.object({
-  provider: z.literal('openai'),
+  provider: apiKeyProviderSchema,
   apiKey: z.string().trim().min(20).max(512),
 }).strict()
 
@@ -346,4 +349,5 @@ export const serverReadinessSchema = z.object({
   worker: readinessComponentSchema,
   noteIndex: readinessComponentSchema,
   admissionProtocolVersions: z.array(z.number().int().positive()).min(1),
+  supportedProviders: providerCapabilitiesSchema.optional(),
 }).strict()

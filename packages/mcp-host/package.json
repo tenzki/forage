@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./discovery": "./src/discovery.ts"
+    "./discovery": "./src/discovery.ts",
+    "./oauth": "./src/oauth.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

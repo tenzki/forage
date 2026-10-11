@@ -21,7 +21,7 @@ process.stdin.on('data', (chunk: string) => {
 })
 async function run(line: string) {
   try {
-    const request = JSON.parse(line) as { action?: unknown; id?: unknown; name?: unknown; config?: unknown; values?: unknown }
+    const request = JSON.parse(line) as { action?: unknown; id?: unknown; name?: unknown; config?: unknown; values?: unknown; accessToken?: unknown }
     if (request.action === 'scan') {
       const discovery = await discoverConfiguredMcp()
       process.stdout.write(`${JSON.stringify({ ok: true, discovery })}\n`, () => process.exit(0))
@@ -38,7 +38,10 @@ async function run(line: string) {
     if (typeof request.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(request.id)
       || typeof request.name !== 'string' || !request.name || request.name.length > 80) throw new Error('Invalid MCP connection identity.')
     const config = mcpServerConfigSchema.parse(request.config)
-    const connection = await discoverMcp({ id: request.id, name: request.name, environment: 'local' }, config, controller.signal)
+    const accessToken = request.accessToken
+    if (accessToken !== undefined && (typeof accessToken !== 'string' || !accessToken || accessToken.length > 20_000 || /\s/.test(accessToken))) throw new Error('Invalid authorization.')
+    const connection = await discoverMcp({ id: request.id, name: request.name, environment: 'local' }, config, controller.signal,
+      typeof accessToken === 'string' ? { accessToken: async () => accessToken } : undefined)
     process.stdout.write(`${JSON.stringify({ ok: true, connection })}\n`, () => process.exit(0))
   } catch (error) {
     const detail = error instanceof Error && error.message.startsWith('MCP:') ? error.message : 'Invalid MCP configuration or connection cancelled.'

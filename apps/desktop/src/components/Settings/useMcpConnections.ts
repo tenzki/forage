@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { NativeEventRepository } from '../../persistence/eventStore'
 import { useMcpStore } from '../../store/mcpStore'
+import { mcpSettingsError } from './mcpPresentation'
 
 /** Use the same persisted mode as skill execution, never connection reachability. */
 export function useMcpConnections() {
@@ -14,6 +15,7 @@ export function useMcpConnections() {
   useEffect(() => {
     let active = true
     setLoading(true)
+    setEnvironment(null)
     setError(null)
     void (async () => {
       const mode = await new NativeEventRepository().storageMode()
@@ -24,7 +26,7 @@ export function useMcpConnections() {
       if (mode === 'server') await store.loadServer()
       else if (!store.loaded) await store.load()
     })().catch((cause: unknown) => {
-      if (active) setError(cause instanceof Error ? cause.message : 'Could not load MCP servers.')
+      if (active) setError(mcpSettingsError(cause, 'Could not load MCP servers for the saved execution mode. Check Connection and try again.'))
     }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [revision])

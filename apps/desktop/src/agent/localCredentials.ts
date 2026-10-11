@@ -2,13 +2,14 @@ import type { CodexAuthConfig } from './client'
 import type { CodexOAuthCredential } from './codexAuth'
 import { invoke } from '@tauri-apps/api/core'
 import type { ExtensionConfiguration, LocalExtensionExecutorSnapshot, LocalExtensionSnapshot } from '@forage/agent-runtime'
+import type { ModelProvider } from '@forage/agent-runtime'
 
 export const LOCAL_OPENAI_CREDENTIAL_ID = 'local-openai'
 export const LOCAL_CODEX_CREDENTIAL_ID = 'local-openai-codex'
 
 export interface LocalCredentialMetadata {
   id: string
-  provider: 'openai' | 'openai-codex'
+  provider: ModelProvider
   status: 'connected' | 'authentication_required'
   accountLabel?: string
   expiresAt?: string
@@ -50,9 +51,9 @@ export async function resolveLocalCredential(
 ): Promise<CodexAuthConfig> {
   if (metadata.status !== 'connected') throw new Error('Local model credential requires authentication.')
   const secret = await vault.load(metadata.id)
-  if (metadata.provider === 'openai') {
-    if (!secret.trim()) throw new Error('Stored OpenAI credential is invalid.')
-    return { mode: 'api_key', apiKey: secret, oauthCredential: null, modelId: '' }
+  if (metadata.provider !== 'openai-codex') {
+    if (!secret.trim()) throw new Error('Stored provider credential is invalid.')
+    return { provider: metadata.provider, mode: 'api_key', apiKey: secret, oauthCredential: null, modelId: '' }
   }
   let credential: unknown
   try {

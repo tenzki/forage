@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { getProviderModels } from '@forage/pi-runtime/provider-catalog'
 import { isExtensionSkill } from './definitions'
 import { resolveAgentContext, resolveFollowUpContext } from './context'
 import { commitExtensionSkillResult, commitStructuredAgentResultInto, insertAiChildUnder, removeAiList, replaceAiOutput, writeAiText } from './insertIntoEditor'
@@ -21,6 +22,7 @@ import { createLocalExtensionSnapshotFromCatalog, isLocalAnswerResult, resolveEf
 import { extensionToolOptions, useExtensionStore } from '../store/extensionStore'
 import { mcpToolOptions, useMcpStore } from '../store/mcpStore'
 import { previewSkillContext } from './skillPreview'
+import { normalizeCustomToolReferences } from './runtimeToolReferences'
 
 export interface SkillExecutionRequest {
   editor: Editor
@@ -95,7 +97,8 @@ async function executeInvocation(
   const { onError, onActivity, onContextError, onBeforeServerRun, onAfterServerRun } = observers
   const { runId, controller, registerCancellation } = execution
   if (editor.isDestroyed) throw new Error('The outline is no longer open.')
-  const { authMode, localCredentials, modelId, enabledToolIds, customTools, agents, skills, setOAuthCredential } = useSettingsStore.getState()
+  const { localCompute, localCredentials, enabledToolIds, customTools, agents, skills, setOAuthCredential } = useSettingsStore.getState()
+  const { provider, modelId } = localCompute
   const skill = skills.find((candidate) => candidate.id === request.skillId)
   if (!skill) throw new Error('The selected skill no longer exists.')
   const { catalog: extensionCatalog, configuration: extensionConfiguration } = useExtensionStore.getState()
@@ -313,11 +316,9 @@ async function executeInvocation(
       return
     }
 
-    const provider = authMode === 'subscription' ? 'openai-codex' : 'openai'
-    const credential = localCredentials.find((candidate) => candidate.provider === provider && candidate.status === 'connected')
-    if (!credential) throw new Error(authMode === 'subscription'
-      ? 'Not signed in to ChatGPT. Open Settings and connect your subscription.'
-      : 'No OpenAI API key set. Open Settings and add your API key.')
+    const credential = localCredentials.find((candidate) => candidate.id === localCompute.credentialRef && candidate.provider === provider && candidate.status === 'connected')
+    if (!credential) throw new Error('The selected local provider requires authentication. Open Connection settings to repair it.')
+    if (!getProviderModels(provider).some((model) => model.id === modelId)) throw new Error('The selected local model is unavailable. Choose a model in Connection settings.')
     const identity = await repository.identity()
     if (!extensionCatalog || !extensionConfiguration) {
       await useExtensionStore.getState().refresh()
@@ -346,6 +347,12 @@ async function executeInvocation(
       currentExtensionState.configuration.revision,
       effectiveToolIds,
     )
+    const runtimeTools = normalizeCustomToolReferences(customTools, [
+      ...BUILTIN_TOOL_OPTIONS.map((tool) => tool.id),
+      ...extensionToolOptions(currentExtensionState.catalog).map((tool) => tool.id),
+      ...mcpToolOptions(mcpConnections).map((tool) => tool.id),
+    ])
+    const runtimeEffectiveToolIds = runtimeTools.normalizeToolIds(effectiveToolIds)
     const thread = conversation
       ? { callId: conversation.callId, turn: conversation.turn }
       : { callId: runId, turn: 1 }
@@ -355,8 +362,12 @@ async function executeInvocation(
       source: { nodeId: invocationNodeId, text: followUp ? steering?.basePrompt ?? '' : prompt },
       target: { parentId: invocationNodeId },
       baseRevision: 0, configurationRevision: 0, credentialRef: credential.id,
-      agent: { ...agent, modelId }, skill, effectiveToolIds, prompt: prompt || skill.label, context: context.lines,
-      customTools, outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
+      computeProfile: { version: 1, revision: 1, provider, modelId, credentialRef: credential.id },
+      agent: { ...agent, modelId, toolIds: runtimeTools.normalizeToolIds(agent.toolIds) },
+      skill: { ...skill, requiredToolIds: runtimeTools.normalizeToolIds(skill.requiredToolIds) },
+      effectiveToolIds: runtimeEffectiveToolIds, prompt: prompt || skill.label, context: context.lines,
+      customTools: runtimeTools.customTools.filter((tool) => runtimeEffectiveToolIds.includes(tool.id)),
+      outlineSnapshot: JSON.stringify(buildOutlineSnapshot(editor.state.doc)),
       ...(localExtensionSnapshot ? { localExtensionSnapshot } : {}),
       mcpSnapshot: selectMcpSnapshot(mcpConnections, effectiveToolIds),
       thread,

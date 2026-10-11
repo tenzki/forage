@@ -11,6 +11,7 @@ export interface SwitchFieldInputProps {
   className?: string
   switchAriaLabel?: string
   actions?: ReactNode
+  actionsPosition?: 'before' | 'after'
 }
 
 // Adapted from OpenSourceUI's SwitchFieldInput (MIT); styled as `Settings/Switch Row` in docs/desktop.pen.
@@ -23,6 +24,7 @@ export function SwitchFieldInput({
   className,
   switchAriaLabel,
   actions,
+  actionsPosition = 'after',
 }: SwitchFieldInputProps) {
   const id = useId()
   const hintId = `${id}-hint`
@@ -38,6 +40,7 @@ export function SwitchFieldInput({
         {hint ? <div id={hintId} className="mt-[3px] text-xs leading-[1.45] text-moss">{hint}</div> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {actionsPosition === 'before' && actions}
         <Switch
           id={id}
           checked={checked}
@@ -47,7 +50,7 @@ export function SwitchFieldInput({
           aria-describedby={hint ? hintId : undefined}
           onCheckedChange={onCheckedChange}
         />
-        {actions}
+        {actionsPosition === 'after' && actions}
       </div>
     </div>
   )

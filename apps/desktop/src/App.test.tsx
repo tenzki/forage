@@ -26,7 +26,7 @@ vi.mock('@tauri-apps/api/path', () => ({
 
 vi.mock('@tauri-apps/plugin-store', () => ({
   load: async () => ({
-    get: async () => '',
+    get: async () => undefined,
     set: async () => undefined,
     delete: async () => true,
     save: async () => undefined,
@@ -971,6 +971,23 @@ describe('App view switching', () => {
     await user.click(editor)
     await user.keyboard('/pol')
     expect(document.querySelector('.slash-menu')?.textContent).toContain('/polish')
+  })
+
+  it('confirms dirty settings drafts before keyboard or sidebar navigation closes Settings', async () => {
+    const user = userEvent.setup()
+    await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Agents' }))
+    await user.click(screen.getByRole('button', { name: 'Add agent' }))
+    await user.type(screen.getByLabelText('Agent name'), 'Unsaved agent')
+    fireEvent.keyDown(window, { key: ',', ctrlKey: true })
+    expect(screen.getByRole('alertdialog', { name: 'Discard unsaved changes?' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }))
+    await user.click(screen.getByRole('button', { name: 'Home' }))
+    expect(screen.getByRole('alertdialog', { name: 'Discard unsaved changes?' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+    expect(screen.queryByRole('group', { name: 'Agent editor' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull()
   })
 
   it('preserves edits made before opening Settings', async () => {

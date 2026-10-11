@@ -51,6 +51,7 @@ async function conversationServer(options: { engine?: AgentEngine; budget?: numb
   const tempRoot = await mkdtemp(join(tmpdir(), 'forage-call-sessions-'))
   cleanups.push(() => rm(assetRoot, { recursive: true, force: true }), () => rm(tempRoot, { recursive: true, force: true }))
   const credentials = new ServerCredentialService(new InMemoryProviderCredentialStore(), {
+      validateApiKey: async () => undefined,
     encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 4).toString('base64') }],
   })
   const toolIds = (options.tools ?? []).map((tool) => tool.id)

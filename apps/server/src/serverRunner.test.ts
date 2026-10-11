@@ -87,14 +87,14 @@ async function enroll(credentials: ServerCredentialService, ownerId: string, out
 async function fixture(options: FixtureOptions = {}) {
   const repository = new InMemoryServerRepository({ instanceId: 'server' })
   const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
-  const credentials = new ServerCredentialService(new InMemoryProviderCredentialStore(), { encryptionKeys: keys })
+  const credentials = new ServerCredentialService(new InMemoryProviderCredentialStore(), { encryptionKeys: keys, validateApiKey: async () => undefined })
   const credentialId = await enroll(credentials, bootstrap.ownerId, bootstrap.outlineId, options.credentialKind ?? 'openai')
   const targetParentId = options.targetParentId ?? SEED_INBOX_ID
   const input: RunInput = {
     version: 1, runId: 'run-1', executionMode: 'server', outlineId: bootstrap.outlineId,
     source: { nodeId: bootstrap.inboxId, text: 'Source' }, target: { parentId: targetParentId },
     baseRevision: 0, configurationRevision: 1, credentialRef: credentialId,
-    agent: { id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: options.toolIds ?? [] },
+    agent: { id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: options.credentialKind === 'openai-codex' ? 'gpt-5.5' : 'gpt-5', toolIds: options.toolIds ?? [] },
     skill: { id: 'skill', label: 'skill', description: 'Skill', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] },
     effectiveToolIds: options.toolIds ?? [], prompt: 'Run.', context: [],
     ...(options.mcpConnections ? { mcpSnapshot: options.mcpConnections.map(({ connection }) => connection) } : {}),
@@ -152,7 +152,7 @@ describe.each(['openai', 'openai-codex'] as const)('server agent runner on Pi wi
     )] })
     const claimed = await repository.agentStore.claimNext('worker', new Date(), 30_000)
     await runner.execute(claimed!)
-    expect(models).toEqual([expect.objectContaining({ provider: credentialKind })])
+    expect(models).toEqual([{ provider: credentialKind, id: credentialKind === 'openai-codex' ? 'gpt-5.5' : 'gpt-5' }])
     const run = await repository.agentStore.getRun(bootstrap.outlineId, 'run-1')
     expect(run).toMatchObject({ status: 'completed', result: { firstRevision: 1, lastRevision: 1 } })
     expect(await repository.agentStore.output('run-1')).toMatchObject({

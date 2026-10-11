@@ -15,6 +15,7 @@ import {
   isLocalAnswerResult, localAnswerResultSchema, requireStructuredResultV1, resolveEffectiveToolIds, type RunInput,
 } from '@forage/agent-runtime'
 import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
+import { getProviderModels } from '@forage/pi-runtime'
 
 export type TokenScope = 'notes:create' | 'sync' | 'agents:read' | 'agents:execute' | 'agents:manage'
 
@@ -321,6 +322,7 @@ export class InMemoryServerRepository implements ServerRepository {
     if (!configurationRevision || !automationRevision || !computeRevision) return []
     const configuration = configurationRevision.configuration
     const compute = computeRevision.profile
+    if (!getProviderModels(compute.provider).some((model) => model.id === compute.modelId)) return []
     const matches = await resolveAutomationMatches(
       automationRevision.policies,
       captureFacts(capture.text, capture.source),
@@ -354,7 +356,7 @@ export class InMemoryServerRepository implements ServerRepository {
         version: 1, runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: this.outlineId,
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
-        credentialRef, agent: resolvedAgent, skill, effectiveToolIds,
+        credentialRef, computeProfile: structuredClone(compute), agent: resolvedAgent, skill, effectiveToolIds,
         mcpSnapshot: selectMcpSnapshot(this.mcpInventory, effectiveToolIds),
         prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
         customTools: configuration.customTools,

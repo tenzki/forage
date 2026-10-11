@@ -9,7 +9,7 @@ import { Button } from '../ui/Button'
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
-export function ServerAgentSettings() {
+export function ServerAgentSettings({ view = 'recovery' }: { view?: 'recovery' | 'rules' } = {}) {
   const published = usePublishedServerConfiguration((state) => state.configuration)
   const [connection, setConnection] = useState<ServerConnectionInfo | null>(null)
   const [credential, setCredential] = useState<CredentialMetadata | null>(null)
@@ -46,10 +46,11 @@ export function ServerAgentSettings() {
   }
 
   if (!connection) return null
+  if (view === 'rules') return <section className="settings-section" aria-label="Inbox rules"><InboxLinkRules skills={published?.skills ?? []} transport={transport} canPublish={revision > 0} /></section>
   return (
     <section className="settings-section server-agent-section" aria-labelledby="server-agent-heading">
       <div className="auth-card server-agent-settings">
-        <h2 id="server-agent-heading">Server agent executor</h2>
+        <h2 id="server-agent-heading">Server recovery</h2>
         <p className="settings-hint">Runs continue on {connection.origin} while this app is closed. Server mode never falls back to local execution.</p>
         <p className="settings-hint">Configuration revision: {revision || 'not published'} · Credential: {credential?.status ?? 'not enrolled'}</p>
         <p className="settings-hint">Agent and skill changes publish to the server when you save them.</p>
@@ -57,8 +58,6 @@ export function ServerAgentSettings() {
           <Button variant="primary" disabled={busy || credential?.status !== 'connected'} onClick={() => void publishConfiguration()}>Republish agents and skills</Button>
           {credential?.status === 'connected' && <Button disabled={busy} onClick={() => void disconnectCredential()}>Disconnect credential</Button>}
         </div>
-        <hr />
-        <InboxLinkRules skills={published?.skills ?? []} transport={transport} canPublish={revision > 0} />
         {status && <p role="status" className="settings-hint">{status}</p>}
       </div>
     </section>

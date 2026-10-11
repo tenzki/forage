@@ -31,7 +31,7 @@
     },
     "forage-sidecar#build": {
       "dependsOn": ["^build"],
-      "outputs": []
+      "outputs": ["dist/**"]
     },
     "test": {
       "cache": false,

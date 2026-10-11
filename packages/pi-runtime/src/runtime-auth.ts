@@ -1,12 +1,14 @@
-import { ModelRuntime, resolveCliModel } from '@earendil-works/pi-coding-agent'
+import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { InMemoryCredentialStore, type ModelsStore, type ModelsStoreEntry } from '@earendil-works/pi-ai'
 import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth'
+import { apiKeyProviderSchema, modelProviderSchema, type ApiKeyProvider, type ModelProvider } from '@forage/agent-runtime'
 
 registerBunOAuthFlows()
+const admittedProviders = new WeakMap<ModelRuntime, ModelProvider>()
 
 /** The two credential shapes both environments resolve: an OpenAI API key or a ChatGPT subscription token. */
 export type ModelAuth =
-  | { providerId: 'openai'; accessToken: string }
+  | { providerId: ApiKeyProvider; accessToken: string }
   | {
     providerId: 'openai-codex'
     accessToken: string
@@ -17,6 +19,7 @@ export type ModelAuth =
 /** A model runtime holding only in-memory credentials; nothing is read from or written to disk. */
 export async function createAuthenticatedModelRuntime(auth: ModelAuth): Promise<ModelRuntime> {
   const accessToken = auth.accessToken.trim()
+  modelProviderSchema.parse(auth.providerId)
   if (!accessToken) throw new Error('Missing model access token.')
 
   const credentials = new InMemoryCredentialStore()
@@ -44,16 +47,26 @@ export async function createAuthenticatedModelRuntime(auth: ModelAuth): Promise<
     modelsStore,
     allowModelNetwork: false,
     modelRefreshTimeoutMs: 5_000,
+    refreshOnCreate: false,
   })
-  if (auth.providerId === 'openai') {
+  for (const provider of runtime.getProviders()) {
+    if (provider.id === auth.providerId) continue
+    runtime.registerNativeProvider({ ...provider, auth: {
+      apiKey: { name: 'Unavailable in this run', login: async () => { throw new Error('Provider is not admitted.') }, resolve: async () => undefined },
+    } })
+  }
+  if (apiKeyProviderSchema.safeParse(auth.providerId).success) {
     await runtime.setRuntimeApiKey(auth.providerId, accessToken)
   }
+  await runtime.refresh({ allowNetwork: false })
+  admittedProviders.set(runtime, auth.providerId)
   return runtime
 }
 
 /** Resolve `<provider>/<model>` against the runtime's catalog, failing when the model is unavailable. */
 export function resolveModel(runtime: ModelRuntime, providerId: string, modelId: string) {
-  const resolved = resolveCliModel({ cliModel: `${providerId}/${modelId}`, modelRuntime: runtime })
-  if (resolved.error || !resolved.model) throw new Error(`Model not available: ${resolved.error ?? modelId}`)
-  return { model: resolved.model, warning: resolved.warning }
+  if (!modelProviderSchema.safeParse(providerId).success || admittedProviders.get(runtime) !== providerId) throw new Error('Model not available for the selected provider.')
+  const model = runtime.getModel(providerId, modelId)
+  if (!model || model.provider !== providerId || model.id !== modelId) throw new Error('Model not available for the selected provider.')
+  return { model, warning: undefined }
 }

@@ -1,7 +1,7 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { AgentRuntimeError, isAbortError } from '@forage/agent-runtime'
-import { mcpSecretValues, openMcpTools } from '@forage/mcp-host'
+import { mcpSecretValues, openMcpTools, type McpAuthorization } from '@forage/mcp-host'
 import {
   ExtensionConfigurationStore,
   acquireManagedRevisionLeases,
@@ -34,6 +34,7 @@ export interface RunCommandDependencies {
   agentDir: string
   signal: AbortSignal
   emit: (value: unknown) => void
+  mcpAuthorization?: McpAuthorization
 }
 
 type ExtensionOutcome = 'completed' | 'failed' | 'cancelled'
@@ -127,7 +128,13 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
       }
     }
 
-    mcp = await openMcpTools(payload.mcpConnections ?? [], payload.enabledToolIds, signal)
+    mcp = await openMcpTools(payload.mcpConnections ?? [], payload.enabledToolIds, signal, dependencies.mcpAuthorization ? {
+      accessToken: async (id, resource, tokenSignal) => {
+        const token = await dependencies.mcpAuthorization!.accessToken(id, resource, tokenSignal)
+        currentSecrets.push(token)
+        return token
+      }, unauthorized: dependencies.mcpAuthorization.unauthorized,
+    } : undefined)
     const outcome = await runPiTurn(turnRequest(payload), {
       modelRuntime: dependencies.modelRuntime,
       model: dependencies.model,

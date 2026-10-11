@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify'
 import { randomUUID } from 'node:crypto'
+import { getProviderCapabilities } from '@forage/pi-runtime'
 import { z } from 'zod'
 import {
   agentActivityPageSchema,
@@ -41,7 +42,8 @@ import {
 import { canonicalJson, sha256Hex, type OutlineState } from '@forage/domain'
 import {
   AgentRuntimeError, migrateAgentConfiguration, resolveEffectiveToolIds,
-  type LlmSkillDefinition, type PortableAgentConfiguration, type RunInput,
+  MODEL_PROVIDERS, ProviderConnectionError, supportsProviderSelection,
+  type LlmSkillDefinition, type ModelProvider, type PortableAgentConfiguration, type RunInput,
 } from '@forage/agent-runtime'
 import type { BoundPrincipal, ServerRepository, TokenScope } from './repository.js'
 import { RepositoryError, requireBoundOutline } from './repository.js'
@@ -53,6 +55,12 @@ import type { AssetStorage } from './assets.js'
 import { verifyAssetBytes } from './assets.js'
 import { redactSecrets } from './credentialCrypto.js'
 import { registerOutlineStream, type OutlineChangeNotifier } from './outlineStream.js'
+
+const SUPPORTED_MODEL_PROVIDERS: readonly ModelProvider[] = MODEL_PROVIDERS.map((provider) => provider.id)
+
+function supportedProviders(options: ServerOptions): readonly ModelProvider[] {
+  return options.agentEngine === 'pi' ? SUPPORTED_MODEL_PROVIDERS : ['openai', 'openai-codex']
+}
 
 export interface ServerOptions {
   repository: ServerRepository
@@ -215,8 +223,13 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = computeProfilePublishRequestSchema.parse(request.body)
+      if (!supportedProviders(options).includes(body.profile.provider)) {
+        throw new RepositoryError('capability_unavailable', 'This server does not support the selected provider.')
+      }
       const credential = await requireCredentialService(options).metadata(body.profile.credentialRef, principal.ownerId, principal.outlineId)
       if (credential.provider !== body.profile.provider) throw new RepositoryError('compute_unavailable', 'Compute provider does not match the selected credential.', 'choose_credential')
+      if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'Connect the selected provider account first.', 'connect_credential')
+      if (!supportsProviderSelection(getProviderCapabilities(supportedProviders(options)), body.profile)) throw new RepositoryError('compute_unavailable', 'Model is unavailable for the selected provider.', 'configure_compute')
       const current = await repository.agentStore.publishComputeProfile(principal.outlineId, body.baseRevision, body.profile, principal.tokenId)
       return computeProfileResponseSchema.parse({
         ...current, credentialStatus: credential.status, ...(credential.accountLabel ? { credentialLabel: credential.accountLabel } : {}),
@@ -236,7 +249,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       let computeReady = false
       if (compute) {
         const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
-        computeReady = credential.status === 'connected'
+        computeReady = credential.status === 'connected' && credential.provider === compute.profile.provider && supportsProviderSelection(getProviderCapabilities(supportedProviders(options)), compute.profile)
       }
       return serverReadinessSchema.parse({
         connection: { ready: true },
@@ -254,6 +267,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
           ? { ready: true, revision: noteIndex.sourceRevision }
           : { ready: false, revision: noteIndex.sourceRevision, message: 'Search index is rebuilding.', recoveryAction: 'wait_for_projection' },
         admissionProtocolVersions: [1, 2],
+        supportedProviders: getProviderCapabilities(supportedProviders(options)),
       })
     } catch (error) { return sendError(reply, error) }
   })
@@ -294,7 +308,11 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = apiKeyEnrollmentRequestSchema.parse(request.body)
-      return reply.code(201).send(await requireCredentialService(options).enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey))
+      if (!supportedProviders(options).includes(body.provider)) throw new RepositoryError('capability_unavailable', 'This server does not support the selected provider.')
+      const controller = new AbortController()
+      request.raw.once('aborted', () => controller.abort())
+      reply.raw.once('close', () => { if (!reply.raw.writableEnded) controller.abort() })
+      return reply.code(201).send(await requireCredentialService(options).enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey, body.provider, controller.signal))
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -302,14 +320,25 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     try {
       const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:manage', request.params)
       const body = credentialImportRequestSchema.parse(request.body)
+      if (!supportedProviders(options).includes(body.provider)) throw new RepositoryError('capability_unavailable', 'This server does not support the selected provider.')
+      const controller = new AbortController()
+      request.raw.once('aborted', () => controller.abort())
+      reply.raw.once('close', () => { if (!reply.raw.writableEnded) controller.abort() })
       const service = requireCredentialService(options)
-      const credential = body.provider === 'openai'
-        ? await service.enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey)
-        : await service.importCodexCredential(principal.ownerId, principal.outlineId, {
+      const credential = body.provider === 'openai-codex'
+        ? await service.importCodexCredential(principal.ownerId, principal.outlineId, {
           accessToken: body.accessToken, refreshToken: body.refreshToken,
           accountId: body.accountId, expiresAt: body.expiresAt,
         })
+        : await service.enrollApiKey(principal.ownerId, principal.outlineId, body.apiKey, body.provider, controller.signal)
       return reply.code(201).send(credential)
+    } catch (error) { return sendError(reply, error) }
+  })
+
+  app.get('/api/v1/outlines/:outlineId/agent-credentials', async (request, reply) => {
+    try {
+      const principal = await authorizeOutline(repository, request.headers.authorization, 'agents:read', request.params)
+      return { credentials: await requireCredentialService(options).accounts(principal.ownerId, principal.outlineId) }
     } catch (error) { return sendError(reply, error) }
   })
 
@@ -420,13 +449,14 @@ export function buildServer(options: ServerOptions): FastifyInstance {
       const compute = await repository.agentStore.currentComputeProfile(principal.outlineId)
       if (!compute) throw new RepositoryError('compute_unavailable', 'No server compute profile is configured.', 'configure_compute')
       const credential = await requireCredentialService(options).metadata(compute.profile.credentialRef, principal.ownerId, principal.outlineId)
-      if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
+      if (credential.status !== 'connected' || credential.provider !== compute.profile.provider) throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
+      if (!supportsProviderSelection(getProviderCapabilities(supportedProviders(options)), compute.profile)) throw new RepositoryError('compute_unavailable', 'Model is unavailable for the selected provider.', 'configure_compute')
       const context = await repository.runAdmissionContext(principal, previous.input.source.nodeId ?? '', previous.input.target.parentId)
       const retryRunId = `run_${randomUUID()}`
       const thread = previous.input.thread
       if (thread && thread.turn > 1) requireConversationEngine(options)
       const input = buildInputFromConfiguration(options, configuration, {
-        ...previous.input, runId: retryRunId, baseRevision: context.baseRevision,
+        ...previous.input, computeProfile: compute.profile, runId: retryRunId, baseRevision: context.baseRevision,
         configurationRevision: configuration.revision, source: { ...previous.input.source, text: context.sourceText }, context: context.context,
         // A retried first run starts a new call; a retried reply is the same turn of its call.
         ...(thread ? {
@@ -632,6 +662,7 @@ async function makeRunInput(
   const credential = await requireCredentialService(options).metadata(credentialRef, principal.ownerId, principal.outlineId)
   if (credential.status !== 'connected') throw new RepositoryError('compute_unavailable', 'The server compute credential is not connected.', 'connect_credential')
   if (credential.provider !== compute.profile.provider) throw new RepositoryError('compute_unavailable', 'The compute profile credential provider does not match.', 'configure_compute')
+  if (!supportsProviderSelection(getProviderCapabilities(supportedProviders(options)), compute.profile)) throw new RepositoryError('compute_unavailable', 'Model is unavailable for the selected provider.', 'configure_compute')
   const acknowledgedRevision = 'acknowledgedOutlineRevision' in body ? body.acknowledgedOutlineRevision : undefined
   const currentRevision = await repository.currentRevision(principal.outlineId)
   if (acknowledgedRevision !== undefined && currentRevision < acknowledgedRevision) {
@@ -662,6 +693,7 @@ async function makeRunInput(
     version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
     source: { nodeId: body.sourceNodeId, text: context.sourceText }, target: { parentId: targetParentId },
     baseRevision: context.baseRevision, configurationRevision: configuration.revision, credentialRef,
+    computeProfile: compute.profile,
     agent: resolvedAgent, skill, effectiveToolIds: [], prompt: body.prompt, context: context.context,
     customTools: configuration.customTools,
     // A manual run starts a call with its own ID; a reply is the next turn of that call.
@@ -771,6 +803,11 @@ function publicRunError(code: string) {
 }
 
 function sendError(reply: { code: (status: number) => { send: (body: unknown) => unknown } }, error: unknown) {
+  if (error instanceof ProviderConnectionError) {
+    return reply.code(error.code === 'authentication_required' || error.code === 'provider_rejected' ? 400 : 503).send({
+      error: { code: error.code === 'timeout' ? 'dependency_unavailable' : error.code === 'provider_rejected' ? 'authentication_required' : error.code, message: error.message, retryable: error.code === 'timeout' || error.code === 'dependency_unavailable' },
+    })
+  }
   if (error instanceof AgentStoreError) {
     const status = error.code === 'not_found' ? 403 : 409
     const code = error.code === 'not_found' ? 'authorization_denied'

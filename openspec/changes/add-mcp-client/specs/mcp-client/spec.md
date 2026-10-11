@@ -77,11 +77,19 @@ The system SHALL assign stable collision-resistant identities to discovered tool
 - **THEN** no MCP request is sent for that call
 
 ### Requirement: Inventory changes are explicit
-The system SHALL detect changed tool definitions and require renewed authorization after refresh. A run SHALL NOT silently execute a different definition than the one admitted.
+The system SHALL load current validated definitions for already-approved remote tool names at run start without requiring renewed authorization for description, title, or input-schema changes. Permission identities SHALL bind the environment, connection, remote name, and command/endpoint independently of the mutable definition. Local refresh SHALL retain saved legacy IDs and approvals for the same remote name and binding. Newly discovered tools SHALL remain ungranted and SHALL NOT enter an active run.
 
 #### Scenario: Schema changes before execution
 - **WHEN** the connected server returns a changed schema for an admitted tool
-- **THEN** the run fails before invoking that tool and directs the user to refresh its inventory
+- **THEN** the run exposes its current validated schema under the approved permission ID without requiring another review
+
+#### Scenario: Definition-only refresh
+- **WHEN** Settings refresh discovers updated definitions for existing approved tools
+- **THEN** their global and agent selections remain intact and definition-only changes do not invalidate an open selection
+
+#### Scenario: Missing tool or changed binding
+- **WHEN** an approved remote name is missing or the command/endpoint binding changes
+- **THEN** the run fails before invoking tools rather than substituting another tool or connection
 
 ### Requirement: Bounded MCP execution
 The system SHALL preserve discovered argument schemas, forward admitted calls, report tool errors, and bound discovery, execution time, and textual results. It SHALL close connections and child processes after completion, failure, and cancellation.

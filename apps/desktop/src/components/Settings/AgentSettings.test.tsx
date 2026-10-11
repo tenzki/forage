@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
+import { invoke } from '@tauri-apps/api/core'
+import { useMcpStore } from '../../store/mcpStore'
 import userEvent from '@testing-library/user-event'
 import { useSettingsStore } from '../../store/settingsStore'
 import { publishLocalAgentConfiguration } from '../../agent/serverConfigurationSync'
@@ -7,6 +9,7 @@ import { AgentSettings } from './AgentSettings'
 import type { ExtensionExecutorOption } from '../../store/extensionStore'
 
 vi.mock('../../agent/serverConfigurationSync', () => ({ publishLocalAgentConfiguration: vi.fn(async () => 'local_only') }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => 'local') }))
 
 const saveSkill = vi.fn(async (_draft: unknown) => undefined)
 const removeSkill = vi.fn(async (_id: string) => undefined)
@@ -25,6 +28,8 @@ const executor: ExtensionExecutorOption = {
 }
 
 beforeEach(() => {
+  vi.mocked(invoke).mockResolvedValue('local')
+  useMcpStore.setState({ connections: [], loaded: true })
   saveSkill.mockReset()
   saveSkill.mockResolvedValue(undefined)
   removeSkill.mockClear()
@@ -32,6 +37,7 @@ beforeEach(() => {
   vi.mocked(publishLocalAgentConfiguration).mockResolvedValue('local_only')
   useSettingsStore.setState({
     customTools: [],
+    enabledToolIds: ['web_search', 'web_fetch'],
     agents: [
       { id: 'general-agent', name: 'General assistant', description: 'General', systemPrompt: 'Be useful.', toolIds: ['web_search', 'web_fetch'] },
       { id: 'writer', name: 'Writer', description: 'Writes', systemPrompt: 'Write.', toolIds: [] },
@@ -50,7 +56,30 @@ async function fillSkill(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('AgentSettings skill form', () => {
-  it('opens the editor beside its skill and switches to the newly selected skill', async () => {
+  it('identifies extension sources in the ordinary list and preserves unavailable references on unrelated saves', async () => {
+    const user = userEvent.setup()
+    const saveAgent = vi.fn(async () => undefined)
+    useSettingsStore.setState({ saveAgent, agents: [{ id: 'general', name: 'General', description: '', systemPrompt: 'Help.', toolIds: ['missing_extension', 'text_statistics'] }], enabledToolIds: ['text_statistics'] })
+    render(<AgentSettings extensionTools={[{ id: 'text_statistics', name: 'Text statistics', description: 'Count words.', installationId: 'text-stats', extensionId: 'dev.example.text-stats', sourceName: 'Text Stats', available: true }]} reportError={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(screen.getByText('Text Stats · Extension')).toBeTruthy()
+    expect((screen.getByText('Count words.') as HTMLElement).hidden).toBe(true)
+    await user.type(screen.getByLabelText('Agent description'), 'Updated description')
+    await user.click(screen.getByRole('button', { name: 'Save agent' }))
+    expect(saveAgent).toHaveBeenCalledWith(expect.objectContaining({ toolIds: ['missing_extension', 'text_statistics'] }))
+  })
+
+  it('does not offer device-local extension authorization in server mode', async () => {
+    const user = userEvent.setup()
+    vi.mocked(invoke).mockImplementation(async (command) => command === 'event_store_storage_mode' ? 'server' : undefined)
+    useMcpStore.setState({ serverConnections: [], loadServer: vi.fn(async () => undefined) })
+    useSettingsStore.setState({ enabledToolIds: ['text_statistics'] })
+    render(<AgentSettings extensionTools={[{ id: 'text_statistics', name: 'Text statistics', description: 'Count words.', installationId: 'text-stats', extensionId: 'dev.example.text-stats', sourceName: 'Text Stats', available: true }]} reportError={vi.fn()} />)
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]!)
+    expect((screen.getByRole('checkbox', { name: 'Text statistics' }) as HTMLInputElement).disabled).toBe(true)
+    expect(screen.getByText(/Device-local extension tools are unavailable/)).toBeTruthy()
+  })
+  it('opens a dedicated editor and confirms discarding before returning to the skill list', async () => {
     const user = userEvent.setup()
     useSettingsStore.setState({ skills: [
       { id: 'ask', label: 'ask', description: 'Ask', agentId: 'general-agent', systemPrompt: 'Answer.', requiredToolIds: [] },
@@ -58,29 +87,36 @@ describe('AgentSettings skill form', () => {
     ] })
     render(<AgentSettings reportError={vi.fn()} />)
     const askRow = screen.getByText('/ask').closest('[data-slot="list-row"]')!
-    const writeRow = screen.getByText('/write').closest('[data-slot="list-row"]')!
 
     await user.click(within(askRow as HTMLElement).getByRole('button', { name: 'Edit' }))
-    expect(askRow.nextElementSibling).toBe(screen.getByRole('group', { name: 'Skill editor' }))
+    expect(screen.queryByText('/write')).toBeNull()
     expect(document.activeElement).toBe(screen.getByLabelText('Slash command'))
     await user.clear(screen.getByLabelText('Skill instructions'))
     await user.type(screen.getByLabelText('Skill instructions'), 'Unsaved draft.')
 
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('alertdialog', { name: 'Discard unsaved changes?' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }))
+    expect((screen.getByLabelText('Skill instructions') as HTMLTextAreaElement).value).toBe('Unsaved draft.')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+    const writeRow = screen.getByText('/write').closest('[data-slot="list-row"]')!
     await user.click(within(writeRow as HTMLElement).getByRole('button', { name: 'Edit' }))
-    expect(writeRow.nextElementSibling).toBe(screen.getByRole('group', { name: 'Skill editor' }))
     expect((screen.getByLabelText('Slash command') as HTMLInputElement).value).toBe('write')
     expect((screen.getByLabelText('Skill instructions') as HTMLTextAreaElement).value).toBe('Write notes.')
     await user.click(screen.getByRole('button', { name: 'Save skill' }))
     expect(saveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'write', systemPrompt: 'Write notes.' }))
   })
 
-  it('does not list tools whose extension is no longer installed', async () => {
+  it('retains saved references whose extension is no longer installed', async () => {
     const user = userEvent.setup()
     useSettingsStore.setState({ agents: [{ id: 'general', name: 'General', description: '', systemPrompt: 'Help.', toolIds: ['web_search', 'generate_image'] }] })
     render(<AgentSettings reportError={vi.fn()} />)
     await user.click(screen.getByRole('button', { name: 'Edit' }))
-    expect(screen.queryByText('Unavailable references')).toBeNull()
-    expect(screen.queryByText('generate_image')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Unavailable references' })).toBeNull()
+    expect(screen.getByText('Unavailable references')).toBeTruthy()
+    expect((screen.getByRole('checkbox', { name: 'generate_image' }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText(/Source is missing/)).toBeTruthy()
     expect(screen.getByRole('checkbox', { name: 'Web search' })).toBeTruthy()
   })
 
@@ -124,7 +160,7 @@ describe('AgentSettings skill form', () => {
     expect(screen.queryByRole('group', { name: 'Skill editor' })).toBeNull()
   })
 
-  it('keeps a local save and shows a failed server publish in the Skills section', async () => {
+  it('retains the draft after failed publication and retries without duplicating the local save', async () => {
     const user = userEvent.setup()
     vi.mocked(publishLocalAgentConfiguration).mockRejectedValueOnce(new Error('Server unavailable'))
     render(<AgentSettings reportError={vi.fn()} />)
@@ -132,9 +168,12 @@ describe('AgentSettings skill form', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save skill' }))
 
+    expect(screen.getByRole('group', { name: 'Skill editor' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('Saved on this device, but not published')
+    await user.click(screen.getByRole('button', { name: 'Save skill' }))
+    expect(saveSkill).toHaveBeenCalledOnce()
+    expect(publishLocalAgentConfiguration).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('group', { name: 'Skill editor' })).toBeNull()
-    const skills = screen.getByRole('region', { name: 'Skills' })
-    expect(within(skills).getByRole('alert').textContent).toContain('Server unavailable')
   })
 
   it('publishes after removing a skill', async () => {

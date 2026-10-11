@@ -219,6 +219,48 @@ impl EventStore {
         Ok(())
     }
 
+    pub fn compare_exchange_mcp_credentials(
+        &self,
+        reference: &str,
+        previous: Option<&str>,
+        replacement: &str,
+        configuration: Option<(&str, Option<&str>)>,
+    ) -> StoreResult<bool> {
+        let mut connection = self.connection()?;
+        let transaction =
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: Option<String> = transaction
+            .query_row(
+                "SELECT secret FROM local_credentials WHERE reference = ?1",
+                [reference],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != previous {
+            return Ok(false);
+        }
+        transaction.execute(
+            "INSERT INTO local_credentials(reference, secret, created_at, updated_at)
+             VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(reference) DO UPDATE SET secret = excluded.secret, updated_at = excluded.updated_at",
+            params![reference, replacement],
+        )?;
+        if let Some((key, secret)) = configuration {
+            if let Some(secret) = secret {
+                transaction.execute(
+                    "INSERT INTO local_credentials(reference, secret, created_at, updated_at)
+                     VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     ON CONFLICT(reference) DO UPDATE SET secret = excluded.secret, updated_at = excluded.updated_at",
+                    params![key, secret],
+                )?;
+            } else {
+                transaction.execute("DELETE FROM local_credentials WHERE reference = ?1", [key])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(true)
+    }
+
     pub fn append(&self, event: &EventRecord) -> StoreResult<i64> {
         let envelope_json = serde_json::to_string(&event.envelope)
             .expect("serde_json::Value serialization cannot fail");

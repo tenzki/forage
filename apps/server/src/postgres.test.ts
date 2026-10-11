@@ -27,6 +27,10 @@ import { ServerAgentRunner } from './serverRunner'
 
 const connectionString = process.env.TEST_DATABASE_URL ?? 'postgres://forage:forage@127.0.0.1:55437/forage_contract_test'
 
+if (process.env.TEST_DATABASE_URL && new URL(process.env.TEST_DATABASE_URL).pathname !== '/forage_contract_test') {
+  throw new Error('Destructive PostgreSQL contracts require the dedicated forage_contract_test database.')
+}
+
 // Every test truncates every table, so pointing this at the development database would
 // destroy local outlines, owners, and credentials. Refuse rather than wipe them.
 if (process.env.TEST_DATABASE_URL && process.env.TEST_DATABASE_URL === process.env.DATABASE_URL) {
@@ -78,7 +82,7 @@ const describePostgres = process.env.TEST_DATABASE_URL ? describe : describe.ski
 
 describePostgres('PostgreSQL server repository', () => {
   beforeAll(async () => {
-    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql', '0005_outline_stream.sql', '0006_call_conversations.sql']) {
+    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql', '0005_outline_stream.sql', '0006_call_conversations.sql', '0007_model_providers.sql']) {
       await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), 'utf8'))
     }
   })
@@ -88,6 +92,71 @@ describePostgres('PostgreSQL server repository', () => {
       TRUNCATE idempotency_records, credentials, note_projections, outline_checkpoints,
         outline_projections, assets, outline_events, outlines, owners RESTART IDENTITY CASCADE
     `)
+  })
+  describe('redesigned provider accounts', () => {
+    const providerFixture = async () => {
+      const repository = new PostgresServerRepository(pool, { instanceId: 'settings-contract' })
+      const bootstrap = await bootstrapSeeded(repository)
+      const store = new PostgresProviderCredentialStore(pool)
+      const service = new ServerCredentialService(store, {
+        validateApiKey: async () => undefined,
+        encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 12).toString('base64') }],
+      })
+      const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'agents:manage'))
+      return { repository, bootstrap, store, service, device }
+    }
+
+    it.each(['anthropic', 'openrouter', 'opencode-go', 'openai'] as const)('encrypts, scopes, and reconnects %s without changing its selected reference', async (provider) => {
+      const { repository, bootstrap, service, device } = await providerFixture()
+      const secret = `fixture-only-${provider}-credential-not-valid`
+      const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, secret, provider)
+      const profile = { version: 1 as const, revision: 1, provider, modelId: 'fixture-model', credentialRef: credential.id }
+      await repository.agentStore.publishComputeProfile(bootstrap.outlineId, 0, profile, device.tokenId)
+      const replacement = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, `${secret}-replacement`, provider)
+      expect(replacement.id).toBe(credential.id)
+      expect((await repository.agentStore.currentComputeProfile(bootstrap.outlineId))?.profile).toEqual(profile)
+      expect(await service.accounts(bootstrap.ownerId, bootstrap.outlineId)).toHaveLength(1)
+      expect(await service.accounts('another-owner', bootstrap.outlineId)).toEqual([])
+      expect(await service.accounts(bootstrap.ownerId, 'another-outline')).toEqual([])
+      const row = (await pool.query('SELECT * FROM agent_provider_credentials WHERE id=$1', [credential.id])).rows[0]
+      expect(row.ciphertext).toBeInstanceOf(Buffer)
+      expect(row.ciphertext.toString()).not.toContain(secret)
+      expect(JSON.stringify(await service.accounts(bootstrap.ownerId, bootstrap.outlineId))).not.toContain(secret)
+      await expect(service.resolve(credential.id, 'another-owner', bootstrap.outlineId)).rejects.toThrow()
+    })
+
+    it('serializes concurrent same-provider enrollment and rolls back failed credential mutation', async () => {
+      const { bootstrap, store, service } = await providerFixture()
+      const enrolled = await Promise.all([
+        service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'fixture-only-first-anthropic-key', 'anthropic'),
+        service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'fixture-only-second-anthropic-key', 'anthropic'),
+      ])
+      expect(enrolled[0]!.id).toBe(enrolled[1]!.id)
+      const before = await store.get(enrolled[0]!.id)
+      await expect(store.mutate(enrolled[0]!.id, async (record) => {
+        await pool.query('SELECT 1')
+        throw new Error(`fixture rollback for ${record.provider}`)
+      })).rejects.toThrow('fixture rollback')
+      expect(await store.get(enrolled[0]!.id)).toEqual(before)
+      expect(await service.accounts(bootstrap.ownerId, bootstrap.outlineId)).toHaveLength(1)
+    })
+
+    it('commits exactly one competing profile revision and retains the winning provider/model/reference', async () => {
+      const { repository, bootstrap, service, device } = await providerFixture()
+      const first = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'fixture-only-openai-key-not-valid', 'openai')
+      const second = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'fixture-only-anthropic-key-not-valid', 'anthropic')
+      const profiles = [
+        { version: 1 as const, revision: 1, provider: 'openai' as const, modelId: 'gpt-5.5', credentialRef: first.id },
+        { version: 1 as const, revision: 1, provider: 'anthropic' as const, modelId: 'fixture-model', credentialRef: second.id },
+      ]
+      const results = await Promise.allSettled(profiles.map((profile) => repository.agentStore.publishComputeProfile(bootstrap.outlineId, 0, profile, device.tokenId)))
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+      const winner = results.findIndex((result) => result.status === 'fulfilled')
+      expect((await repository.agentStore.currentComputeProfile(bootstrap.outlineId))?.profile).toEqual(profiles[winner])
+      await expect(pool.query("UPDATE agent_compute_profiles SET provider='unsupported-future-provider' WHERE outline_id=$1", [bootstrap.outlineId])).rejects.toThrow()
+      expect((await repository.agentStore.currentComputeProfile(bootstrap.outlineId))?.profile).toEqual(profiles[winner])
+    })
   })
   it('allows a claimed outline with no inbox and an unbound credential', async () => {
     await pool.query(`INSERT INTO owners(id, email) VALUES ('owner_1', 'a@b.invalid')`)
@@ -309,6 +378,7 @@ describePostgres('PostgreSQL server repository', () => {
     const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
     const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'agents:manage'))
     const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
       encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 6).toString('base64') }],
     })
     const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
@@ -343,6 +413,7 @@ describePostgres('PostgreSQL server repository', () => {
     const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
     const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'agents:manage'))
     const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
       encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 7).toString('base64') }],
     })
     const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
@@ -365,7 +436,17 @@ describePostgres('PostgreSQL server repository', () => {
     const first = await repository.createNote(api, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ' })
     const replay = await repository.createNote(api, 'capture', { text: 'https://youtu.be/dQw4w9WgXcQ' })
     expect(replay.response).toEqual(first.response)
-    expect(await repository.agentStore.listRuns(bootstrap.outlineId, 10)).toHaveLength(1)
+    const admitted = await repository.agentStore.listRuns(bootstrap.outlineId, 10)
+    expect(admitted).toHaveLength(1)
+    expect(admitted[0]!.input.computeProfile).toEqual({ version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef: credential.id })
+    await repository.agentStore.publishComputeProfile(bootstrap.outlineId, 1, {
+      version: 1, revision: 2, provider: 'openai', modelId: 'gpt-5.5', credentialRef: credential.id,
+    }, device.tokenId)
+    await repository.createNote(api, 'capture-new-profile', { text: 'https://youtu.be/dQw4w9WgXcQ' })
+    const subsequent = await repository.agentStore.listRuns(bootstrap.outlineId, 10)
+    expect(subsequent).toHaveLength(2)
+    expect(subsequent.find((run) => run.id === admitted[0]!.id)?.input).toEqual(admitted[0]!.input)
+    expect(subsequent.find((run) => run.id !== admitted[0]!.id)?.input.computeProfile).toMatchObject({ revision: 2, modelId: 'gpt-5.5' })
   })
 
   it('serializes rotating OAuth refresh tokens under the credential row lock', async () => {
@@ -376,6 +457,7 @@ describePostgres('PostgreSQL server repository', () => {
       access_token: `x.${jwtPayload}.y`, refresh_token: 'rotated-refresh', expires_in: 3600,
     }), { status: 200 }))
     const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
       encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 8).toString('base64') }], fetch,
       oauth: {
         deviceUrl: 'https://auth.example/device', deviceTokenUrl: 'https://auth.example/device/token',
@@ -398,6 +480,7 @@ describePostgres('PostgreSQL server repository', () => {
     const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
     const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
     const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
       encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 9).toString('base64') }],
     })
     const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
@@ -508,6 +591,7 @@ describePostgres('PostgreSQL server repository', () => {
       const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
       const bootstrap = await bootstrapSeeded(repository)
       const credentials = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
         encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 10).toString('base64') }],
       })
       const credential = await credentials.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, apiKey)

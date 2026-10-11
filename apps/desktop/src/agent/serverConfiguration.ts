@@ -1,6 +1,7 @@
 import type { PortableAgentConfiguration } from '@forage/agent-runtime'
 import type { AgentDefinition, SkillDefinition } from './definitions'
 import type { CustomHttpToolConfig } from './tools'
+import { normalizeCustomToolReferences } from './runtimeToolReferences'
 
 export interface LocalAgentConfiguration {
   agents: AgentDefinition[]
@@ -25,18 +26,7 @@ export function buildServerAgentConfiguration(
   revision: number,
   _credentialRef?: string,
 ): PortableAgentConfiguration {
-  // Older desktop builds used UUIDs as local custom-tool identifiers. Runtime
-  // tool identifiers are intentionally stricter, while the user-chosen custom
-  // tool name already follows that format. Keep local storage compatible and
-  // publish a stable, valid server identifier.
-  const validToolId = (value: string) => /^[a-z][a-z0-9_]{0,63}$/.test(value)
-  const serverToolIds = new Map(settings.customTools.map((tool) => [
-    tool.id,
-    validToolId(tool.id) ? tool.id : tool.name.trim().toLowerCase(),
-  ]))
-  const normalizeToolIds = (ids: string[]) => [
-    ...new Set(ids.map((id) => serverToolIds.get(id) ?? id)),
-  ]
+  const { customTools, normalizeToolIds } = normalizeCustomToolReferences(settings.customTools)
   return {
     version: 3,
     revision,
@@ -49,10 +39,7 @@ export function buildServerAgentConfiguration(
         ? skill
         : { ...skill, execution: 'llm' as const, requiredToolIds: normalizeToolIds(skill.requiredToolIds) }
     )),
-    customTools: settings.customTools.map((tool) => ({
-      ...tool,
-      id: serverToolIds.get(tool.id)!,
-    })),
+    customTools,
     globallyEnabledToolIds: normalizeToolIds(settings.enabledToolIds),
   }
 }

@@ -5,6 +5,10 @@ const startupEvent = vi.hoisted(() => ({
 }))
 const createCommand = vi.hoisted(() => vi.fn())
 const childKill = vi.hoisted(() => vi.fn(async () => undefined))
+const childWrite = vi.hoisted(() => vi.fn(async (_message: string) => undefined))
+const resolveToken = vi.hoisted(() => vi.fn(async () => 'private-oauth-access'))
+const markRequired = vi.hoisted(() => vi.fn())
+let stdoutHandler: ((value: string) => void) | undefined
 let stderrHandler: ((value: string) => void) | undefined
 
 vi.mock('@tauri-apps/api/path', () => ({
@@ -16,29 +20,57 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   Command: {
     create: createCommand.mockImplementation(() => {
       const handlers = new Map<string, (value: unknown) => void>()
-      let stdoutHandler: ((value: string) => void) | undefined
       return {
         stdout: { on: (_event: string, handler: (value: string) => void) => { stdoutHandler = handler } },
         stderr: { on: (_event: string, handler: (value: string) => void) => { stderrHandler = handler } },
         on: (event: string, handler: (value: unknown) => void) => { handlers.set(event, handler) },
         spawn: async () => {
           stdoutHandler?.(`${JSON.stringify(startupEvent.value)}\n`)
-          return { kill: childKill, write: vi.fn(async () => undefined) }
+          return { kill: childKill, write: childWrite }
         },
       }
     }),
   },
 }))
 
+vi.mock('./mcpOAuthClient', () => ({ resolveMcpAccessToken: resolveToken, markMcpSignInRequired: markRequired }))
+
 import { PiRpcClient } from './piSdkClient'
 
 beforeEach(() => {
+  startupEvent.value = { type: 'process_error', error: 'Missing AI_CHAT_API_KEY' }
   createCommand.mockClear()
   childKill.mockClear()
+  childWrite.mockClear()
+  resolveToken.mockClear()
+  markRequired.mockClear()
   stderrHandler = undefined
 })
 
 describe('Pi SDK startup', () => {
+  it('keeps OAuth token IPC private and restricts it to the admitted endpoint', async () => {
+    startupEvent.value = { type: 'ready' }
+    const client = new PiRpcClient()
+    const events: unknown[] = []
+    client.onEvent((event) => events.push(event))
+    await client.start({ provider: 'openai', modelId: 'test', apiKey: 'model-key', accountId: '' })
+    client.setMcpAuthorization([{ connection: { id: 'fixture', name: 'Fixture', environment: 'local', enabled: true, tools: [], authentication: 'oauth', authorizationStatus: 'connected' },
+      config: { url: 'https://example.com/mcp', headers: {}, authentication: { method: 'oauth' } } }])
+    const requestId = crypto.randomUUID()
+    stdoutHandler?.(`${JSON.stringify({ type: 'mcp_oauth_token_request', requestId, connectionId: 'fixture', resource: 'https://example.com/mcp' })}\n`)
+    await vi.waitFor(() => expect(childWrite).toHaveBeenCalledWith(`${JSON.stringify({ type: 'mcp_oauth_token_response', requestId, accessToken: 'private-oauth-access' })}\n`))
+    expect(events).toEqual([{ type: 'ready' }])
+    expect(resolveToken).toHaveBeenCalledOnce()
+    stdoutHandler?.(`${JSON.stringify({ type: 'mcp_oauth_token_request', requestId, connectionId: 'fixture', resource: 'https://different.example/mcp' })}\n`)
+    await vi.waitFor(() => expect(childWrite).toHaveBeenLastCalledWith(`${JSON.stringify({ type: 'mcp_oauth_token_response', requestId })}\n`))
+    expect(resolveToken).toHaveBeenCalledOnce()
+    stderrHandler?.('accidental private-oauth-access')
+    expect(client.getStderr()).not.toContain('private-oauth-access')
+    stdoutHandler?.(`${JSON.stringify({ type: 'mcp_oauth_required', connectionId: 'fixture' })}\n`)
+    expect(markRequired).toHaveBeenCalledWith('fixture', undefined)
+    expect(events).toEqual([{ type: 'ready' }])
+    await client.stop()
+  })
   it('rejects start immediately when the sidecar reports a startup error', async () => {
     const client = new PiRpcClient()
 
@@ -118,10 +150,12 @@ describe('Pi SDK startup', () => {
     vi.useRealTimers()
   })
 
-  it('redacts known model credentials from sidecar stderr', async () => {
+  it.each(['anthropic', 'openrouter', 'opencode-go', 'openai'] as const)('sends %s secrets only through the child environment and redacts stderr', async (provider) => {
     startupEvent.value = { type: 'ready' }
     const client = new PiRpcClient()
-    await client.start({ provider: 'openai', modelId: 'gpt-test', apiKey: 'model-secret', accountId: '' })
+    await client.start({ provider, modelId: 'gpt-test', apiKey: 'model-secret', accountId: '' })
+    expect(createCommand.mock.calls[0]?.[2]).toMatchObject({ env: { AI_CHAT_PROVIDER: provider, AI_CHAT_API_KEY: 'model-secret' } })
+    expect(JSON.stringify(createCommand.mock.calls[0]?.[1])).not.toContain('model-secret')
     stderrHandler?.('extension printed model-secret')
     expect(client.getStderr()).toContain('extension printed [REDACTED]')
     expect(client.getStderr()).not.toContain('model-secret')

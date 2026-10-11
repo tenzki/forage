@@ -95,8 +95,19 @@ export class TauriServerAgentTransport implements ServerAgentTransport {
   async publishAutomation(request: unknown): Promise<unknown> {
     return this.invokeNative('server_agent_publish_automation', { request: automationPolicyPublishRequestSchema.parse(request) })
   }
-  async enrollApiKey(request: unknown) {
-    return credentialMetadataSchema.parse(await this.invokeNative('server_agent_enroll_api_key', { request: apiKeyEnrollmentRequestSchema.parse(request) }))
+  async enrollApiKey(request: unknown, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const requestId = crypto.randomUUID()
+    const cancel = () => { void this.invokeNative('server_agent_cancel_provider_connection', { requestId }).catch(() => undefined) }
+    signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      const credential = credentialMetadataSchema.parse(await this.invokeNative('server_agent_enroll_api_key', { request: apiKeyEnrollmentRequestSchema.parse(request), requestId }))
+      signal?.throwIfAborted()
+      return credential
+    } catch (error) {
+      signal?.throwIfAborted()
+      throw error
+    } finally { signal?.removeEventListener('abort', cancel) }
   }
   async importCredential(request: unknown) {
     return credentialMetadataSchema.parse(await this.invokeNative('server_agent_import_credential', {
@@ -111,6 +122,9 @@ export class TauriServerAgentTransport implements ServerAgentTransport {
   }
   async credential(credentialId: string) {
     return credentialMetadataSchema.parse(await this.invokeNative('server_agent_credential', { credentialId }))
+  }
+  async accounts() {
+    return z.object({ credentials: z.array(credentialMetadataSchema).max(100) }).strict().parse(await this.invokeNative('server_agent_credentials')).credentials
   }
   async disconnectCredential(credentialId: string) {
     return credentialMetadataSchema.parse(await this.invokeNative('server_agent_disconnect_credential', { credentialId }))

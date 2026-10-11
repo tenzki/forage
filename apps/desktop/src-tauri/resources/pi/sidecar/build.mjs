@@ -22,6 +22,7 @@ await build({
         index: path.join(root, 'index.ts'),
         management: path.join(root, 'management.ts'),
         'mcp-management': path.join(root, 'mcp-management.ts'),
+        'mcp-oauth': path.join(root, 'mcp-oauth.ts'),
         executor: path.join(root, 'executor.ts'),
         'executor-process': path.join(root, 'executor-process.ts'),
         'executor-worker': path.join(root, 'executor-worker.ts'),

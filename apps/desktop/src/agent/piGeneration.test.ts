@@ -8,6 +8,7 @@ const rpc = vi.hoisted(() => ({
   promptEvents: [] as TestEvent[],
   promptEventBatches: [] as TestEvent[][],
   promptCount: 0,
+  payloads: [] as string[],
   emitDefaultText: true,
   start: vi.fn(async () => undefined),
   stop: vi.fn(async () => undefined),
@@ -26,7 +27,8 @@ vi.mock('./piSdkClient', () => ({
     waitForSettled = vi.fn(async () => undefined)
     getStderr = () => ''
 
-    async prompt() {
+    async prompt(payload: string) {
+      rpc.payloads.push(payload)
       const events = rpc.promptEventBatches[rpc.promptCount] ?? rpc.promptEvents
       rpc.promptCount += 1
       for (const event of events) rpc.listener?.(event)
@@ -48,10 +50,25 @@ beforeEach(() => {
   rpc.promptEvents = []
   rpc.promptEventBatches = []
   rpc.promptCount = 0
+  rpc.payloads = []
   rpc.emitDefaultText = true
 })
 
 describe('generateWithPi authentication', () => {
+  it('uses the admitted custom tool ID as its sidecar name and leaves MCP identities unchanged', async () => {
+    const mcpId = `mcp_l_${'a'.repeat(48)}`
+    const customTool = { id: 'weather', name: 'public_weather', description: 'Read public weather', urlTemplate: 'https://api.open-meteo.com/v1/forecast?latitude={{latitude}}' }
+    await generateWithPi({ mode: 'api_key', apiKey: 'test-key', oauthCredential: null, modelId: 'gpt-test' }, {
+      skill: { ...SKILLS[0], requiredToolIds: [customTool.id] },
+      agent: { id: 'agent', name: 'Agent', description: '', systemPrompt: 'Help.', toolIds: [customTool.id, mcpId] },
+      prompt: 'test', context: [], enabledToolIds: [customTool.id, mcpId],
+      customTools: [customTool, { ...customTool, id: 'disabled_tool', name: 'disabled_tool' }],
+    }, { onDelta: vi.fn() })
+    const payload = JSON.parse(Buffer.from(rpc.payloads[0]!, 'base64url').toString('utf8'))
+    expect(payload.enabledToolIds).toEqual([customTool.id, mcpId])
+    expect(payload.requiredToolIds).toEqual([customTool.id])
+    expect(payload.customTools).toEqual([{ name: customTool.id, description: customTool.description, urlTemplate: customTool.urlTemplate }])
+  })
   it('forwards validated OAuth metadata to the sidecar client', async () => {
     const expires = Date.now() + 15 * 60_000
 

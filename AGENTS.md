@@ -4,6 +4,12 @@
 
 This file provides guidance to coding agents working in this repository.
 
+## Computer Use and browsers
+
+Never use Computer Use tools or request Computer Use permission for this project. Do not work around this restriction with alternate GUI automation. Prefer command-line tools, APIs, and purpose-built connectors, including Pencil for design inspection.
+
+Do not use a browser unless the user explicitly requests browser use. If a task requires native visual or interactive verification that cannot be performed through permitted tools, record it as a pending manual check rather than claiming it passed.
+
 ## Commands
 
 ```bash
@@ -30,6 +36,8 @@ The sidecar runs via `tsx` as a pnpm workspace package in `apps/desktop/src-taur
 There is no linter. `tsconfig.json` is strict and has `noUnusedLocals`/`noUnusedParameters`, so `tsc` is the gate.
 
 Anything touching custom native persistence/sync commands or `plugin-store` only works in the Tauri app (`pnpm dev` or `pnpm dev:desktop`), not the browser-only `dev:web` command.
+
+Desktop development builds the sidecar through Turbo's cache. Unchanged sidecar/dependency inputs reuse the bundled outputs; source, configuration, or dependency changes invalidate the cache. Native development still runs Cargo's incremental build check. To force a sidecar rebuild, run `pnpm exec turbo run build --filter=forage-sidecar --force` before starting the desktop.
 
 ## Architecture
 

@@ -1,6 +1,7 @@
 pub mod agent_sessions;
 pub mod assets;
 pub mod commands;
+pub mod mcp_oauth;
 pub mod page_peek;
 pub mod persistence;
 pub mod server_stream;
@@ -49,12 +50,21 @@ pub fn run() {
                 http_client,
             });
             app.manage(server_stream::ServerStreamState::default());
+            app.manage(mcp_oauth::McpOAuthState::default());
             shortcuts_key::install(app.handle());
             Ok(())
         })
         .invoke_handler({
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             commands::event_store_append,
+            mcp_oauth::mcp_oauth_begin,
+            mcp_oauth::mcp_oauth_load,
+            mcp_oauth::mcp_oauth_commit,
+            mcp_oauth::mcp_oauth_release,
+            mcp_oauth::mcp_oauth_refresh_start,
+            mcp_oauth::mcp_oauth_invalidate,
+            mcp_oauth::mcp_oauth_set_url,
+            mcp_oauth::mcp_oauth_open_browser,
             commands::event_store_events_after,
             commands::event_store_events_before,
             commands::event_store_pending,
@@ -124,10 +134,12 @@ pub fn run() {
             sync_commands::server_agent_automation,
             sync_commands::server_agent_publish_automation,
             sync_commands::server_agent_enroll_api_key,
+            sync_commands::server_agent_cancel_provider_connection,
             sync_commands::server_agent_import_credential,
             sync_commands::server_agent_start_device_authorization,
             sync_commands::server_agent_poll_device_authorization,
             sync_commands::server_agent_credential,
+            sync_commands::server_agent_credentials,
             sync_commands::server_agent_disconnect_credential,
             sync_commands::server_agent_invoke,
             sync_commands::server_agent_runs,

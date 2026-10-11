@@ -116,6 +116,9 @@ importers:
       '@forage/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@forage/pi-runtime':
+        specifier: workspace:*
+        version: link:../../packages/pi-runtime
       '@forage/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

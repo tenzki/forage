@@ -3,15 +3,16 @@ import { appendFileSync, writeFileSync } from 'node:fs'
 export function respond(request) {
   if (request.method === 'initialize') return { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
   if (request.method === 'tools/list') return { tools: [{
-    name: 'echo.with-punctuation', description: process.env.DESCRIPTION ?? 'Echo a message',
-    inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false },
+    name: 'echo.with-punctuation', description: process.env.DESCRIPTION_REV === '2' ? 'Updated definition' : process.env.DESCRIPTION ?? 'Echo a message',
+    inputSchema: { type: 'object', properties: { message: { type: process.env.INPUT_KIND === 'n' ? 'number' : 'string' } }, required: ['message'], additionalProperties: false },
   }, { name: 'failure', description: 'Report a failure', inputSchema: { type: 'object', properties: {} } },
-  { name: 'wait', description: 'Wait for cancellation', inputSchema: { type: 'object', properties: {} } }] }
+  { name: 'wait', description: 'Wait for cancellation', inputSchema: { type: 'object', properties: {} } },
+  ...(process.env.ADD_TOOL === '1' ? [{ name: 'additional', description: 'A new tool', inputSchema: { type: 'object', properties: {} } }] : [])].filter((tool) => !process.env.OMIT_ECHO || tool.name !== 'echo.with-punctuation') }
   if (request.method === 'tools/call') {
     if (process.env.CALL_LOG) appendFileSync(process.env.CALL_LOG, `${request.params.name}\n`)
     if (request.params.name === 'wait') return new Promise(() => {})
     if (request.params.name === 'failure') return { isError: true, content: [{ type: 'text', text: 'Fixture rejected the operation' }] }
-    return { content: [{ type: 'text', text: request.params.arguments.message }], structuredContent: { echo: request.params.arguments.message } }
+    return { content: [{ type: 'text', text: String(request.params.arguments.message) }], structuredContent: { echo: request.params.arguments.message } }
   }
   return undefined
 }

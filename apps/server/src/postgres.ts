@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
+import { getProviderModels } from '@forage/pi-runtime'
 import {
   canonicalJson,
   parseEventEnvelope,
@@ -297,8 +298,8 @@ export class PostgresServerRepository implements ServerRepository {
     const automationResult = await client.query<{ policies: unknown }>(
         'SELECT policies FROM agent_automation_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
       )
-    const computeResult = await client.query<{ provider: 'openai' | 'openai-codex'; model_id: string; credential_reference: string }>(
-        'SELECT provider,model_id,credential_reference FROM agent_compute_profiles WHERE outline_id=$1', [principal.outlineId],
+    const computeResult = await client.query<{ provider: NonNullable<RunInput['computeProfile']>['provider']; revision: string; model_id: string; credential_reference: string }>(
+        'SELECT provider,revision,model_id,credential_reference FROM agent_compute_profiles WHERE outline_id=$1', [principal.outlineId],
       )
     if (!configurationResult.rows[0] || !automationResult.rows[0] || !computeResult.rows[0]) return
     const configuration = migrateAgentConfiguration(
@@ -306,6 +307,7 @@ export class PostgresServerRepository implements ServerRepository {
     ).configuration
     const policies = automationPolicySetSchema.parse(automationResult.rows[0].policies)
     const compute = computeResult.rows[0]
+    if (!getProviderModels(compute.provider).some((model) => model.id === compute.model_id)) return
     const matches = await resolveAutomationMatches(
       policies,
       captureFacts(capture.text, capture.source),
@@ -314,8 +316,8 @@ export class PostgresServerRepository implements ServerRepository {
         const agent = configuration.agents.find((candidate) => candidate.id === agentId)
         if (!agent || !this.dispatcherForAgent) return undefined
         const credential = await client.query(
-          `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
-          [compute.credential_reference, principal.ownerId, principal.outlineId],
+          `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected' AND provider=$4`,
+          [compute.credential_reference, principal.ownerId, principal.outlineId, compute.provider],
         )
         if (!credential.rowCount) return undefined
         return this.dispatcherForAgent({ ownerId: principal.ownerId, outlineId: principal.outlineId, agent: {
@@ -332,8 +334,8 @@ export class PostgresServerRepository implements ServerRepository {
       if (!skill || !agent) continue
       const resolvedAgent = { ...agent, modelId: compute.model_id, credentialRef }
       const credential = await client.query(
-        `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected'`,
-        [credentialRef, principal.ownerId, principal.outlineId],
+        `SELECT id FROM agent_provider_credentials WHERE id=$1 AND owner_id=$2 AND outline_id=$3 AND status='connected' AND provider=$4`,
+        [credentialRef, principal.ownerId, principal.outlineId, compute.provider],
       )
       if (!credential.rowCount) continue
       let effectiveToolIds: string[]
@@ -350,7 +352,7 @@ export class PostgresServerRepository implements ServerRepository {
         version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
-        credentialRef, agent: resolvedAgent, skill, effectiveToolIds,
+        credentialRef, computeProfile: { version: 1, revision: Number(compute.revision), provider: compute.provider, modelId: compute.model_id, credentialRef }, agent: resolvedAgent, skill, effectiveToolIds,
         mcpSnapshot: selectMcpSnapshot(this.mcpInventory, effectiveToolIds),
         prompt: 'Process this Inbox capture using the selected skill.', context: [capture.text],
         customTools: configuration.customTools,

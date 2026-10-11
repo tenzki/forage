@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { McpConnection } from '@forage/agent-runtime'
-import { createMcpStore, type McpStoreDependencies } from './mcpStore'
+import { createMcpStore, mcpToolOptions, type McpStoreDependencies } from './mcpStore'
 
 const tool = { id: `mcp_l_${'a'.repeat(48)}`, remoteName: 'search', name: 'Search', description: 'Search data', inputSchema: { type: 'object' }, fingerprint: 'a'.repeat(64) }
 const connection: McpConnection = { id: 'fixture', name: 'Fixture', environment: 'local', enabled: true, tools: [tool] }
@@ -21,6 +21,69 @@ function setup(initial: McpConnection[] = []) {
 }
 
 describe('MCP settings store', () => {
+  it('ignores old-account failures and refuses an old review revision after account recovery', async () => {
+    const revision = crypto.randomUUID()
+    const previous: McpConnection = { ...connection, authentication: 'oauth', authorizationStatus: 'connected', authorizationRevision: revision }
+    const { store } = setup([previous])
+    await store.getState().load()
+    const oldRevision = crypto.randomUUID()
+    await store.getState().requireSignIn('fixture', oldRevision)
+    expect(store.getState().connections[0]?.authorizationStatus).toBe('connected')
+    await expect(store.getState().resolve([{ ...previous, authorizationRevision: oldRevision }])).rejects.toThrow('changed')
+  })
+  it('commits browser sign-in metadata only, without automatically enabling tools', async () => {
+    const { store, deps, persisted } = setup()
+    deps.authorize = vi.fn(async (id: string, name: string): Promise<McpConnection> => ({ ...connection, id, name, authentication: 'oauth', authorizationStatus: 'connected' }))
+    const result = await store.getState().addConnection('OAuth fixture', { url: 'https://example.com/mcp', headers: {}, authentication: { method: 'oauth' } })
+    expect(result.authentication).toBe('oauth')
+    expect(deps.authorize).toHaveBeenCalledOnce()
+    expect(deps.discover).not.toHaveBeenCalled()
+    expect(deps.vault.store).not.toHaveBeenCalled()
+    expect(deps.deauthorize).not.toHaveBeenCalled()
+    expect(persisted()[0]?.tools).toEqual([tool])
+  })
+  it('invalidates staged OAuth credentials when metadata persistence fails', async () => {
+    const { store, deps } = setup()
+    deps.authorize = vi.fn(async (id: string, name: string): Promise<McpConnection> => ({ ...connection, id, name, authentication: 'oauth', authorizationStatus: 'connected' }))
+    deps.invalidateAuthorization = vi.fn(async () => undefined)
+    vi.mocked(deps.write).mockRejectedValueOnce(new Error('disk full'))
+    await expect(store.getState().addConnection('OAuth fixture', { url: 'https://example.com/mcp', headers: {}, authentication: { method: 'oauth' } })).rejects.toThrow('disk full')
+    expect(deps.invalidateAuthorization).toHaveBeenCalledOnce()
+    expect(store.getState().connections).toEqual([])
+  })
+  it('requires explicit access review after every interactive reauthentication, even with unchanged tools', async () => {
+    const previous: McpConnection = { ...connection, authentication: 'oauth', authorizationStatus: 'sign_in_required' }
+    const { store, deps, secrets } = setup([previous])
+    secrets.set('forage-mcp/fixture/configuration', JSON.stringify({ url: 'https://example.com/mcp', headers: {}, authentication: { method: 'oauth' } }))
+    deps.authorize = vi.fn(async (): Promise<McpConnection> => ({ ...previous, authorizationStatus: 'connected' }))
+    await store.getState().load()
+    await expect(store.getState().resolve([previous])).rejects.toThrow('disabled')
+    const next = await store.getState().signIn('fixture')
+    expect(next.id).toBe('fixture')
+    expect(next.tools).toEqual(previous.tools)
+    expect(next.authorizationStatus).toBe('review_required')
+    expect(mcpToolOptions([next])[0]?.available).toBe(false)
+    await expect(store.getState().resolve([next])).rejects.toThrow('disabled')
+    expect(deps.deauthorize).toHaveBeenCalledWith([])
+    await store.getState().reviewAccess('fixture')
+    expect(mcpToolOptions(store.getState().connections)[0]?.available).toBe(true)
+    await expect(store.getState().resolve(store.getState().connections)).resolves.toHaveLength(1)
+  })
+  it('retains grants and credentials on failed reauthentication and removes OAuth ownership on disconnect', async () => {
+    const previous: McpConnection = { ...connection, authentication: 'oauth', authorizationStatus: 'connected' }
+    const { store, deps, secrets } = setup([previous])
+    secrets.set('forage-mcp/fixture/configuration', JSON.stringify({ url: 'https://example.com/mcp', headers: {}, authentication: { method: 'oauth' } }))
+    deps.authorize = vi.fn(async () => { throw new Error('MCP: Sign-in was denied. Try again when you are ready.') })
+    deps.invalidateAuthorization = vi.fn(async () => undefined)
+    await store.getState().load()
+    await expect(store.getState().signIn('fixture')).rejects.toThrow('denied')
+    expect(store.getState().connections[0]).toMatchObject({ authorizationStatus: 'sign_in_required', tools: [tool] })
+    expect(deps.deauthorize).not.toHaveBeenCalled()
+    expect(secrets.has('forage-mcp/fixture/configuration')).toBe(true)
+    await store.getState().remove('fixture')
+    expect(deps.invalidateAuthorization).toHaveBeenCalledWith('fixture')
+    expect(deps.deauthorize).toHaveBeenCalledWith([tool.id])
+  })
   it('scans without launching and imports a candidate once with vaulted configuration', async () => {
     const { store, deps, persisted } = setup()
     const id = 'd'.repeat(64)
@@ -48,6 +111,29 @@ describe('MCP settings store', () => {
     expect(store.getState().scanning).toBe(false)
     await store.getState().scanConnections()
     expect(store.getState().discoveryError).toBeNull()
+  })
+  it('retains same-name definitions as distinct candidates and imports a variant under an explicit name', async () => {
+    const { store, deps } = setup()
+    const first = 'd'.repeat(64)
+    const second = 'e'.repeat(64)
+    vi.mocked(deps.scan).mockResolvedValue({ candidates: [
+      { id: first, name: 'Fixture', sources: ['Codex', 'Cursor'], transport: 'stdio', inputs: [] },
+      { id: second, name: 'Fixture', sources: ['Claude Desktop'], transport: 'http', inputs: [] },
+    ], warnings: [] })
+    await store.getState().scanConnections()
+    await store.getState().connectCandidate(first, {}, 'Fixture')
+    await expect(store.getState().connectCandidate(second, {}, 'Fixture')).rejects.toThrow('already exists')
+    const imported = await store.getState().connectCandidate(second, {}, 'Fixture remote')
+    expect(imported.discoveryId).toBe(second)
+    expect(store.getState().connections.map((entry) => entry.discoveryId)).toEqual([first, second])
+    expect(deps.deauthorize).not.toHaveBeenCalled()
+  })
+  it('retains imported source identity after tool refresh so unchanged candidates remain deduplicated', async () => {
+    const discoveryId = 'd'.repeat(64)
+    const { store } = setup([{ ...connection, discoveryId }])
+    await store.getState().load()
+    await store.getState().refresh(connection.id)
+    expect(store.getState().connections[0]!.discoveryId).toBe(discoveryId)
   })
 
   it('connects from form fields with a human-readable name and vaults credentials', async () => {
@@ -77,21 +163,54 @@ describe('MCP settings store', () => {
     expect([...secrets.values()].some((value) => value.includes('private-value'))).toBe(true)
     expect(deps.deauthorize).not.toHaveBeenCalled()
   })
+  it('returns every imported connection for explicit review and preserves partial imports without grants', async () => {
+    const { store, deps } = setup()
+    const imported = await store.getState().importConnections('{"mcpServers":{"first":{"command":"node"},"second":{"url":"https://example.com/mcp"}}}')
+    expect(imported.map((entry) => entry.name)).toEqual(['first', 'second'])
+    vi.mocked(deps.discover).mockResolvedValueOnce({ ...connection, id: 'third', name: 'third' }).mockRejectedValueOnce(new Error('MCP: Authentication failed.'))
+    await expect(store.getState().importConnections('{"mcpServers":{"third":{"command":"node"},"fourth":{"command":"node"}}}')).rejects.toThrow('Authentication failed')
+    expect(store.getState().connections.map((entry) => entry.name)).toEqual(['first', 'second', 'third'])
+    expect(deps.deauthorize).not.toHaveBeenCalled()
+  })
 
-  it('revokes changed definitions and refuses disabled or removed snapshots', async () => {
+  it('retains approvals for updated definitions and refuses disabled or removed snapshots', async () => {
     const { store, deps } = setup([connection])
     await store.getState().load()
     expect(await store.getState().resolve([connection])).toMatchObject([{ config: { env: { TOKEN: 'private-value' } } }])
     vi.mocked(deps.discover).mockResolvedValueOnce({ ...connection, tools: [{ ...tool, id: `mcp_l_${'b'.repeat(48)}`, fingerprint: 'b'.repeat(64) }] })
     await store.getState().refresh(connection.id)
-    expect(deps.deauthorize).toHaveBeenCalledWith([tool.id])
-    await expect(store.getState().resolve([connection])).rejects.toThrow('changed')
+    expect(deps.deauthorize).toHaveBeenCalledWith([])
+    expect(store.getState().connections[0]!.tools[0]).toMatchObject({ id: tool.id, fingerprint: 'b'.repeat(64) })
+    await expect(store.getState().resolve([connection])).resolves.toHaveLength(1)
     const next = store.getState().connections[0]!
     await store.getState().setEnabled(connection.id, false)
     await expect(store.getState().resolve([next])).rejects.toThrow('disabled')
     await store.getState().remove(connection.id)
     expect(store.getState().connections).toEqual([])
     expect(deps.vault.remove).toHaveBeenCalledWith('forage-mcp/fixture/configuration')
+  })
+
+  it('revokes only removed tools and does not authorize additional tools', async () => {
+    const { store, deps } = setup([connection])
+    await store.getState().load()
+    const additional = { ...tool, id: `mcp_l_${'b'.repeat(48)}`, remoteName: 'additional' }
+    vi.mocked(deps.discover).mockResolvedValueOnce({ ...connection, tools: [additional] })
+    await store.getState().refresh(connection.id)
+    expect(deps.deauthorize).toHaveBeenCalledWith([tool.id])
+    expect(store.getState().connections[0]!.tools).toEqual([additional])
+    await expect(store.getState().resolve([connection])).rejects.toThrow('changed')
+  })
+
+  it('does not retain permission IDs when a connection binding changes', async () => {
+    const bound = { ...connection, tools: [{ ...tool, bindingFingerprint: 'c'.repeat(64) }] }
+    const { store, deps } = setup([bound])
+    await store.getState().load()
+    const replacement = { ...tool, id: `mcp_l_${'b'.repeat(48)}`, bindingFingerprint: 'd'.repeat(64) }
+    vi.mocked(deps.discover).mockResolvedValueOnce({ ...connection, tools: [replacement] })
+    await store.getState().refresh(connection.id)
+    expect(deps.deauthorize).toHaveBeenCalledWith([tool.id])
+    expect(store.getState().connections[0]!.tools).toEqual([replacement])
+    await expect(store.getState().resolve([bound])).rejects.toThrow('changed')
   })
 
   it('retains failed connections as unavailable and serializes edits', async () => {

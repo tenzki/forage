@@ -29,13 +29,13 @@ describe('server agent settings', () => {
   it('leaves run history to the activity sidebar', async () => {
     render(<ServerAgentSettings />)
 
-    expect(await screen.findByRole('heading', { name: 'Server agent executor' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Server recovery' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Recent runs' })).toBeNull()
   })
 
   it('offers skills published from elsewhere in Settings without reopening it', async () => {
     const user = userEvent.setup()
-    render(<ServerAgentSettings />)
+    render(<ServerAgentSettings view="rules" />)
     await user.click(await screen.findByRole('button', { name: 'Edit GitHub' }))
     expect(screen.getByText('Publish agents and skills first.')).toBeTruthy()
 
@@ -65,7 +65,7 @@ describe('server agent settings', () => {
       return fallback(command, arguments_)
     })
     const user = userEvent.setup()
-    render(<ServerAgentSettings />)
+    render(<ServerAgentSettings view="rules" />)
 
     await user.click(await screen.findByRole('button', { name: 'Edit GitHub' }))
     await user.click(screen.getByRole('combobox', { name: 'Add skill to GitHub' }))
