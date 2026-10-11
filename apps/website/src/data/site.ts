@@ -3,7 +3,7 @@ export const site = {
   title: 'Forage — Your second brain. Powered with AI.',
   description: 'A personal outliner with AI for macOS. Gather notes, research, and ideas in one connected outline, and build your own understanding.',
   repository: 'https://github.com/tenzki/forage',
-  download: null as string | null,
+  download: 'https://github.com/tenzki/forage/releases',
   documentation: 'https://github.com/tenzki/forage#readme',
   extensionDocs: 'https://github.com/tenzki/forage/blob/main/docs/extensions.md',
 } as const
@@ -59,6 +59,6 @@ export const ownership = [
 ] as const
 
 export const footerLinks = [
-  { title: 'Product', links: [{ label: 'How it works', href: '#how-it-works' }, { label: 'Agents & skills', href: '#skills' }, { label: 'Extensions', href: '#extensions' }, { label: site.download ? 'Get Forage' : 'Coming soon', href: site.download }] },
+  { title: 'Product', links: [{ label: 'How it works', href: '#how-it-works' }, { label: 'Agents & skills', href: '#skills' }, { label: 'Extensions', href: '#extensions' }, { label: 'Get Forage', href: site.download }] },
   { title: 'Resources', links: [{ label: 'Documentation', href: site.documentation }, { label: 'GitHub', href: site.repository }, { label: 'Release notes', href: `${site.repository}/releases` }] },
 ] as const

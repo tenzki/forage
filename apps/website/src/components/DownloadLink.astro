@@ -4,10 +4,6 @@ import Icon from './Icon.astro'
 interface Props { class?: string; small?: boolean }
 const { class: className, small = false } = Astro.props
 ---
-{site.download ? (
-  <a href={site.download} class:list={['inline-flex min-h-12 items-center justify-center gap-5 rounded-sm bg-ink px-6 py-3 text-paper transition-colors hover:bg-ink-soft', small ? 'text-base' : 'text-[17px]', className]}>
-    Get Forage for macOS <Icon name="arrow" size={17} />
-  </a>
-) : (
-  <span class:list={['inline-flex min-h-12 items-center justify-center rounded-sm bg-ink px-6 py-3 text-paper', small ? 'text-base' : 'text-[17px]', className]}>Coming soon</span>
-)}
+<a href={site.download} class:list={['inline-flex min-h-12 items-center justify-center gap-5 rounded-sm bg-ink px-6 py-3 text-paper transition-colors hover:bg-ink-soft', small ? 'text-base' : 'text-[17px]', className]}>
+  Get Forage for macOS <Icon name="arrow" size={17} />
+</a>

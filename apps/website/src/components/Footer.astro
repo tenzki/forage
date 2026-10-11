@@ -12,7 +12,7 @@ import { footerLinks } from '../data/site'
     <div class="relative mx-auto flex max-w-[640px] flex-col items-center gap-[34px] md:gap-[38px]">
       <div class="text-center"><a href="#top" class="text-[64px] leading-none tracking-[-.04em] md:text-[84px]" aria-label="Forage, back to top">forage</a><p class="mt-3.5 text-[16px] leading-[1.4] text-ink-soft md:text-[18px]">Your second brain. Your own thinking.</p></div>
       <nav aria-label="Footer navigation" class="grid w-full max-w-[340px] grid-cols-2 gap-[30px] md:gap-12">
-        {footerLinks.map(group => <div><p class="mb-4 font-mono text-[11px] tracking-[.06em] text-moss uppercase">{group.title}</p><ul class="m-0 flex list-none flex-col gap-3 p-0">{group.links.map(link => <li>{link.href ? <a href={link.href} class="text-link inline-block py-0.5 text-[16px] md:text-[17px]">{link.label}</a> : <span class="inline-block py-0.5 text-[16px] text-ink-soft md:text-[17px]">{link.label}</span>}</li>)}</ul></div>)}
+        {footerLinks.map(group => <div><p class="mb-4 font-mono text-[11px] tracking-[.06em] text-moss uppercase">{group.title}</p><ul class="m-0 flex list-none flex-col gap-3 p-0">{group.links.map(link => <li><a href={link.href} class="text-link inline-block py-0.5 text-[16px] md:text-[17px]">{link.label}</a></li>)}</ul></div>)}
       </nav>
     </div>
   </div>
