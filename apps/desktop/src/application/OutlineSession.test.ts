@@ -5,6 +5,67 @@ import { EditorState } from '@tiptap/pm/state'
 import { EMPTY_DOC } from '../editor/emptyDoc'
 import { captureDocumentEvent } from '../editor/eventCapture'
 import { OutlineSession, type OutlineSessionRepository } from './OutlineSession'
+import { DocumentCoordinator } from '../editor/DocumentCoordinator'
+import { collectBullets, findBullet } from '../editor/outlineModel'
+import { dispatchPersistentUndo, dispatchPersistentRedo, recordDocumentChange, type PersistentHistoryState } from '../editor/persistentHistory'
+import type { StoredEventRecord } from '../persistence/eventStore'
+import type { JsonValue } from '../types/tree'
+
+describe('canonical views with one durable OutlineSession', () => {
+  it('persists each cross-pane edit/compensation once and reopens the document and shared history', async () => {
+    const repo = repository()
+    const session = new OutlineSession(repo.value)
+    const opened = await session.open()
+    const baselineCheckpoint = repo.checkpoints[0]
+    const pending: Promise<unknown>[] = []
+    const history: PersistentHistoryState = { undo: [], redo: [] }
+    let group = 0
+    const coordinator = new DocumentCoordinator(opened.state.doc as JsonValue, {
+      onPaneSwitch: () => { group++ },
+      onTransaction: (root, appended) => {
+        const captured = captureDocumentEvent(root, appended, {
+          ...session.context()!, nextChangeGroupId: () => `pane-group-${group}`,
+        })
+        if (captured) {
+          if (captured.type === 'document.steps_applied') recordDocumentChange(history, captured)
+          pending.push(session.persistCaptured(captured))
+        }
+      },
+    })
+    try {
+      const a = coordinator.createView('a')
+      const b = coordinator.createView('b')
+      const target = collectBullets(a.state.doc).find(entry => entry.systemRole === null)!.id
+      a.view.dispatch(a.state.tr.insertText('first', findBullet(a.state.doc, target)!.pos + 2))
+      b.view.dispatch(b.state.tr.insertText('second', findBullet(b.state.doc, target)!.pos + 2))
+      a.destroy()
+      expect(dispatchPersistentUndo(coordinator.editor, history)).not.toBeNull()
+      expect(dispatchPersistentRedo(coordinator.editor, history)).not.toBeNull()
+      await Promise.all(pending)
+      expect(repo.events.map(event => event.type)).toEqual([
+        'document.steps_applied', 'document.steps_applied', 'document.undo_applied', 'document.redo_applied',
+      ])
+      expect(new Set(repo.events.map(event => event.id)).size).toBe(4)
+      const expectedDoc = coordinator.editor.getJSON()
+      const records: StoredEventRecord[] = repo.events.map((event, index) => ({
+        id: event.id, outlineId: event.outlineId, baseRevision: event.baseRevision, serverRevision: null,
+        envelope: event, localSequence: index + 1, status: 'pending', supersededBy: null, createdAt: event.occurredAt,
+      }))
+      repo.value.loadReplayInput = async () => ({
+        checkpoint: baselineCheckpoint, state: opened.state, events: repo.events, latestLocalSequence: 4,
+      })
+      repo.value.eventsBefore = async (_outlineId, before, limit) => records
+        .filter(record => record.localSequence <= before).slice(-limit)
+      coordinator.destroy()
+      const reopened = await new OutlineSession(repo.value).open()
+      expect(reopened.state.doc).toEqual(expectedDoc)
+      expect((await reopened.history).undo.map(entry => entry.id)).toEqual(history.undo.map(entry => entry.id))
+      expect(repo.events).toHaveLength(4)
+    } finally {
+      if (!coordinator.editor.isDestroyed) coordinator.destroy()
+    }
+  })
+})
 
 function repository(overrides: Partial<OutlineSessionRepository> = {}) {
   const checkpoints: Parameters<OutlineSessionRepository['saveCheckpoint']>[0][] = []

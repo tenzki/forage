@@ -1,8 +1,9 @@
 import { Extension, type Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { isCanonicalDailyDate } from '@forage/document'
+import { editorPaneId } from './documentAccess'
 import {
   collectBullets,
   reorderBullet,
@@ -17,10 +18,12 @@ export const OUTLINER_OPEN_SEARCH_EVENT = 'outliner-open-search'
 export const OUTLINER_DAILY_DATE_EVENT = 'outliner-daily-date'
 
 export interface DailyDateRequest {
+  sourcePaneId?: string
   date: string
 }
 
 export interface PointerDragEventDetail {
+  sourcePaneId?: string
   phase: 'move' | 'drop' | 'cancel'
   nodeId: string
   clientX: number
@@ -28,11 +31,13 @@ export interface PointerDragEventDetail {
 }
 
 export interface SearchRequest {
+  sourcePaneId?: string
   query: string
   scopeId: string | null
 }
 
 export interface NodeMenuRequest {
+  sourcePaneId?: string
   nodeId: string
   top: number
   left: number
@@ -60,6 +65,22 @@ const activityMeta = 'agentActivity'
 const hideCompletedMeta = 'hideCompleted'
 const navigateBackMeta = 'navigateBack'
 const navigateForwardMeta = 'navigateForward'
+const paneNavigationMeta = 'foragePaneNavigation'
+interface PaneNavigation { zoom: (nodeId: string | null) => void; back: () => boolean; forward: () => boolean }
+const paneNavigations = new WeakMap<Editor, PaneNavigation>()
+const pointerDragCleanup = new WeakMap<Editor, Set<() => void>>()
+export function registerPaneNavigation(editor: Editor, navigation: PaneNavigation): () => void {
+  paneNavigations.set(editor, navigation)
+  return () => { paneNavigations.delete(editor) }
+}
+export function syncPaneNavigation(editor: Editor, zoomId: string | null, backStack: Array<string | null>, forwardStack: Array<string | null>): void {
+  editor.view.dispatch(editor.state.tr.setMeta(paneNavigationMeta, { zoomId, backStack, forwardStack }))
+}
+
+export const SHARED_ACTIVITY_META = 'forageSharedActivity'
+export function isSharedActivityTransaction(transaction: Transaction): boolean {
+  return transaction.getMeta(uiKey)?.type === activityMeta
+}
 
 export function getOutlinerUiState(editor: Editor): OutlinerUiState {
   return uiKey.getState(editor.state) ?? {
@@ -73,16 +94,22 @@ export function getOutlinerUiState(editor: Editor): OutlinerUiState {
 }
 
 export function setZoom(editor: Editor, nodeId: string | null): void {
+  const navigation = paneNavigations.get(editor)
+  if (navigation) { navigation.zoom(nodeId); return }
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: zoomMeta, nodeId }))
 }
 
 export function navigateBack(editor: Editor): boolean {
+  const navigation = paneNavigations.get(editor)
+  if (navigation) return navigation.back()
   if (!getOutlinerUiState(editor).backStack.length) return false
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: navigateBackMeta }))
   return true
 }
 
 export function navigateForward(editor: Editor): boolean {
+  const navigation = paneNavigations.get(editor)
+  if (navigation) return navigation.forward()
   if (!getOutlinerUiState(editor).forwardStack.length) return false
   editor.view.dispatch(editor.state.tr.setMeta(uiKey, { type: navigateForwardMeta }))
   return true
@@ -181,7 +208,8 @@ function placementAt(row: HTMLElement, clientY: number): MovePlacement {
 function rowAt(clientX: number, clientY: number, source: HTMLElement): HTMLElement | null {
   const element = document.elementFromPoint(clientX, clientY)
   const row = element?.closest<HTMLElement>('li[data-node-id]') ?? null
-  if (!row || row === source || source.contains(row)) return null
+  if (!row || row === source || source.contains(row)
+    || row.closest('.ProseMirror') !== source.closest('.ProseMirror')) return null
   return row
 }
 
@@ -262,11 +290,16 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
       sourceRow, targetRow: null, targetId: null, placement: 'after', ghost: null, preview: null,
     }
 
-    const move = (event: PointerEvent) => updatePointerDrag(event, state, button, nodeId)
+    const move = (event: PointerEvent) => updatePointerDrag(event, state, button, nodeId, editorPaneId(editor))
+    let settled = false
     const finish = (event: PointerEvent, cancelled = false) => {
+      if (settled) return
+      settled = true
+      pointerDragCleanup.get(editor)?.delete(teardown)
       if (state.started) {
         event.preventDefault()
         emitPointerDrag({
+          sourcePaneId: editorPaneId(editor),
           phase: cancelled ? 'cancel' : 'drop',
           nodeId,
           clientX: event.clientX,
@@ -289,6 +322,10 @@ function installPointerDrag(button: HTMLButtonElement, editor: Editor, nodeId: s
       state.targetId = null
       finish(event, true)
     }
+    const teardown = () => cancel(downEvent)
+    const cleanups = pointerDragCleanup.get(editor) ?? new Set<() => void>()
+    pointerDragCleanup.set(editor, cleanups)
+    cleanups.add(teardown)
     document.addEventListener('pointermove', move)
     document.addEventListener('pointerup', finish)
     document.addEventListener('pointercancel', cancel)
@@ -300,6 +337,7 @@ function updatePointerDrag(
   state: PointerDragState,
   button: HTMLButtonElement,
   nodeId: string,
+  sourcePaneId?: string,
 ): void {
   const distance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY)
   if (!state.started && distance < 4) return
@@ -317,6 +355,7 @@ function updatePointerDrag(
     state.ghost.style.top = `${event.clientY + 10}px`
   }
   emitPointerDrag({
+    sourcePaneId,
     phase: 'move',
     nodeId,
     clientX: event.clientX,
@@ -356,13 +395,13 @@ function createBulletButton(editor: Editor, nodeId: string): HTMLButtonElement {
   return button
 }
 
-function createMenuButton(nodeId: string): HTMLButtonElement {
+function createMenuButton(editor: Editor, nodeId: string): HTMLButtonElement {
   const button = iconButton('Actions for bullet', 'bullet-menu', '•••')
   button.addEventListener('click', (event) => {
     event.stopPropagation()
     const rect = button.getBoundingClientRect()
     window.dispatchEvent(new CustomEvent<NodeMenuRequest>(OUTLINER_NODE_MENU_EVENT, {
-      detail: { nodeId, top: rect.bottom + 4, left: rect.left },
+      detail: { nodeId, top: rect.bottom + 4, left: rect.left, sourcePaneId: editorPaneId(editor) },
     }))
   })
   return button
@@ -388,7 +427,7 @@ function createControls(editor: Editor, node: ProseMirrorNode): HTMLElement {
   const controls = document.createElement('span')
   controls.className = 'bullet-controls'
   controls.setAttribute('contenteditable', 'false')
-  controls.append(createMenuButton(nodeId))
+  controls.append(createMenuButton(editor, nodeId))
   if (hasChildList(node)) {
     controls.append(createCollapseButton(editor, nodeId, Boolean(node.attrs.collapsed)))
   } else {
@@ -439,7 +478,7 @@ function createActivityWidget(activity: AgentActivity): HTMLElement {
   return status
 }
 
-function createDailyDatePicker(date: string, label: string): HTMLElement {
+function createDailyDatePicker(editor: Editor, date: string, label: string): HTMLElement {
   const picker = document.createElement('label')
   picker.className = 'daily-note-date-picker'
   picker.title = `Change daily note date for ${label}`
@@ -458,7 +497,7 @@ function createDailyDatePicker(date: string, label: string): HTMLElement {
     event.stopPropagation()
     if (!isCanonicalDailyDate(input.value) || input.value === date) return
     window.dispatchEvent(new CustomEvent<DailyDateRequest>(OUTLINER_DAILY_DATE_EVENT, {
-      detail: { date: input.value },
+      detail: { date: input.value, sourcePaneId: editorPaneId(editor) },
     }))
   })
 
@@ -543,7 +582,7 @@ function buildDecorations(editor: Editor): DecorationSet {
     ) {
       decorations.push(Decoration.widget(
         entry.pos + 2 + entry.node.firstChild.content.size,
-        () => createDailyDatePicker(entry.dailyDate!, entry.node.firstChild!.textContent),
+        () => createDailyDatePicker(editor, entry.dailyDate!, entry.node.firstChild!.textContent),
         { key: `daily-date-${entry.id}-${entry.dailyDate}`, side: 1 },
       ))
     }
@@ -575,11 +614,23 @@ function buildDecorations(editor: Editor): DecorationSet {
 export const OutlinerUi = Extension.create({
   name: 'outlinerUi',
 
+  addOptions() { return { renderDecorations: true } },
+
   addProseMirrorPlugins() {
     const editor = this.editor
+    // ProseMirror requests decorations several times per state update. Keep
+    // only the current immutable document/UI pair, rather than rebuilding
+    // every bullet's controls for each request.
+    let cachedDoc: ProseMirrorNode | undefined
+    let cachedUi: OutlinerUiState | undefined
+    let cachedDecorations = DecorationSet.empty
     return [
       new Plugin<OutlinerUiState>({
         key: uiKey,
+        view: () => ({ destroy: () => {
+          pointerDragCleanup.get(editor)?.forEach(cleanup => cleanup())
+          pointerDragCleanup.delete(editor)
+        } }),
         state: {
           init: () => ({
             zoomId: null,
@@ -590,6 +641,10 @@ export const OutlinerUi = Extension.create({
             agentActivity: {},
           }),
           apply: (transaction, previous) => {
+            const navigation = transaction.getMeta(paneNavigationMeta) as Pick<OutlinerUiState, 'zoomId' | 'backStack' | 'forwardStack'> | undefined
+            if (navigation) return { ...previous, ...navigation }
+            const shared = transaction.getMeta(SHARED_ACTIVITY_META) as OutlinerUiState['agentActivity'] | undefined
+            if (shared) previous = { ...previous, agentActivity: shared }
             const meta = transaction.getMeta(uiKey) as
               | { type: string; nodeId?: string | null; query?: string; hideCompleted?: boolean; activity?: AgentActivity | null }
               | undefined
@@ -632,7 +687,7 @@ export const OutlinerUi = Extension.create({
               }
               return { ...previous, agentActivity }
             }
-            if (!transaction.docChanged) return previous
+            if (!transaction.docChanged || paneNavigations.has(editor)) return previous
             const nodeIds = new Set(collectBullets(transaction.doc).map((entry) => entry.id))
             const validTarget = (nodeId: string | null) => nodeId === null || nodeIds.has(nodeId)
             const backStack = previous.backStack.filter(validTarget)
@@ -649,7 +704,16 @@ export const OutlinerUi = Extension.create({
           },
         },
         props: {
-          decorations: (_state) => buildDecorations(editor),
+          decorations: state => {
+            if (!this.options.renderDecorations) return DecorationSet.empty
+            const ui = getOutlinerUiState(editor)
+            if (cachedDoc !== state.doc || cachedUi !== ui) {
+              cachedDoc = state.doc
+              cachedUi = ui
+              cachedDecorations = buildDecorations(editor)
+            }
+            return cachedDecorations
+          },
         },
       }),
     ]

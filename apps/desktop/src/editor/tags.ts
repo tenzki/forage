@@ -1,4 +1,5 @@
 import { Extension, type Editor } from '@tiptap/core'
+import { editorPaneId } from './documentAccess'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
@@ -149,7 +150,7 @@ export const TagDecorations = Extension.create({
             if (!tag) return false
             event.preventDefault()
             window.dispatchEvent(new CustomEvent(OUTLINE_TAG_EVENT, {
-              detail: { tag },
+              detail: { tag, sourcePaneId: editorPaneId(this.editor) },
             }))
             return true
           },

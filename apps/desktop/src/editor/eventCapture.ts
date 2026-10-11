@@ -72,6 +72,7 @@ export function captureDocumentEvent(
   context: DocumentEventContext,
 ): CapturedEditorEvent | null {
   const transactions = [root, ...appendedTransactions]
+  if (root.getMeta('forageProjection') === true) return null
   if (root.getMeta('preventUpdate') === true || root.getMeta('forageRemote') === true) return null
   const steps = transactions.flatMap((transaction) => transaction.steps)
   if (steps.length === 0 || !transactions.some((transaction) => transaction.docChanged)) return null

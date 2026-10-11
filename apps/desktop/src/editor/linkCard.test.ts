@@ -91,6 +91,27 @@ describe('link hover cards', () => {
     expect(editor.view.dom.querySelector('.link-card')).toBeNull()
   })
 
+  it('retains the hover owner when another pane closes and addresses preview opening to its source', async () => {
+    const a = editorWith([bullet('a', { href: 'https://example.com' })])
+    const b = editorWith([bullet('b', { text: 'Other pane' })])
+    a.view.dom.dataset.paneId = 'pane-a'
+    const listener = vi.fn()
+    window.addEventListener(OUTLINE_LINK_PEEK_EVENT, listener)
+    try {
+      hover(a, 'Example')
+      await vi.waitFor(() => expect(cardInBody()).not.toBeNull())
+      const otherHost = b.view.dom.parentElement
+      b.destroy()
+      otherHost?.remove()
+      editors.splice(editors.indexOf(b), 1)
+      expect(cardInBody()).not.toBeNull()
+      const body = cardInBody()!.querySelector('.link-card-body') as HTMLElement
+      body.click()
+      expect(listener).toHaveBeenCalledOnce()
+      expect((listener.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ sourcePaneId: 'pane-a', sourceNodeId: 'a' })
+    } finally { window.removeEventListener(OUTLINE_LINK_PEEK_EVENT, listener) }
+  })
+
   it('previews the target bullet of an internal link without fetching', async () => {
     const editor = editorWith([
       bullet('x', { text: 'Target bullet' }),

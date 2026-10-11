@@ -1,3 +1,4 @@
+import { commandBinding } from '../../workspace/commands'
 import {
   ArrowRight,
   ArrowUpRight,
@@ -38,12 +39,14 @@ export interface LinkPreviewActions {
   onOpenExternal: () => void
   onRetry: () => void
   onOpenInternal: () => void
+  onOpenRight?: () => void
   onRelink: () => void
   onRemoveLink: () => void
 }
 
-function FooterAction({ label, onClick, quiet = false, children }: {
+function FooterAction({ label, title, onClick, quiet = false, children }: {
   label?: string
+  title?: string
   onClick: () => void
   quiet?: boolean
   children: ReactNode
@@ -52,6 +55,7 @@ function FooterAction({ label, onClick, quiet = false, children }: {
     <button
       type="button"
       aria-label={label}
+      title={title}
       className={quiet ? 'link-card-action is-quiet' : 'link-card-action'}
       onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => {
@@ -140,6 +144,7 @@ function InternalPreview({ model, actions }: {
         <FooterAction label={`Open ${model.title || 'Untitled'}`} onClick={actions.onOpenInternal}>
           Open <ArrowRight size={12} aria-hidden="true" />
         </FooterAction>
+        {actions.onOpenRight && <FooterAction label="Open in right pane" title={`Open in right pane (${commandBinding('openRight')})`} onClick={actions.onOpenRight}>Open right <PanelRightOpen size={12} aria-hidden="true" /></FooterAction>}
       </div>
     </>
   )

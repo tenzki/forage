@@ -9,14 +9,12 @@ import {
   Home,
   Inbox,
   ListTodo,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Settings,
   Trash2,
 } from 'lucide-react'
 import type { Editor } from '@tiptap/react'
+import { editorPaneId, ownsPaneEvent } from '../../editor/documentAccess'
+import { requestInternalNavigation } from '../../editor/internalLinks'
 import {
   breadcrumbFor,
   collectBullets,
@@ -85,82 +83,18 @@ function Breadcrumbs({ editor, zoomId }: { editor: Editor; zoomId: string | null
   )
 }
 
-function Toolbar({
-  editor,
-  zoomId,
-  sidebarCollapsed,
-  canNavigateBack,
-  canNavigateForward,
-  onToggleSidebar,
-  onNavigateBack,
-  onNavigateForward,
-  activitySidebarCollapsed,
-  onToggleActivitySidebar,
-}: {
-  editor: Editor
-  zoomId: string | null
-  sidebarCollapsed: boolean
-  canNavigateBack: boolean
-  canNavigateForward: boolean
-  onToggleSidebar: () => void
-  onNavigateBack: () => void
-  onNavigateForward: () => void
-  activitySidebarCollapsed: boolean
-  onToggleActivitySidebar: () => void
+function Toolbar({ editor, zoomId, canNavigateBack, canNavigateForward, onNavigateBack, onNavigateForward, paneActions }: {
+  editor: Editor; zoomId: string | null; canNavigateBack: boolean; canNavigateForward: boolean
+  onNavigateBack: () => void; onNavigateForward: () => void; paneActions?: React.ReactNode
 }) {
-  return (
-    <div className="outline-toolbar-bar sticky top-0 z-20 flex min-h-12 items-center justify-between gap-4 border-b border-neutral-200 bg-white px-3 py-2">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <IconButton
-          label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (\u2318\\ / Ctrl+\\)`}
-          aria-keyshortcuts="Meta+\\ Control+\\"
-          onClick={onToggleSidebar}
-        >
-          <span className="t-icon-swap" data-state={sidebarCollapsed ? 'a' : 'b'}>
-            <span className="t-icon" data-icon="a"><PanelLeftOpen size={17} aria-hidden="true" /></span>
-            <span className="t-icon" data-icon="b"><PanelLeftClose size={17} aria-hidden="true" /></span>
-          </span>
-        </IconButton>
-        <div className="flex shrink-0 items-center gap-0.5" aria-label="Navigation history">
-          <IconButton
-            label="Go back"
-            title="Back (⌘[ / Ctrl+[)"
-            aria-keyshortcuts="Meta+[ Control+["
-            disabled={!canNavigateBack}
-            onClick={onNavigateBack}
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-          </IconButton>
-          <IconButton
-            label="Go forward"
-            title="Forward (⌘] / Ctrl+])"
-            aria-keyshortcuts="Meta+] Control+]"
-            disabled={!canNavigateForward}
-            onClick={onNavigateForward}
-          >
-            <ArrowRight size={16} aria-hidden="true" />
-          </IconButton>
-        </div>
-        <span className="toolbar-divider" aria-hidden="true" />
-        <Breadcrumbs editor={editor} zoomId={zoomId} />
-      </div>
-      <div className="ml-auto flex shrink-0 items-center gap-1">
-        <IconButton
-          label={activitySidebarCollapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'}
-          title={`${activitySidebarCollapsed ? 'Expand' : 'Collapse'} activity sidebar (\u2318/ / Ctrl+/)`}
-          aria-keyshortcuts="Meta+/ Control+/"
-          active={!activitySidebarCollapsed}
-          onClick={onToggleActivitySidebar}
-        >
-          <span className="t-icon-swap" data-state={activitySidebarCollapsed ? 'a' : 'b'}>
-            <span className="t-icon" data-icon="a"><PanelRightOpen size={17} aria-hidden="true" /></span>
-            <span className="t-icon" data-icon="b"><PanelRightClose size={17} aria-hidden="true" /></span>
-          </span>
-        </IconButton>
-      </div>
+  return <div className="outline-toolbar-bar">
+    <div className="pane-history" aria-label="Navigation history">
+      <IconButton label="Go back" aria-keyshortcuts="Meta+[ Control+[" title="Back (⌘[ / Ctrl+[)" disabled={!canNavigateBack} onClick={onNavigateBack}><ArrowLeft size={16} /></IconButton>
+      <IconButton label="Go forward" aria-keyshortcuts="Meta+] Control+]" title="Forward (⌘] / Ctrl+])" disabled={!canNavigateForward} onClick={onNavigateForward}><ArrowRight size={16} /></IconButton>
     </div>
-  )
+    <Breadcrumbs editor={editor} zoomId={zoomId} />
+    {paneActions}
+  </div>
 }
 
 function resultPath(entry: BulletEntry, entries: BulletEntry[]): string {
@@ -492,19 +426,22 @@ function OutlineSearch({
   )
 }
 
-function useNodeMenu() {
+function useNodeMenu(editor: Editor | null, active: boolean) {
   const [request, setRequest] = useState<NodeMenuRequest | null>(null)
   useEffect(() => {
-    const open = (event: Event) => setRequest((event as CustomEvent<NodeMenuRequest>).detail)
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent<NodeMenuRequest>).detail
+      if (editor && ownsPaneEvent(editor, detail, active)) setRequest(detail)
+    }
     window.addEventListener(OUTLINER_NODE_MENU_EVENT, open)
     return () => window.removeEventListener(OUTLINER_NODE_MENU_EVENT, open)
-  }, [])
+  }, [editor, active])
   return [request, setRequest] as const
 }
 
 function useDeepLinks(editor: Editor | null) {
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editorPaneId(editor)) return
     const openHash = () => {
       const nodeId = new URLSearchParams(window.location.hash.slice(1)).get('node')
       if (!nodeId || !collectBullets(editor.state.doc).some((entry) => entry.id === nodeId)) return
@@ -519,14 +456,13 @@ function useDeepLinks(editor: Editor | null) {
 
 export function OutlinerChrome({
   editor,
+  paneActions,
+  active = true,
+  globalTarget = active,
   trash,
   onTrashChange,
   shortcuts = [],
   onShortcutsChange = () => undefined,
-  sidebarCollapsed = false,
-  onToggleSidebar = () => undefined,
-  activitySidebarCollapsed = false,
-  onToggleActivitySidebar = () => undefined,
   onOpenSettings = () => undefined,
   onOpenTrash = () => undefined,
   onOpenInbox = () => undefined,
@@ -534,6 +470,9 @@ export function OutlinerChrome({
   onOpenTasks = () => undefined,
 }: {
   editor: Editor | null
+  paneActions?: React.ReactNode
+  active?: boolean
+  globalTarget?: boolean
   trash: TrashEntry[]
   onTrashChange: (entries: TrashEntry[]) => void
   shortcuts?: OutlineShortcut[]
@@ -556,14 +495,18 @@ export function OutlinerChrome({
   const searchPresence = useMotionPresence(searchOpen, 150)
   const [searchQuery, setSearchQueryText] = useState('')
   const [searchSession, setSearchSession] = useState(0)
-  const [nodeMenu, setNodeMenu] = useNodeMenu()
+  const [nodeMenu, setNodeMenu] = useNodeMenu(editor, active)
   const [actionError, setActionError] = useState<string | null>(null)
 
   // Zooming opens a new page: start it at the top. Keeping the old scroll
   // offset left a link clicked low on a long page looking at empty space.
   useEffect(() => {
+    if (editor && editorPaneId(editor)) return
     document.querySelector<HTMLElement>('.outline-workspace')?.scrollTo?.({ top: 0 })
-  }, [zoomId])
+  }, [editor, zoomId])
+  useEffect(() => {
+    if (!active) { setSearchOpen(false); setNodeMenu(null) }
+  }, [active, setNodeMenu])
   useDeepLinks(editor)
 
   const openMoveForCurrentBullet = useCallback(() => {
@@ -603,6 +546,7 @@ export function OutlinerChrome({
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
+      if (!globalTarget || event.isComposing || event.defaultPrevented) return
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.key.toLocaleLowerCase() === 'k') {
         event.preventDefault()
@@ -620,10 +564,10 @@ export function OutlinerChrome({
     }
     window.addEventListener('keydown', shortcut)
     return () => window.removeEventListener('keydown', shortcut)
-  }, [editor, openMoveForCurrentBullet])
+  }, [editor, globalTarget, openMoveForCurrentBullet])
 
   useEffect(() => {
-    if (!editor || !('__TAURI_INTERNALS__' in window)) return
+    if (!editor || !globalTarget || !('__TAURI_INTERNALS__' in window)) return
     let disposed = false
     let unlisten: (() => void) | undefined
     void import('@tauri-apps/api/event')
@@ -636,22 +580,26 @@ export function OutlinerChrome({
       disposed = true
       unlisten?.()
     }
-  }, [editor, openMoveForCurrentBullet])
+  }, [editor, globalTarget, openMoveForCurrentBullet])
 
   useEffect(() => {
     const openSavedSearch = (event: Event) => {
       if (!editor) return
-      const { query } = (event as CustomEvent<SearchRequest>).detail
+      const detail = (event as CustomEvent<SearchRequest>).detail
+      if (!ownsPaneEvent(editor, detail, globalTarget)) return
+      const { query } = detail
       openSearch(query)
     }
     window.addEventListener(OUTLINER_OPEN_SEARCH_EVENT, openSavedSearch)
     return () => window.removeEventListener(OUTLINER_OPEN_SEARCH_EVENT, openSavedSearch)
-  }, [editor])
+  }, [editor, globalTarget])
 
   useEffect(() => {
     const openDailyDate = (event: Event) => {
       if (!editor) return
-      const { date } = (event as CustomEvent<DailyDateRequest>).detail
+      const detail = (event as CustomEvent<DailyDateRequest>).detail
+      if (!ownsPaneEvent(editor, detail, active)) return
+      const { date } = detail
       openOrCreateDailyNote(editor, {
         date,
         nextId: newNodeId,
@@ -660,20 +608,22 @@ export function OutlinerChrome({
     }
     window.addEventListener(OUTLINER_DAILY_DATE_EVENT, openDailyDate)
     return () => window.removeEventListener(OUTLINER_DAILY_DATE_EVENT, openDailyDate)
-  }, [editor])
+  }, [editor, active])
 
   useEffect(() => {
     const openTag = (event: Event) => {
-      const tag = (event as CustomEvent<{ tag?: string }>).detail?.tag
+      const detail = (event as CustomEvent<{ tag?: string; sourcePaneId?: string }>).detail
+      if (!editor || !ownsPaneEvent(editor, detail, active)) return
+      const tag = detail?.tag
       if (tag) openSearch(`#${tag}`)
     }
     window.addEventListener(OUTLINE_TAG_EVENT, openTag)
     return () => window.removeEventListener(OUTLINE_TAG_EVENT, openTag)
-  }, [])
+  }, [editor, active])
 
   useEffect(() => {
     const openInternalLink = (event: Event) => {
-      if (!editor) return
+      if (!editor || editorPaneId(editor)) return
       const targetId = (event as CustomEvent<{ targetId?: string }>).detail?.targetId
       if (!targetId || !collectBullets(editor.state.doc).some((entry) => entry.id === targetId)) return
       setZoom(editor, targetId)
@@ -688,13 +638,10 @@ export function OutlinerChrome({
     <>
       <Toolbar
         editor={editor}
+        paneActions={paneActions}
         zoomId={zoomId}
-        sidebarCollapsed={sidebarCollapsed}
         canNavigateBack={canNavigateBack}
         canNavigateForward={canNavigateForward}
-        onToggleSidebar={onToggleSidebar}
-        activitySidebarCollapsed={activitySidebarCollapsed}
-        onToggleActivitySidebar={onToggleActivitySidebar}
         onNavigateBack={() => navigateBack(editor)}
         onNavigateForward={() => navigateForward(editor)}
       />
@@ -728,6 +675,7 @@ export function OutlinerChrome({
           onError={setActionError}
           isShortcut={shortcuts.some((item) => item.type === 'node' && item.target === nodeMenu.nodeId)}
           onToggleShortcut={() => toggleNodeShortcut(nodeMenu.nodeId)}
+          onOpenRight={() => { requestInternalNavigation(editor, nodeMenu.nodeId, true); setNodeMenu(null) }}
         />
       )}
     </>

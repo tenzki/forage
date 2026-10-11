@@ -46,7 +46,7 @@ function hostOf(href: string): string {
 function safeHref(value: string, base: string): string | null {
   try {
     const url = new URL(value, base)
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
+    return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:' ? url.toString() : null
   } catch {
     return null
   }
@@ -230,7 +230,7 @@ export function parseReaderResponse(body: string, href: string, fetchedAt = Date
   const field = (name: string) => header.find((line) => line.startsWith(`${name}:`))?.slice(name.length + 1).trim()
   const markdown = contentAt === -1 ? body : lines.slice(contentAt + 1).join('\n')
   const source = field('URL Source')
-  const base = source && safeHref(source, href) ? source : href
+  const base = source && /^https?:/iu.test(source) && safeHref(source, href) ? source : href
   let blocks = parseReaderMarkdown(markdown, base)
   const title = field('Title') || (blocks[0]?.type === 'heading' ? inlineText(blocks[0].content) : hostOf(href))
   // The article usually repeats its title as the first heading; the header shows it already.

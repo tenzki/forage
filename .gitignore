@@ -13,3 +13,5 @@ node_modules/
 .env.*
 !.env.example
 !.env.server.example
+
+apps/desktop/verification-dist/

@@ -7,8 +7,15 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { newNodeId } from '../types/tree'
 import { collectBullets, type BulletEntry } from './outlineModel'
 import { InternalLinkSchema } from '@forage/document'
+import { editorPaneId } from './documentAccess'
 
 export const OUTLINE_INTERNAL_LINK_EVENT = 'outline:internal-link'
+export interface InternalLinkRequest { targetId: string; sourcePaneId?: string; openRight?: boolean }
+export function requestInternalNavigation(editor: Editor, targetId: string, openRight = false): void {
+  window.dispatchEvent(new CustomEvent<InternalLinkRequest>(OUTLINE_INTERNAL_LINK_EVENT, {
+    detail: { targetId, sourcePaneId: editorPaneId(editor), openRight },
+  }))
+}
 
 const internalLinkPluginKey = new PluginKey('outlineInternalLinks')
 
@@ -169,17 +176,16 @@ export const InternalLink = InternalLinkSchema.extend({
       props: {
         decorations: (state) => internalLinkPluginKey.getState(state),
         handleDOMEvents: {
-          click: (view, event) => {
+          click: (_view, event) => {
             const target = event.target instanceof Element
               ? event.target.closest<HTMLElement>('a[data-internal-node-id]')
               : null
             const targetId = target?.dataset.internalNodeId
             if (!targetId) return false
             event.preventDefault()
-            if (!linkedTargetIds(view.state.doc).has(targetId)) return true
-            window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, {
-              detail: { targetId },
-            }))
+            if (!editorPaneId(this.editor) && !linkedTargetIds(_view.state.doc).has(targetId)) return true
+            const apple = /Mac|iPhone|iPad|iPod/u.test(`${navigator.platform} ${navigator.userAgent}`)
+            requestInternalNavigation(this.editor, targetId, apple ? event.metaKey : event.ctrlKey)
             return true
           },
         },

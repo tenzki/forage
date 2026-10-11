@@ -23,6 +23,116 @@ pub mod sync_commands;
 /// page, so app commands are gated here.
 const TRUSTED_WEBVIEWS: &[&str] = &["main"];
 
+pub fn trusted_webview(label: &str) -> bool {
+    TRUSTED_WEBVIEWS.contains(&label)
+}
+
+/// Production command boundary, reused by the isolated native verification app.
+pub fn invoke_handler(invoke: tauri::ipc::Invoke<tauri::Wry>) -> bool {
+    if !trusted_webview(invoke.message.webview_ref().label()) {
+        invoke
+            .resolver
+            .reject("app commands are not available to this webview");
+        return true;
+    }
+    let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        commands::event_store_append,
+        mcp_oauth::mcp_oauth_begin,
+        mcp_oauth::mcp_oauth_load,
+        mcp_oauth::mcp_oauth_commit,
+        mcp_oauth::mcp_oauth_release,
+        mcp_oauth::mcp_oauth_refresh_start,
+        mcp_oauth::mcp_oauth_invalidate,
+        mcp_oauth::mcp_oauth_set_url,
+        mcp_oauth::mcp_oauth_open_browser,
+        commands::event_store_events_after,
+        commands::event_store_events_before,
+        commands::event_store_pending,
+        commands::event_store_acknowledge,
+        commands::event_store_supersede,
+        commands::event_store_commit_rebase,
+        commands::event_store_save_checkpoint,
+        commands::event_store_latest_checkpoint,
+        commands::event_store_sync_state,
+        commands::event_store_record_pulled,
+        commands::event_store_storage_mode,
+        commands::event_store_set_storage_mode,
+        commands::event_store_identity,
+        commands::server_agent_configuration_mirror,
+        commands::server_agent_set_configuration_mirror,
+        commands::server_agent_remembered_runs,
+        commands::server_agent_set_remembered_runs,
+        commands::server_provisioning_state,
+        commands::server_set_provisioning_state,
+        commands::remembered_server_identity,
+        commands::set_remembered_server_identity,
+        commands::agent_run_admit,
+        commands::agent_run_get,
+        commands::agent_run_begin_attempt,
+        commands::agent_run_append_activity,
+        commands::agent_run_activity_after,
+        commands::agent_run_recent,
+        commands::agent_runs_clear,
+        commands::agent_run_cancel,
+        commands::agent_run_settle,
+        commands::agent_run_place_result,
+        commands::agent_run_retry,
+        commands::agent_run_interrupt_unfinished,
+        commands::local_credential_store,
+        commands::local_credential_load,
+        commands::local_credential_remove,
+        commands::asset_ingest_data_url,
+        commands::asset_read,
+        shortcuts_key::workspace_shortcuts_set_active,
+        shortcuts_key::workspace_focus,
+        page_peek::page_peek_create,
+        page_peek::page_peek_load,
+        page_peek::page_peek_present,
+        page_peek::page_peek_navigate,
+        page_peek::page_peek_snapshot,
+        page_peek::page_peek_close,
+        sync_commands::server_enroll,
+        sync_commands::server_seed_outline,
+        commands::event_store_mark_seeded,
+        sync_commands::server_test_connection,
+        sync_commands::server_checkpoint,
+        server_stream::server_stream_connect,
+        server_stream::server_stream_disconnect,
+        sync_commands::server_pull_events,
+        sync_commands::server_push_events,
+        sync_commands::server_upload_asset,
+        sync_commands::server_download_asset,
+        sync_commands::server_disconnect,
+        sync_commands::server_connection_info,
+        sync_commands::server_agent_configuration,
+        sync_commands::server_agent_publish_configuration,
+        sync_commands::server_agent_compute_profile,
+        sync_commands::server_mcp_inventory,
+        sync_commands::server_agent_publish_compute_profile,
+        sync_commands::server_agent_readiness,
+        sync_commands::server_outline_search,
+        sync_commands::server_agent_automation,
+        sync_commands::server_agent_publish_automation,
+        sync_commands::server_agent_enroll_api_key,
+        sync_commands::server_agent_cancel_provider_connection,
+        sync_commands::server_agent_import_credential,
+        sync_commands::server_agent_start_device_authorization,
+        sync_commands::server_agent_poll_device_authorization,
+        sync_commands::server_agent_credential,
+        sync_commands::server_agent_credentials,
+        sync_commands::server_agent_disconnect_credential,
+        sync_commands::server_agent_invoke,
+        sync_commands::server_agent_runs,
+        sync_commands::server_agent_run,
+        sync_commands::server_agent_activity,
+        sync_commands::server_agent_cancel,
+        sync_commands::server_agent_clear_history,
+        sync_commands::server_agent_retry,
+        sync_commands::server_agent_place,
+    ];
+    handler(invoke)
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
         .setup(|app| {
@@ -51,113 +161,31 @@ pub fn run() {
             });
             app.manage(server_stream::ServerStreamState::default());
             app.manage(mcp_oauth::McpOAuthState::default());
+            app.manage(page_peek::PageRegistry::default());
             shortcuts_key::install(app.handle());
             Ok(())
         })
-        .invoke_handler({
-            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
-            commands::event_store_append,
-            mcp_oauth::mcp_oauth_begin,
-            mcp_oauth::mcp_oauth_load,
-            mcp_oauth::mcp_oauth_commit,
-            mcp_oauth::mcp_oauth_release,
-            mcp_oauth::mcp_oauth_refresh_start,
-            mcp_oauth::mcp_oauth_invalidate,
-            mcp_oauth::mcp_oauth_set_url,
-            mcp_oauth::mcp_oauth_open_browser,
-            commands::event_store_events_after,
-            commands::event_store_events_before,
-            commands::event_store_pending,
-            commands::event_store_acknowledge,
-            commands::event_store_supersede,
-            commands::event_store_commit_rebase,
-            commands::event_store_save_checkpoint,
-            commands::event_store_latest_checkpoint,
-            commands::event_store_sync_state,
-            commands::event_store_record_pulled,
-            commands::event_store_storage_mode,
-            commands::event_store_set_storage_mode,
-            commands::event_store_identity,
-            commands::server_agent_configuration_mirror,
-            commands::server_agent_set_configuration_mirror,
-            commands::server_agent_remembered_runs,
-            commands::server_agent_set_remembered_runs,
-            commands::server_provisioning_state,
-            commands::server_set_provisioning_state,
-            commands::remembered_server_identity,
-            commands::set_remembered_server_identity,
-            commands::agent_run_admit,
-            commands::agent_run_get,
-            commands::agent_run_begin_attempt,
-            commands::agent_run_append_activity,
-            commands::agent_run_activity_after,
-            commands::agent_run_recent,
-            commands::agent_runs_clear,
-            commands::agent_run_cancel,
-            commands::agent_run_settle,
-            commands::agent_run_place_result,
-            commands::agent_run_retry,
-            commands::agent_run_interrupt_unfinished,
-            commands::local_credential_store,
-            commands::local_credential_load,
-            commands::local_credential_remove,
-            commands::asset_ingest_data_url,
-            commands::asset_read,
-            page_peek::page_peek_prepare,
-            page_peek::page_peek_load,
-            page_peek::page_peek_show,
-            page_peek::page_peek_set_bounds,
-            page_peek::page_peek_set_visible,
-            page_peek::page_peek_navigate,
-            page_peek::page_peek_snapshot,
-            page_peek::page_peek_close,
-            sync_commands::server_enroll,
-            sync_commands::server_seed_outline,
-            commands::event_store_mark_seeded,
-            sync_commands::server_test_connection,
-            sync_commands::server_checkpoint,
-            server_stream::server_stream_connect,
-            server_stream::server_stream_disconnect,
-            sync_commands::server_pull_events,
-            sync_commands::server_push_events,
-            sync_commands::server_upload_asset,
-            sync_commands::server_download_asset,
-            sync_commands::server_disconnect,
-            sync_commands::server_connection_info,
-            sync_commands::server_agent_configuration,
-            sync_commands::server_agent_publish_configuration,
-            sync_commands::server_agent_compute_profile,
-            sync_commands::server_mcp_inventory,
-            sync_commands::server_agent_publish_compute_profile,
-            sync_commands::server_agent_readiness,
-            sync_commands::server_outline_search,
-            sync_commands::server_agent_automation,
-            sync_commands::server_agent_publish_automation,
-            sync_commands::server_agent_enroll_api_key,
-            sync_commands::server_agent_cancel_provider_connection,
-            sync_commands::server_agent_import_credential,
-            sync_commands::server_agent_start_device_authorization,
-            sync_commands::server_agent_poll_device_authorization,
-            sync_commands::server_agent_credential,
-            sync_commands::server_agent_credentials,
-            sync_commands::server_agent_disconnect_credential,
-            sync_commands::server_agent_invoke,
-            sync_commands::server_agent_runs,
-            sync_commands::server_agent_run,
-            sync_commands::server_agent_activity,
-            sync_commands::server_agent_cancel,
-            sync_commands::server_agent_clear_history,
-            sync_commands::server_agent_retry,
-            sync_commands::server_agent_place,
-            ];
-            move |invoke| {
-                if !TRUSTED_WEBVIEWS.contains(&invoke.message.webview_ref().label()) {
-                    invoke.resolver.reject("app commands are not available to this webview");
-                    return true;
-                }
-                handler(invoke)
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && matches!(
+                    event,
+                    tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Resized(_)
+                )
+            {
+                use tauri::Manager;
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(main) = app.get_webview("main") {
+                        let _ = main.eval("window.dispatchEvent(new Event('resize'))");
+                    }
+                });
+            }
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                use tauri::Manager;
+                window.state::<page_peek::PageRegistry>().clear();
             }
         })
+        .invoke_handler(invoke_handler)
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())

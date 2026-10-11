@@ -45,6 +45,7 @@ let card: HTMLElement | null = null
 let root: Root | null = null
 let shown: Shown | null = null
 let showTimer: ReturnType<typeof setTimeout> | null = null
+let pendingView: EditorView | null = null
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 /** The external href of an anchor, or null for internal links and non-links. */
@@ -131,7 +132,7 @@ function actionsFor(current: Shown): LinkPreviewActions {
     onPeek: () => {
       if (target.kind !== 'external') return
       hideCard()
-      requestLinkPeek(target.href, bulletIdAtDom(view, target.anchor))
+      requestLinkPeek(target.href, bulletIdAtDom(view, target.anchor), view.dom.dataset.paneId)
     },
     onOpenExternal: () => {
       if (target.kind !== 'external') return
@@ -146,7 +147,14 @@ function actionsFor(current: Shown): LinkPreviewActions {
     onOpenInternal: () => {
       if (target.kind !== 'internal') return
       hideCard()
-      window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, { detail: { targetId: target.targetId } }))
+      window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, { detail: { targetId: target.targetId, sourcePaneId: view.dom.dataset.paneId } }))
+    },
+    onOpenRight: () => {
+      hideCard()
+      if (target.kind === 'internal') window.dispatchEvent(new CustomEvent(OUTLINE_INTERNAL_LINK_EVENT, {
+        detail: { targetId: target.targetId, sourcePaneId: view.dom.dataset.paneId, openRight: true },
+      }))
+      else requestLinkPeek(target.href, bulletIdAtDom(view, target.anchor), view.dom.dataset.paneId)
     },
     onRelink: () => {
       if (target.kind !== 'internal') return
@@ -219,12 +227,17 @@ function ensureCard(): HTMLElement {
     event.preventDefault()
     const { target } = current
     if (target.kind === 'internal') {
-      if (modelFor(current).kind !== 'missing') actionsFor(current).onOpenInternal()
+      const apple = /Mac|iPhone|iPad|iPod/u.test(`${navigator.platform} ${navigator.userAgent}`)
+      if (modelFor(current).kind !== 'missing') {
+        const actions = actionsFor(current)
+        if (apple ? event.metaKey : event.ctrlKey) actions.onOpenRight?.()
+        else actions.onOpenInternal()
+      }
       return
     }
     hideCard()
     if (event.metaKey || event.ctrlKey) openExternally(target.href)
-    else requestLinkPeek(target.href, bulletIdAtDom(current.view, target.anchor))
+    else requestLinkPeek(target.href, bulletIdAtDom(current.view, target.anchor), current.view.dom.dataset.paneId)
   })
   card = element
   root = createRoot(element)
@@ -259,6 +272,7 @@ function showCard(view: EditorView, target: HoverTarget): void {
 }
 
 export function hideCard(): void {
+  pendingView = null
   if (showTimer) { clearTimeout(showTimer); showTimer = null }
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
   shown = null
@@ -304,8 +318,10 @@ export const LinkCards = Extension.create({
             cancelHide()
             if (sameTarget(shown?.target, hit)) return false
             if (showTimer) clearTimeout(showTimer)
+            pendingView = view
             showTimer = setTimeout(() => {
               showTimer = null
+              pendingView = null
               showCard(view, hit)
             }, shown ? 0 : HOVER_DELAY_MS)
             return false
@@ -327,7 +343,7 @@ export const LinkCards = Extension.create({
           },
         },
       },
-      view: () => ({ destroy: hideCard }),
+      view: view => ({ destroy: () => { if (shown?.view === view || pendingView === view) hideCard() } }),
     })]
   },
 })

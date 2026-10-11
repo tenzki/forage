@@ -9,6 +9,12 @@
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "build:workspace-verify": "tsc -p tsconfig.workspace-verify.json && vite build --config vite.workspace-verify.config.ts",
+    "test:workspace-native": "node scripts/verify-workspace.mjs",
+    "test:workspace-layout": "FORAGE_WORKSPACE_LAYOUT_ONLY=1 node scripts/verify-workspace.mjs",
+    "test:pane-resources": "node scripts/verify-pane-resources.mjs",
+    "test:pane-shortcuts": "node scripts/verify-pane-shortcuts.mjs",
+    "test:pane-clipping": "node scripts/verify-pane-clipping.mjs",
     "test": "vitest run --config ../../vitest.config.ts --root ../.. apps/desktop/src"
   },
   "dependencies": {

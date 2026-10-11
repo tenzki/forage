@@ -1,0 +1,134 @@
+{
+  "passed": true,
+  "platform": "darwin",
+  "timestamp": "2026-09-30T14:15:31.420Z",
+  "flow": {
+    "checks": [
+      {
+        "data": {
+          "bullets": 1002
+        },
+        "stage": "seed"
+      },
+      {
+        "data": {
+          "centered": {
+            "left": 119,
+            "right": 119,
+            "scrollLeft": 0,
+            "widths": [
+              480,
+              480
+            ]
+          },
+          "centeredDrag": {
+            "after": 540,
+            "before": 480,
+            "edgeMovement": 30,
+            "margins": {
+              "left": 89,
+              "right": 89,
+              "scrollLeft": 0,
+              "widths": [
+                480,
+                540
+              ]
+            }
+          },
+          "narrow": {
+            "headerHeights": [
+              48,
+              48
+            ],
+            "objectUrls": 0,
+            "paneWidths": [
+              480,
+              520
+            ],
+            "separatorWidths": [
+              1,
+              1
+            ]
+          },
+          "outline": {
+            "hit": "<p>Bullet 0</p>",
+            "layout": {
+              "headerHeights": [
+                48,
+                48
+              ],
+              "objectUrls": 0,
+              "paneWidths": [
+                480,
+                480
+              ],
+              "separatorWidths": [
+                1,
+                1
+              ]
+            },
+            "paragraphTop": 162,
+            "scrollTop": 0,
+            "sourceConnected": true,
+            "sourceHeight": 724,
+            "sourcePainted": true,
+            "sourceText": "Bullet 0",
+            "sourceWidth": 480
+          },
+          "overflow": {
+            "left": 0,
+            "right": -302,
+            "scrollLeft": 0,
+            "widths": [
+              480,
+              520
+            ]
+          },
+          "overflowDrag": {
+            "after": 520,
+            "before": 490,
+            "edgeMovement": 30,
+            "margins": {
+              "left": -276,
+              "right": -26,
+              "scrollLeft": 276,
+              "widths": [
+                480,
+                520
+              ]
+            }
+          },
+          "singleWidth": 280,
+          "web": {
+            "hit": "<p>Bullet 0</p>",
+            "layout": {
+              "headerHeights": [
+                48,
+                48
+              ],
+              "objectUrls": 0,
+              "paneWidths": [
+                480,
+                480
+              ],
+              "separatorWidths": [
+                1,
+                1
+              ]
+            },
+            "paragraphTop": 162,
+            "scrollTop": 0,
+            "sourceConnected": true,
+            "sourceHeight": 724,
+            "sourcePainted": true,
+            "sourceText": "Bullet 0",
+            "sourceWidth": 480
+          }
+        },
+        "stage": "open-right-source-visibility"
+      }
+    ],
+    "passed": true
+  },
+  "layoutOnly": true
+}

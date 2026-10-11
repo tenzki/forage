@@ -11,6 +11,7 @@
 import { Extension, type Editor } from '@tiptap/core'
 import { Fragment, Slice, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { AllSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
+import { documentEditor } from './documentAccess'
 import { newNodeId } from '../types/tree'
 import {
   collectBullets,
@@ -33,8 +34,8 @@ const idPluginKey = new PluginKey('bulletNodeIds')
 const mutationLockedEditors = new WeakSet<Editor>()
 
 export function setEditorMutationLocked(editor: Editor, locked: boolean): void {
-  if (locked) mutationLockedEditors.add(editor)
-  else mutationLockedEditors.delete(editor)
+  if (locked) mutationLockedEditors.add(documentEditor(editor))
+  else mutationLockedEditors.delete(documentEditor(editor))
 }
 
 export const BulletAttributes = StableBulletAttributes.extend({

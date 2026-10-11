@@ -631,10 +631,25 @@ body {
 }
 
 .outline-editor-view::after {
-  display: block;
-  height: 176px;
-  content: '';
+  content: none;
 }
+
+.outline-editor-view { height: 100%; }
+.workspace-panes { display: flex; height: 100%; overflow-x: auto; }
+.workspace-outline-pane, .workspace-web-pane {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 360px;
+  min-height: 0;
+  flex-direction: column;
+  border: 0;
+  container-type: inline-size;
+}
+.workspace-panes > :only-child { flex: 1 1 0; min-width: 0; }
+.workspace-pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.workspace-pane-scroll::after { display: block; content: ''; height: 176px; }
+.workspace-web-pane > .link-peek-pane { flex: 1; }
+.pane-unavailable { padding: 24px; }
 
 .outliner-editor {
   font-family: var(--outline-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
@@ -6409,11 +6424,11 @@ body.is-dragging-rule * {
   }
 
   /* ---------- Link peek, reader pane (Screen 08) ---------- */
-  .outliner-main:has(.link-peek-pane) {
+  .outliner-main:has(> .link-peek-pane) {
     grid-template-columns: 220px minmax(0, 1fr) min(640px, 46%);
   }
 
-  .outliner-main:has(.outline-sidebar.is-collapsed):has(.link-peek-pane) {
+  .outliner-main:has(.outline-sidebar.is-collapsed):has(> .link-peek-pane) {
     grid-template-columns: 46px minmax(0, 1fr) min(640px, 48%);
   }
 
@@ -7395,3 +7410,54 @@ body.is-dragging-rule * {
     animation: forage-activity-spin 900ms linear infinite;
   }
 }
+
+/* Multi-pane shell. Pane widths and scroll remain session-local. */
+.workspace-panes { overscroll-behavior-x: contain; align-items: stretch; }
+/* Auto margins share spare space, but collapse to zero on overflow so the
+   leading pane remains reachable by horizontal scrolling. */
+.workspace-panes > :first-child { margin-left: auto; }
+.workspace-panes > :last-child { margin-right: auto; }
+.workspace-pane-scroll { overscroll-behavior-y: contain; }
+/* Full document adapters stay live. Explicit strip geometry culls only wholly
+   offscreen columns; automatic WebKit culling can blank visible source panes. */
+.workspace-outline-pane { content-visibility: visible; contain-intrinsic-size: 360px 800px; }
+.workspace-outline-pane[data-offscreen] { content-visibility: hidden; }
+.workspace-pane-scroll .outliner-editor { padding-left: 20px; padding-right: 20px; }
+.outline-toolbar-bar, .link-peek-toolbar { display: flex; align-items: center; height: 48px; min-height: 48px; flex: none; padding: 0 8px; gap: 2px; border-bottom: 1px solid var(--rule-soft); background: var(--paper-raised); }
+.pane-history, .pane-actions { display: flex; flex: none; align-items: center; }
+.pane-actions, .web-overflow { position: relative; }
+.outline-toolbar-bar .outline-breadcrumbs { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.outline-breadcrumbs .breadcrumb-segment { min-width: 0; overflow: hidden; }
+.outline-breadcrumbs button, .web-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.web-location { flex: 1; }
+.pane-menu { position: absolute; right: 0; top: 100%; z-index: 60; width: 280px; padding: 6px; background: var(--paper-raised); border: 1px solid var(--rule-soft); border-radius: 8px; box-shadow: 0 8px 24px #0002; }
+.pane-menu button { display: flex; width: 100%; justify-content: space-between; padding: 8px; font-size: 12px; gap: 8px; text-align: left; }
+.pane-menu button:hover, .pane-menu button:focus-visible { background: var(--paper-sunk); }
+.pane-menu button:disabled { opacity: .4; }
+.pane-menu small { color: var(--moss); }
+.web-overflow summary { cursor: pointer; list-style: none; padding: 6px; }
+.link-peek-pane { border-left: 0; }
+.link-peek-address-host { overflow: hidden; text-overflow: ellipsis; }
+.pane-separator { position: relative; width: 1px; flex: 0 0 1px; background: var(--rule-soft); z-index: 25; cursor: col-resize; touch-action: none; }
+.pane-separator::after { content: ''; position: absolute; left: -4px; width: 9px; height: 100%; }
+.pane-separator:focus-visible { outline: 2px solid var(--moss); outline-offset: -1px; }
+.sidebar-toggle { display: flex; align-items: center; justify-content: center; height: 36px; width: 36px; margin: 6px; flex: none; border-radius: 6px; }
+.sidebar-toggle:hover { background: var(--paper-sunk); }
+.outliner-main:has(.outline-sidebar.is-collapsed) { grid-template-columns: 56px minmax(0, 1fr) 320px; }
+.outliner-main:has(.activity-sidebar.is-collapsed) { grid-template-columns: 220px minmax(0, 1fr) 56px; }
+.outliner-main:has(.outline-sidebar.is-collapsed):has(.activity-sidebar.is-collapsed) { grid-template-columns: 56px minmax(0, 1fr) 56px; }
+.activity-sidebar.is-collapsed { display: flex !important; width: auto; border-left: 1px solid var(--rule-soft); transform: none; opacity: 1; filter: none; visibility: visible; pointer-events: auto; }
+@container (max-width: 400px) {
+  .link-peek-address-path { display: none; }
+  .outline-breadcrumbs .breadcrumb-segment:not(:last-child) { display: none; }
+  .link-peek-toolbar .segmented-control { font-size: 11px; }
+}
+.workspace-panes { container-type: inline-size; container-name: workspace; }
+@container workspace (max-width: 359px) {
+  .link-peek-toolbar [data-slot="segmented-control"] button { padding-left: 4px; padding-right: 4px; }
+}
+.link-peek-pane.is-compact .link-peek-toolbar { padding: 0 6px; }
+.link-peek-pane.is-compact .link-peek-toolbar > button, .link-peek-pane.is-compact .pane-actions > button { width: 26px; height: 26px; }
+.link-peek-pane.is-compact .link-peek-address { padding: 0; gap: 0; }
+.link-peek-pane.is-compact .link-peek-address > svg { display: none; }
+.pane-menu { width: min(280px, 100cqw); }

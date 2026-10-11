@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Compass, Keyboard, ListTree, PencilLine, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { MotionPresenceState } from './ui/useMotionPresence'
+import { commandBinding, paneCommands } from '../workspace/commands'
 import { Kbd } from './ui/Kbd'
 
 interface ShortcutItem {
@@ -23,6 +24,7 @@ const IS_APPLE_PLATFORM = typeof navigator !== 'undefined'
 const PRIMARY_MODIFIER = IS_APPLE_PLATFORM ? '⌘' : 'Ctrl'
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  { title: 'Panes', description: 'Session workspace controls (provisional bindings).', icon: Compass, shortcuts: paneCommands.map(command => ({ label: command.label, keys: [commandBinding(command.id).split('+')] })) },
   {
     title: 'Navigate',
     description: 'Move around Forage without leaving the keyboard.',

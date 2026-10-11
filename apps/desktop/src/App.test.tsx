@@ -6,17 +6,28 @@
 // everything above them (persistence, settings store, App) is the real code.
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { formatDailyDate, localCalendarDate } from './editor/dailyNotes'
 import { replayOutlineEvents, type EventEnvelope } from '@forage/domain'
 import { EMPTY_DOC } from './editor/emptyDoc'
 import { insertExtensionSkillResult } from './agent/insertIntoEditor'
+import type { Editor } from '@tiptap/core'
+import { currentBulletId, findBullet, trashBullet, restoreBullet } from './editor/outlineModel'
+import { getOutlinerUiState, setZoom } from './editor/outlinerUi'
+import { requestInternalNavigation } from './editor/internalLinks'
+import * as pageBridge from './components/Outliner/pagePeek'
+import { requestLinkPeek } from './editor/externalLinks'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeMocks.invoke, isTauri: () => false }))
+
+vi.mock('./editor/readerDocument', async importOriginal => ({
+  ...(await importOriginal<typeof import('./editor/readerDocument')>()),
+  fetchReaderDocument: vi.fn(async (href: string) => ({ href, host: new URL(href).hostname, title: 'Test article', blocks: [], minutes: 1, fetchedAt: 0 })),
+}))
 
 vi.mock('@tauri-apps/api/path', () => ({
   homeDir: async () => '/home/test',
@@ -38,7 +49,7 @@ async function renderApp() {
   await waitFor(() => expect(view.container.querySelector('.ProseMirror')).not.toBeNull())
   // Let the independent outline/settings startup effects settle before callers
   // capture editor identity; either effect may schedule one final render.
-  await new Promise((resolve) => window.setTimeout(resolve, 0))
+  await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)) })
   await waitFor(() => expect(view.container.querySelector('.ProseMirror')).not.toBeNull())
   return view
 }
@@ -57,6 +68,66 @@ describe('App view switching', () => {
     })
   })
 
+  it('dispatches workspace keys once, protects final close, and respects input ownership', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Linux')
+    const { container } = await renderApp()
+    const panes = () => container.querySelectorAll('.workspace-outline-pane')
+    const editor = (container.querySelector('.tiptap') as HTMLElement & { editor: Editor }).editor
+    act(() => editor.commands.focus())
+    const before = editor.getJSON()
+    fireEvent.keyDown(editor.view.dom, { key: '|', code: 'Backslash', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(panes()).toHaveLength(2))
+    expect(editor.getJSON()).toEqual(before)
+    fireEvent.keyDown(window, { key: 'w', code: 'KeyW', ctrlKey: true })
+    await waitFor(() => expect(panes()).toHaveLength(1))
+    const finalClose = new KeyboardEvent('keydown', { key: 'w', code: 'KeyW', ctrlKey: true, cancelable: true })
+    act(() => window.dispatchEvent(finalClose))
+    expect(finalClose.defaultPrevented).toBe(true)
+    expect(panes()).toHaveLength(1)
+    fireEvent.keyDown(window, { key: '|', code: 'Backslash', ctrlKey: true, shiftKey: true, isComposing: true })
+    expect(panes()).toHaveLength(1)
+    const input = document.body.appendChild(document.createElement('input'))
+    input.focus()
+    fireEvent.keyDown(input, { key: '|', code: 'Backslash', ctrlKey: true, shiftKey: true })
+    expect(panes()).toHaveLength(1)
+    input.remove()
+    act(() => editor.commands.focus())
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Pane actions' }))
+    fireEvent.keyDown(window, { key: '|', code: 'Backslash', ctrlKey: true, shiftKey: true })
+    expect(panes()).toHaveLength(1)
+    await user.click(screen.getByRole('menuitem', { name: /^Split right/ }))
+    await waitFor(() => expect(panes()).toHaveLength(2))
+    vi.restoreAllMocks()
+  })
+
+  it('routes native Page commands once and keeps both sidebar rails independent', async () => {
+    const { container } = await renderApp()
+    const editor = (container.querySelector('.tiptap') as HTMLElement & { editor: Editor }).editor
+    act(() => requestLinkPeek('https://example.test', currentBulletId(editor) ?? undefined, 'primary'))
+    await waitFor(() => expect(container.querySelectorAll('.workspace-web-pane')).toHaveLength(1))
+    const owned = vi.spyOn(pageBridge, 'pageResourceOwnedBy').mockImplementation((resourceId, paneId) => resourceId === `test-${paneId}`)
+    let lastSource = ''
+    const native = (command: string) => {
+      lastSource = Array.from(container.querySelectorAll<HTMLElement>('.workspace-web-pane')).slice(-1)[0]?.dataset.paneId ?? lastSource
+      act(() => window.dispatchEvent(new CustomEvent('forage-pane-command', { detail: { command, nativePage: true, sourcePaneId: lastSource, resourceId: `test-${lastSource}` } })))
+    }
+    native('split')
+    await waitFor(() => expect(container.querySelectorAll('.workspace-web-pane')).toHaveLength(2))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
+    await user.click(screen.getByRole('button', { name: 'Collapse activity sidebar' }))
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand activity sidebar' })).toBeTruthy()
+    native('close')
+    await waitFor(() => expect(container.querySelectorAll('.workspace-web-pane')).toHaveLength(1))
+    native('close')
+    await waitFor(() => expect(container.querySelectorAll('.workspace-web-pane')).toHaveLength(0))
+    native('split') // A delayed event from a closed native page cannot split an outline.
+    expect(container.querySelectorAll('.workspace-outline-pane')).toHaveLength(1)
+    owned.mockRestore()
+  })
+
   it('durably appends typing as an event instead of scheduling an iCloud snapshot', async () => {
     const user = userEvent.setup()
     const { container } = await renderApp()
@@ -73,6 +144,143 @@ describe('App view switching', () => {
         }),
       }),
     ))
+  })
+
+  it('opens repeated internal targets immediately right, scopes plain navigation, and rejects broken links', async () => {
+    const { container } = await renderApp()
+    const dom = container.querySelector('.ProseMirror') as HTMLElement & { editor: Editor }
+    const id = currentBulletId(dom.editor)!
+    const source = dom.dataset.paneId!
+    nativeMocks.invoke.mockClear()
+    act(() => requestInternalNavigation(dom.editor, id, true))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const right = container.querySelectorAll<HTMLElement & { editor: Editor }>('.ProseMirror')[1]
+    act(() => requestInternalNavigation(dom.editor, id, true))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(3))
+    expect(container.querySelectorAll<HTMLElement>('[data-pane-id].workspace-outline-pane')[0].dataset.paneId).toBe(source)
+    expect(container.querySelectorAll<HTMLElement>('[data-pane-id].workspace-outline-pane')[2].dataset.paneId).toBe(right.dataset.paneId)
+    expect(getOutlinerUiState(dom.editor).zoomId).toBeNull()
+    act(() => requestInternalNavigation(dom.editor, id))
+    expect(getOutlinerUiState(dom.editor).zoomId).toBe(id)
+    act(() => requestInternalNavigation(dom.editor, 'missing-node', true))
+    expect(container.querySelectorAll('.ProseMirror')).toHaveLength(3)
+    expect(screen.getByRole('alert').textContent).toContain('Linked item no longer exists')
+    expect(nativeMocks.invoke.mock.calls.filter(([command]) => command === 'event_store_append')).toHaveLength(0)
+  })
+
+  it('preserves pane identities, visits and scroll across secondary views, and routes global navigation from a web pane', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const a = container.querySelector('.ProseMirror') as HTMLElement & { editor: Editor }
+    await user.click(screen.getByRole('button', { name: 'Pane actions' }))
+    await user.click(screen.getByRole('menuitem', { name: /^Split right/ }))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const b = container.querySelectorAll<HTMLElement & { editor: Editor }>('.ProseMirror')[1]
+    const id = currentBulletId(b.editor)!
+    act(() => setZoom(b.editor, id))
+    const scroller = b.closest('.workspace-pane-scroll') as HTMLElement
+    scroller.scrollTop = 165
+    fireEvent.scroll(scroller)
+    const originalVisits = getOutlinerUiState(b.editor).backStack
+    for (const name of ['Settings', 'Tasks', 'Trash']) {
+      await user.click(screen.getByRole('button', { name }))
+      await user.click(container.querySelector<HTMLButtonElement>('.sidebar-home')!)
+      // Home is a navigation command; returning via the secondary Back button
+      // is exercised separately below. Mounted adapters retain their identity.
+      expect(container.querySelectorAll('.ProseMirror')[0]).toBe(a)
+      expect(container.querySelectorAll('.ProseMirror')[1]).toBe(b)
+    }
+    act(() => setZoom(b.editor, id))
+    scroller.scrollTop = 165
+    fireEvent.scroll(scroller)
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Back to outline' }))
+    expect(getOutlinerUiState(b.editor).zoomId).toBe(id)
+    expect(scroller.scrollTop).toBe(165)
+    expect(originalVisits).toHaveLength(1)
+    act(() => requestLinkPeek('https://example.test', id, b.dataset.paneId))
+    expect(container.querySelector('.workspace-web-pane')).not.toBeNull()
+    expect(container.querySelector('.activity-sidebar')).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Inbox' }))
+    expect(findBullet(b.editor.state.doc, getOutlinerUiState(b.editor).zoomId!)?.systemRole).toBe('inbox')
+    expect(getOutlinerUiState(a.editor).zoomId).toBeNull()
+  })
+
+  it('shows a deleted pane target and resolves its restoration without replacing its view', async () => {
+    const { container } = await renderApp()
+    const a = container.querySelector('.ProseMirror') as HTMLElement & { editor: Editor }
+    const target = currentBulletId(a.editor)!
+    act(() => requestInternalNavigation(a.editor, target, true))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const b = container.querySelectorAll<HTMLElement & { editor: Editor }>('.ProseMirror')[1]
+    let entry!: NonNullable<ReturnType<typeof trashBullet>>
+    act(() => { entry = trashBullet(a.editor, target)! })
+    expect(within(b.closest('.workspace-outline-pane') as HTMLElement).getByRole('status').textContent).toContain('unavailable')
+    expect(getOutlinerUiState(b.editor).zoomId).toBe(target)
+    act(() => { restoreBullet(a.editor, entry) })
+    expect(container.querySelectorAll('.ProseMirror')[1]).toBe(b)
+    expect(container.querySelector('.pane-unavailable')).toBeNull()
+    expect(getOutlinerUiState(b.editor).zoomId).toBe(target)
+  })
+
+  it('routes a node menu and global Search once with two mounted views', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    await user.click(screen.getByRole('button', { name: 'Pane actions' }))
+    await user.click(screen.getByRole('menuitem', { name: /^Split right/ }))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const panes = container.querySelectorAll<HTMLElement>('.workspace-outline-pane')
+    const menus = within(panes[0]).getAllByRole('button', { name: 'Actions for bullet' })
+    await user.click(menus[menus.length - 1])
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    await user.click(screen.getByRole('menuitem', { name: 'Open in right pane' }))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(3))
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    expect(screen.getAllByRole('dialog', { name: 'Search outline' })).toHaveLength(1)
+  })
+
+  it('scopes slash completion to the current pane and leaves the other invocation unchanged', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    const a = container.querySelector('.ProseMirror') as HTMLElement & { editor: Editor }
+    await user.click(a)
+    const originalId = currentBulletId(a.editor)!
+    await user.keyboard('/res')
+    expect(container.querySelector('.slash-menu')?.textContent).toContain('/research')
+    act(() => requestLinkPeek('https://example.test', originalId, a.dataset.paneId))
+    expect(container.querySelector('.slash-menu')).toBeNull()
+    act(() => a.editor.view.focus())
+    act(() => {
+      a.editor.view.dispatch(a.editor.state.tr.insert(a.editor.state.doc.content.size - 1,
+        a.editor.schema.nodes.listItem.create({ nodeId: 'other-invocation' }, a.editor.schema.nodes.paragraph.create())))
+      requestInternalNavigation(a.editor, 'other-invocation', true)
+    })
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const b = container.querySelectorAll<HTMLElement & { editor: Editor }>('.ProseMirror')[1]
+    await user.click(b)
+    await user.keyboard('/todo{Enter}')
+    expect(findBullet(b.editor.state.doc, 'other-invocation')!.bulletKind).toBe('todo')
+    expect(findBullet(a.editor.state.doc, originalId)!.text).toBe('/res')
+    expect(a.editor.state.doc.eq(b.editor.state.doc)).toBe(true)
+    expect(container.querySelectorAll('.slash-menu')).toHaveLength(0)
+  })
+
+  it('closes an inactive pane without changing focus and protects the final outline', async () => {
+    const user = userEvent.setup()
+    const { container } = await renderApp()
+    expect(screen.queryByRole('button', { name: 'Close pane' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pane actions' }))
+    await user.click(screen.getByRole('menuitem', { name: /^Split right/ }))
+    await waitFor(() => expect(container.querySelectorAll('.ProseMirror')).toHaveLength(2))
+    const panes = container.querySelectorAll<HTMLElement>('.workspace-outline-pane')
+    const remaining = panes[1].querySelector('.ProseMirror')!
+    expect(document.activeElement).toBe(remaining)
+    await user.click(within(panes[0]).getByRole('button', { name: 'Close pane' }))
+    expect(container.querySelectorAll('.ProseMirror')).toHaveLength(1)
+    expect(document.activeElement).toBe(remaining)
+    expect(screen.queryByRole('button', { name: 'Close pane' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pane actions' }))
+    expect((screen.getByRole('menuitem', { name: /^Close pane/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('shows local storage in the sidebar status', async () => {
@@ -492,6 +700,11 @@ describe('App view switching', () => {
     const editor = container.querySelector('.ProseMirror') as HTMLElement
 
     await user.click(editor)
+    // A click on the editor's outer container has no caret coordinates in
+    // jsdom. Anchor the typing probe to its empty user bullet explicitly.
+    const view = (editor as HTMLElement & { editor: Editor }).editor
+    const target = currentBulletId(view)!
+    act(() => view.commands.setTextSelection(findBullet(view.state.doc, target)!.pos + 2))
     await user.keyboard('a')
     expect(await screen.findByText(/disk temporarily unavailable/)).toBeTruthy()
     await user.keyboard('b')
@@ -623,14 +836,15 @@ describe('App view switching', () => {
     expect(screen.getByText('No steps were recorded for this call.')).toBeTruthy()
   })
 
-  it('fully hides the activity sidebar from the header toggle', async () => {
+  it('collapses Activity into an independent rail', async () => {
     const user = userEvent.setup()
     await renderApp()
     const sidebar = screen.getByRole('complementary', { name: 'Agent activity' }) as HTMLElement
 
     await user.click(screen.getByRole('button', { name: 'Collapse activity sidebar' }))
 
-    expect(sidebar.hidden).toBe(true)
+    expect(sidebar.classList.contains('is-collapsed')).toBe(true)
+    expect(sidebar.hidden).toBe(false)
     expect(screen.getByRole('button', { name: 'Expand activity sidebar' })).toBeTruthy()
   })
 
@@ -656,7 +870,7 @@ describe('App view switching', () => {
 
     fireEvent.keyDown(window, { key: '/', code: 'Slash', ctrlKey: true })
 
-    expect(activity.hidden).toBe(true)
+    expect(activity.classList.contains('is-collapsed')).toBe(true)
     expect(outline.classList.contains('is-collapsed')).toBe(false)
 
     fireEvent.keyDown(window, { key: '/', code: 'Slash', ctrlKey: true })

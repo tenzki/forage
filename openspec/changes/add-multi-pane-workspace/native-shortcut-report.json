@@ -1,0 +1,183 @@
+{
+  "checks": [
+    {
+      "command": "openRight",
+      "count": 1,
+      "owner": "main"
+    },
+    {
+      "command": "split",
+      "count": 1,
+      "owner": "main"
+    },
+    {
+      "command": "previous",
+      "count": 1,
+      "owner": "main"
+    },
+    {
+      "command": "next",
+      "count": 1,
+      "owner": "main"
+    },
+    {
+      "command": "close",
+      "count": 1,
+      "owner": "main"
+    },
+    {
+      "command": "openRight",
+      "count": 1,
+      "owner": "page-resource-5365bbe0-4c91-4048-bd61-c5503b6451d9"
+    },
+    {
+      "command": "split",
+      "count": 1,
+      "owner": "page-resource-5365bbe0-4c91-4048-bd61-c5503b6451d9"
+    },
+    {
+      "command": "previous",
+      "count": 1,
+      "owner": "page-resource-5365bbe0-4c91-4048-bd61-c5503b6451d9"
+    },
+    {
+      "command": "next",
+      "count": 1,
+      "owner": "page-resource-5365bbe0-4c91-4048-bd61-c5503b6451d9"
+    },
+    {
+      "command": "close",
+      "count": 1,
+      "owner": "page-resource-5365bbe0-4c91-4048-bd61-c5503b6451d9"
+    },
+    {
+      "count": 0,
+      "stage": "native-form-precedence"
+    },
+    {
+      "count": 0,
+      "stage": "repeat-suppressed"
+    },
+    {
+      "collapsed": false,
+      "geometry": {
+        "activity": 320,
+        "headers": [
+          48,
+          48
+        ],
+        "nav": 220,
+        "overflow": false,
+        "scrollers": [
+          111,
+          0
+        ],
+        "separators": [
+          1
+        ],
+        "viewport": 940,
+        "webControlsFit": true,
+        "widths": [
+          470,
+          470
+        ]
+      },
+      "panes": 2,
+      "stage": "production-css-shell",
+      "windowWidth": 1480
+    },
+    {
+      "collapsed": false,
+      "geometry": {
+        "activity": 320,
+        "headers": [
+          48,
+          48,
+          48
+        ],
+        "nav": 220,
+        "overflow": true,
+        "scrollers": [
+          111,
+          0,
+          0
+        ],
+        "separators": [
+          1,
+          1
+        ],
+        "viewport": 940,
+        "webControlsFit": true,
+        "widths": [
+          360,
+          360,
+          360
+        ]
+      },
+      "panes": 3,
+      "stage": "production-css-shell",
+      "windowWidth": 1480
+    },
+    {
+      "collapsed": true,
+      "geometry": {
+        "activity": 56,
+        "headers": [
+          48,
+          48,
+          48
+        ],
+        "nav": 56,
+        "overflow": true,
+        "scrollers": [
+          111,
+          0,
+          0
+        ],
+        "separators": [
+          1,
+          1
+        ],
+        "viewport": 720,
+        "webControlsFit": true,
+        "widths": [
+          360,
+          360,
+          360
+        ]
+      },
+      "panes": 3,
+      "stage": "production-css-shell",
+      "windowWidth": 832
+    },
+    {
+      "collapsed": false,
+      "geometry": {
+        "activity": 320,
+        "headers": [
+          48,
+          48
+        ],
+        "nav": 220,
+        "overflow": true,
+        "scrollers": [
+          111,
+          0
+        ],
+        "separators": [
+          1
+        ],
+        "viewport": 180,
+        "webControlsFit": true,
+        "widths": [
+          180,
+          180
+        ]
+      },
+      "panes": 2,
+      "stage": "production-css-shell",
+      "windowWidth": 720
+    }
+  ],
+  "passed": true
+}

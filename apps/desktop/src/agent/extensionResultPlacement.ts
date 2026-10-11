@@ -1,3 +1,4 @@
+import { documentEditor } from '../editor/documentAccess'
 import type { Editor } from '@tiptap/react'
 import { parseStructuredResult } from '@forage/agent-runtime'
 import type { LocalAgentRun } from '../persistence/eventStore'
@@ -27,7 +28,7 @@ export async function placeRetainedExtensionSkillResult(
   })
   if (result.version !== 2) throw new Error('The retained extension result is not reference-aware.')
   const nodeIds = insertExtensionSkillResult(
-    editor,
+    documentEditor(editor),
     targetNodeId,
     run.id,
     result,

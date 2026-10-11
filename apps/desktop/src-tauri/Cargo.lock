@@ -1087,6 +1087,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "futures-util",
+ "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",

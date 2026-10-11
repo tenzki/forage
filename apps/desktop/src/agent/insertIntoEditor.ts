@@ -14,6 +14,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import { setAgentActivity } from '../editor/outlinerUi'
+import { documentEditor } from '../editor/documentAccess'
 import { newNodeId } from '../types/tree'
 import type { CodexAuthConfig } from './client'
 import type { AgentDefinition } from './definitions'
@@ -1047,7 +1048,10 @@ export function runSkillIntoEditor(
   const context = resolveAgentContext(editor.state.doc, invocationNodeId)
   const outlineSnapshot = JSON.stringify(buildOutlineSnapshot(editor.state.doc))
   removeCurrentSlashCommand(editor, skill.label)
-  const nodeId = insertAiChild(editor)
+  // Resolve the session authority before streaming or asynchronous asset work.
+  // The invocation was snapshotted from the source pane's local caret.
+  editor = documentEditor(editor)
+  const nodeId = insertAiChildUnder(editor, invocationNodeId)
   if (!nodeId) throw new Error('Could not find a bullet to generate under.')
   const activityId = `skill-${nodeId}`
   const startedAt = Date.now()

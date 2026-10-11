@@ -9,7 +9,9 @@ disableNativeTextAssistance()
 
 const root = createRoot(document.getElementById('app')!)
 
-if (import.meta.env.DEV && window.location.hash === '#ui-kit') {
+if (import.meta.env.DEV && window.location.hash === '#two-view-prototype') {
+  void import('./editor/prototypes/TwoViewPrototype').then(({ TwoViewPrototype }) => root.render(<TwoViewPrototype />))
+} else if (import.meta.env.DEV && window.location.hash === '#ui-kit') {
   // Development-only catalogue of the shared UI components.
   void import('./components/ui/UiGallery').then(({ UiGallery }) => root.render(<UiGallery />))
 } else {

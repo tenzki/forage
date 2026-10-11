@@ -12,6 +12,10 @@ import { nativeLocalCredentialVault } from './localCredentials'
 import { serverRunManager } from './serverRunManager'
 import { skillExecution } from './skillExecution'
 import { runInputSchema } from '@forage/agent-runtime'
+import { DocumentCoordinator } from '../editor/DocumentCoordinator'
+import { findBullet } from '../editor/outlineModel'
+import { captureDocumentEvent, type CapturedEditorEvent } from '../editor/eventCapture'
+import type { JsonValue } from '../types/tree'
 
 const allowedTool = {
   id: `mcp_l_${'a'.repeat(48)}`, remoteName: 'search', name: 'Search',
@@ -219,5 +223,51 @@ describe('skill execution application service', () => {
     await handle.completion
     expect(onError).toHaveBeenCalledWith('The selected skill no longer exists.')
     expect(NativeEventRepository.prototype.storageMode).not.toHaveBeenCalled()
+  })
+
+  it('continues admission, streaming and stable result placement after the initiating pane closes', async () => {
+    const events: CapturedEditorEvent[] = []
+    const coordinator = new DocumentCoordinator(editor.getJSON() as JsonValue, {
+      onTransaction: (root, appended) => {
+        const captured = captureDocumentEvent(root, appended, {
+          outlineId: 'outline', actorId: 'actor', deviceId: 'device', baseRevision: 0,
+          nextEventId: () => `event-${events.length}`, nextChangeGroupId: () => 'run',
+        })
+        if (captured) events.push(captured)
+      },
+    })
+    try {
+      const source = coordinator.createView('source')
+      const remaining = coordinator.createView('remaining')
+      const invocationNodeId = currentListItemId(editor)!
+      let admit!: (mode: 'local') => void
+      vi.mocked(NativeEventRepository.prototype.storageMode).mockReturnValue(new Promise(resolve => { admit = resolve }))
+      vi.spyOn(NativeEventRepository.prototype, 'agentActivityAfter').mockResolvedValue([])
+      vi.spyOn(NativeEventRepository.prototype, 'appendAgentActivity').mockResolvedValue(1)
+      let complete!: (result: { version: 1; nodes: Array<{ type: 'text'; text: string }>; sources: [] }) => void
+      const cancel = vi.fn(async () => {})
+      const invoke = vi.spyOn(LocalAgentExecutor.prototype, 'invoke').mockImplementation(async (input, observers) => {
+        observers?.onDelta?.('Streaming after close')
+        return { runId: input.runId, cancel, completion: new Promise(resolve => { complete = resolve }) }
+      })
+      const onError = vi.fn()
+      const handle = skillExecution.execute({ editor: source, skillId: 'ask', invocationNodeId, prompt: 'Why?' }, { onError })
+      source.destroy()
+      admit('local')
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce())
+      expect(remaining.state.doc.textContent).toContain('Streaming after close')
+      // Moving the remaining pane's caret cannot retarget accepted work.
+      remaining.commands.setTextSelection(remaining.state.doc.content.size - 3)
+      complete({ version: 1, nodes: [{ type: 'text', text: 'Final result after close' }], sources: [] })
+      await handle.completion
+      expect(cancel).not.toHaveBeenCalled()
+      expect(onError).toHaveBeenLastCalledWith(null)
+      expect(findBullet(remaining.state.doc, invocationNodeId)!.node.textContent).toContain('Final result after close')
+      expect(remaining.state.doc.eq(coordinator.editor.state.doc)).toBe(true)
+      expect(events.length).toBeGreaterThan(0)
+      expect(new Set(events.map(event => event.id)).size).toBe(events.length)
+    } finally {
+      coordinator.destroy()
+    }
   })
 })

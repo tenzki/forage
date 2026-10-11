@@ -1,0 +1,192 @@
+{
+  "checks": [
+    {
+      "a": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 0
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-a",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "b": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 300
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-b",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "stage": "opposite-halves"
+    },
+    {
+      "a": {
+        "native": {
+          "clipWidth": 120,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 120,
+          "visibleX": 480
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-a",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "b": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 150
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-b",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "stage": "horizontal-scroll-and-narrow-sliver"
+    },
+    {
+      "a": {
+        "native": {
+          "clipWidth": 120,
+          "hidden": true,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 0,
+          "visibleX": 0
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-a",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "b": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 0
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-b",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "stage": "first-page-offscreen"
+    },
+    {
+      "a": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 0
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-a",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "b": {
+        "native": {
+          "clipWidth": 300,
+          "hidden": false,
+          "nativePageWidth": 600,
+          "outsideHitsRejected": 4,
+          "visibleWidth": 300,
+          "visibleX": 300
+        },
+        "web": {
+          "counters": [
+            0,
+            0
+          ],
+          "page": "clip-probe-b",
+          "responsiveColumns": "300px 300px",
+          "rightColumnX": 300,
+          "viewportWidth": 600
+        }
+      },
+      "stage": "restored"
+    },
+    {
+      "aCounters": [
+        1,
+        0
+      ],
+      "bCounters": [
+        0,
+        1
+      ],
+      "stage": "independent-page-interaction"
+    },
+    {
+      "passed": true,
+      "stage": "independent-document-state"
+    }
+  ],
+  "passed": true
+}

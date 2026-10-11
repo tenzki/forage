@@ -1,0 +1,520 @@
+{
+  "passed": true,
+  "platform": "darwin",
+  "timestamp": "2026-09-30T14:06:00.429Z",
+  "flow": {
+    "checks": [
+      {
+        "data": {
+          "bullets": 1002
+        },
+        "stage": "seed"
+      },
+      {
+        "data": {
+          "centered": {
+            "left": 119,
+            "right": 119,
+            "scrollLeft": 0,
+            "widths": [
+              480,
+              480
+            ]
+          },
+          "centeredDrag": {
+            "after": 540,
+            "before": 480,
+            "edgeMovement": 30,
+            "margins": {
+              "left": 89,
+              "right": 89,
+              "scrollLeft": 0,
+              "widths": [
+                480,
+                540
+              ]
+            }
+          },
+          "narrow": {
+            "headerHeights": [
+              48,
+              48
+            ],
+            "objectUrls": 0,
+            "paneWidths": [
+              480,
+              520
+            ],
+            "separatorWidths": [
+              1,
+              1
+            ]
+          },
+          "outline": {
+            "hit": "<p>Bullet 0</p>",
+            "layout": {
+              "headerHeights": [
+                48,
+                48
+              ],
+              "objectUrls": 0,
+              "paneWidths": [
+                480,
+                480
+              ],
+              "separatorWidths": [
+                1,
+                1
+              ]
+            },
+            "paragraphTop": 162,
+            "scrollTop": 0,
+            "sourceConnected": true,
+            "sourceHeight": 724,
+            "sourcePainted": true,
+            "sourceText": "Bullet 0",
+            "sourceWidth": 480
+          },
+          "overflow": {
+            "left": 0,
+            "right": -302,
+            "scrollLeft": 0,
+            "widths": [
+              480,
+              520
+            ]
+          },
+          "overflowDrag": {
+            "after": 520,
+            "before": 490,
+            "edgeMovement": 30,
+            "margins": {
+              "left": -276,
+              "right": -26,
+              "scrollLeft": 276,
+              "widths": [
+                480,
+                520
+              ]
+            }
+          },
+          "singleWidth": 280,
+          "web": {
+            "hit": "<p>Bullet 0</p>",
+            "layout": {
+              "headerHeights": [
+                48,
+                48
+              ],
+              "objectUrls": 0,
+              "paneWidths": [
+                480,
+                480
+              ],
+              "separatorWidths": [
+                1,
+                1
+              ]
+            },
+            "paragraphTop": 162,
+            "scrollTop": 0,
+            "sourceConnected": true,
+            "sourceHeight": 724,
+            "sourcePainted": true,
+            "sourceText": "Bullet 0",
+            "sourceWidth": 480
+          }
+        },
+        "stage": "open-right-source-visibility"
+      },
+      {
+        "data": {
+          "equal": true,
+          "ids": [
+            "primary",
+            "f3002dfb-0f1b-4751-9cb2-c1897f980043",
+            "214b82a7-622f-45e6-a4a5-91a9078389f8"
+          ],
+          "outline": 3,
+          "text": "Bullet 0",
+          "web": 0
+        },
+        "stage": "three-real-app-views"
+      },
+      {
+        "data": {
+          "count": 5,
+          "runs": [],
+          "text": "BABullet 0",
+          "types": [
+            "document.steps_applied",
+            "document.steps_applied",
+            "document.steps_applied",
+            "document.undo_applied",
+            "document.redo_applied"
+          ],
+          "unique": 5
+        },
+        "stage": "same-node-shared-undo-durability"
+      },
+      {
+        "data": {
+          "equal": true,
+          "ids": [
+            "primary",
+            "214b82a7-622f-45e6-a4a5-91a9078389f8"
+          ],
+          "outline": 2,
+          "text": "BABullet 0",
+          "web": 0
+        },
+        "run": {
+          "invocationId": "d6c13db6-d952-408e-b59a-324f6a956d74",
+          "runId": "64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "sourcePaneId": "f3002dfb-0f1b-4751-9cb2-c1897f980043"
+        },
+        "stage": "close-during-durable-run"
+      },
+      {
+        "data": {
+          "headerHeights": [
+            48,
+            48,
+            48
+          ],
+          "objectUrls": 0,
+          "paneWidths": [
+            480,
+            480,
+            480
+          ],
+          "separatorWidths": [
+            1,
+            1,
+            1
+          ]
+        },
+        "references": [
+          "j6MIs",
+          "U6GEmb",
+          "Lv3U2",
+          "B3v8d9",
+          "LHer1",
+          "MVl2N"
+        ],
+        "stage": "actual-app-pen-layout"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": false,
+            "pageWidth": 480,
+            "paneId": "d9f4f341-0662-4b93-9a9f-117705627a01",
+            "resourceId": "5bbf5cf0-2e5a-463b-b3cb-b80a408a4aca",
+            "visibleWidth": 480
+          },
+          {
+            "hidden": false,
+            "pageWidth": 480,
+            "paneId": "015e34ae-c81d-462c-966a-5bd1ace2e960",
+            "resourceId": "b5741b13-1fd2-4156-9fb8-1906e8c65fcc",
+            "visibleWidth": 406
+          }
+        ],
+        "stage": "three-pane-outline-two-pages"
+      },
+      {
+        "paneOrder": [
+          "primary",
+          "d9f4f341-0662-4b93-9a9f-117705627a01",
+          "015e34ae-c81d-462c-966a-5bd1ace2e960"
+        ],
+        "stage": "actual-app-native-previous-next"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": true,
+            "pageWidth": 1,
+            "paneId": "d9f4f341-0662-4b93-9a9f-117705627a01",
+            "resourceId": "5bbf5cf0-2e5a-463b-b3cb-b80a408a4aca",
+            "visibleWidth": 0
+          },
+          {
+            "hidden": true,
+            "pageWidth": 1,
+            "paneId": "015e34ae-c81d-462c-966a-5bd1ace2e960",
+            "resourceId": "b5741b13-1fd2-4156-9fb8-1906e8c65fcc",
+            "visibleWidth": 0
+          }
+        ],
+        "stage": "settings-hides-surfaces"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": false,
+            "pageWidth": 480,
+            "paneId": "d9f4f341-0662-4b93-9a9f-117705627a01",
+            "resourceId": "5bbf5cf0-2e5a-463b-b3cb-b80a408a4aca",
+            "visibleWidth": 480
+          },
+          {
+            "hidden": false,
+            "pageWidth": 480,
+            "paneId": "015e34ae-c81d-462c-966a-5bd1ace2e960",
+            "resourceId": "b5741b13-1fd2-4156-9fb8-1906e8c65fcc",
+            "visibleWidth": 56
+          }
+        ],
+        "stage": "real-strip-scroll-clipping"
+      },
+      {
+        "stage": "owned-native-close-and-resource-cleanup"
+      },
+      {
+        "cycles": 5,
+        "elapsedMs": 4480,
+        "objectUrls": 0,
+        "remainingNativeWebviews": 1,
+        "resourcesCreated": 10,
+        "stage": "native-page-open-close-snapshot-cycles"
+      }
+    ],
+    "durable": {
+      "count": 45,
+      "runText": "Verify closureNative result after source pane closed",
+      "runs": [
+        {
+          "id": "64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "resultIdentity": "result:64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "status": "completed"
+        }
+      ],
+      "text": "....................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied"
+      ],
+      "unique": 45
+    },
+    "nativeWebviews": 1,
+    "passed": true,
+    "performance": {
+      "cases": [
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 35,
+          "editToFrameP95Ms": 39,
+          "mountMs": 30,
+          "mountedEditors": 1,
+          "outlineDomItems": 1004,
+          "panes": 1,
+          "viewUpdateMedianMs": 6
+        },
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 54,
+          "editToFrameP95Ms": 68,
+          "mountMs": 512,
+          "mountedEditors": 3,
+          "outlineDomItems": 3012,
+          "panes": 3,
+          "viewUpdateMedianMs": 10
+        },
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 118,
+          "editToFrameP95Ms": 302,
+          "mountMs": 3592,
+          "mountedEditors": 10,
+          "outlineDomItems": 10040,
+          "panes": 10,
+          "viewUpdateMedianMs": 38
+        }
+      ],
+      "cycleMs": 13103,
+      "destroyedEditors": 20,
+      "heapBytes": null,
+      "objectUrls": 0,
+      "openCloseCycles": 20,
+      "remainingEditors": 10
+    }
+  },
+  "restart": {
+    "afterUndo": {
+      "count": 46,
+      "runs": [
+        {
+          "id": "64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "resultIdentity": "result:64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "status": "completed"
+        }
+      ],
+      "text": "...................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied"
+      ],
+      "unique": 46
+    },
+    "durableUndoAvailable": true,
+    "panes": {
+      "equal": true,
+      "ids": [
+        "primary"
+      ],
+      "outline": 1,
+      "text": "....................................BABullet 0",
+      "web": 0
+    },
+    "passed": true,
+    "persisted": {
+      "count": 45,
+      "runs": [
+        {
+          "id": "64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "resultIdentity": "result:64bcb1ab-0edd-4407-a053-dd92e1850efb",
+          "status": "completed"
+        }
+      ],
+      "text": "....................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied"
+      ],
+      "unique": 45
+    },
+    "restart": true
+  }
+}

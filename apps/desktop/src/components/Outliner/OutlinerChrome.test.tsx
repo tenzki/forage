@@ -492,39 +492,11 @@ describe('outliner chrome', () => {
     }])
   })
 
-  it('exposes the sidebar toggle in the outline toolbar', async () => {
-    const user = userEvent.setup()
-    const onToggleSidebar = vi.fn()
-    render(
-      <OutlinerChrome
-        editor={editor}
-        trash={[]}
-        onTrashChange={vi.fn()}
-        onToggleSidebar={onToggleSidebar}
-      />,
-    )
-
-    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
-
-    expect(onToggleSidebar).toHaveBeenCalledOnce()
-  })
-
-  it('toggles the activity sidebar from the toolbar', async () => {
-    const user = userEvent.setup()
-    const onToggleActivitySidebar = vi.fn()
-    render(
-      <OutlinerChrome
-        editor={editor}
-        trash={[]}
-        onTrashChange={vi.fn()}
-        onToggleActivitySidebar={onToggleActivitySidebar}
-      />,
-    )
-
-    const activityToggle = screen.getByRole('button', { name: 'Collapse activity sidebar' })
-    expect(screen.queryByRole('button', { name: /Search/ })).toBeNull()
-    await user.click(activityToggle)
-    expect(onToggleActivitySidebar).toHaveBeenCalledOnce()
+  it('keeps global sidebar controls out of pane headers', () => {
+    render(<OutlinerChrome editor={editor} trash={[]} onTrashChange={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Collapse sidebar' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse activity sidebar' })).toBeNull()
+    expect(screen.getByRole('navigation', { name: 'Outline location' })).toBeTruthy()
   })
 
   it('adds a node to sidebar shortcuts from its action menu', async () => {

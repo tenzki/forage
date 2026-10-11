@@ -1,0 +1,40 @@
+{
+  "platform": "darwin",
+  "timestamp": "2026-09-30T12:38:25.239Z",
+  "description": "Actual App before linear bullet indexing and decoration caching; SQLite flow with 1,004 bullets on macOS WKWebView.",
+  "performance": {
+    "cases": [
+      {
+        "bullets": 1004,
+        "editToFrameMedianMs": 89,
+        "editToFrameP95Ms": 101,
+        "mountMs": 31,
+        "mountedEditors": 1,
+        "outlineDomItems": 1004,
+        "panes": 1
+      },
+      {
+        "bullets": 1004,
+        "editToFrameMedianMs": 450,
+        "editToFrameP95Ms": 587,
+        "mountMs": 1833,
+        "mountedEditors": 3,
+        "outlineDomItems": 3012,
+        "panes": 3
+      },
+      {
+        "bullets": 1004,
+        "editToFrameMedianMs": 1783,
+        "editToFrameP95Ms": 2993,
+        "mountMs": 10779,
+        "mountedEditors": 10,
+        "outlineDomItems": 10040,
+        "panes": 10
+      }
+    ],
+    "cycleMs": 32281,
+    "heapBytes": null,
+    "openCloseCycles": 20,
+    "remainingEditors": 10
+  }
+}

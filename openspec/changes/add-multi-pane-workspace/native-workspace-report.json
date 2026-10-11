@@ -1,0 +1,402 @@
+{
+  "passed": true,
+  "platform": "darwin",
+  "timestamp": "2026-09-30T12:58:33.633Z",
+  "flow": {
+    "checks": [
+      {
+        "data": {
+          "bullets": 1002
+        },
+        "stage": "seed"
+      },
+      {
+        "data": {
+          "equal": true,
+          "ids": [
+            "primary",
+            "6b532e62-0f41-4c6e-801c-e43f66499305",
+            "3382e700-525f-45d0-a1e5-f043ad28b997"
+          ],
+          "outline": 3,
+          "text": "Bullet 0",
+          "web": 0
+        },
+        "stage": "three-real-app-views"
+      },
+      {
+        "data": {
+          "count": 5,
+          "runs": [],
+          "text": "BABullet 0",
+          "types": [
+            "document.steps_applied",
+            "document.steps_applied",
+            "document.steps_applied",
+            "document.undo_applied",
+            "document.redo_applied"
+          ],
+          "unique": 5
+        },
+        "stage": "same-node-shared-undo-durability"
+      },
+      {
+        "data": {
+          "equal": true,
+          "ids": [
+            "primary",
+            "3382e700-525f-45d0-a1e5-f043ad28b997"
+          ],
+          "outline": 2,
+          "text": "BABullet 0",
+          "web": 0
+        },
+        "run": {
+          "invocationId": "f9f596ce-3fcf-4d8c-a300-6a1ca2dab073",
+          "runId": "e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "sourcePaneId": "6b532e62-0f41-4c6e-801c-e43f66499305"
+        },
+        "stage": "close-during-durable-run"
+      },
+      {
+        "data": {
+          "headerHeights": [
+            48,
+            48,
+            48
+          ],
+          "objectUrls": 0,
+          "paneWidths": [
+            455.328125,
+            455.328125,
+            455.328125
+          ],
+          "separatorWidths": [
+            1,
+            1
+          ]
+        },
+        "references": [
+          "j6MIs",
+          "U6GEmb",
+          "Lv3U2",
+          "B3v8d9",
+          "LHer1",
+          "MVl2N"
+        ],
+        "stage": "actual-app-pen-layout"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": false,
+            "pageWidth": 455.328125,
+            "paneId": "dfe6e6e0-1807-4315-bd8a-9a22195ee866",
+            "resourceId": "07775b22-9aa7-440c-8b1e-eb17d133fcc1",
+            "visibleWidth": 455.328125
+          },
+          {
+            "hidden": false,
+            "pageWidth": 455.328125,
+            "paneId": "f70f125b-bfb9-4784-b963-75c655d5a4b0",
+            "resourceId": "7fa1931c-eb20-4198-a3f4-3e897152ef98",
+            "visibleWidth": 455.328125
+          }
+        ],
+        "stage": "three-pane-outline-two-pages"
+      },
+      {
+        "paneOrder": [
+          "primary",
+          "dfe6e6e0-1807-4315-bd8a-9a22195ee866",
+          "f70f125b-bfb9-4784-b963-75c655d5a4b0"
+        ],
+        "stage": "actual-app-native-previous-next"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": true,
+            "pageWidth": 1,
+            "paneId": "dfe6e6e0-1807-4315-bd8a-9a22195ee866",
+            "resourceId": "07775b22-9aa7-440c-8b1e-eb17d133fcc1",
+            "visibleWidth": 0
+          },
+          {
+            "hidden": true,
+            "pageWidth": 1,
+            "paneId": "f70f125b-bfb9-4784-b963-75c655d5a4b0",
+            "resourceId": "7fa1931c-eb20-4198-a3f4-3e897152ef98",
+            "visibleWidth": 0
+          }
+        ],
+        "stage": "settings-hides-surfaces"
+      },
+      {
+        "geometry": [
+          {
+            "hidden": false,
+            "pageWidth": 360,
+            "paneId": "dfe6e6e0-1807-4315-bd8a-9a22195ee866",
+            "resourceId": "07775b22-9aa7-440c-8b1e-eb17d133fcc1",
+            "visibleWidth": 360
+          },
+          {
+            "hidden": false,
+            "pageWidth": 360,
+            "paneId": "f70f125b-bfb9-4784-b963-75c655d5a4b0",
+            "resourceId": "7fa1931c-eb20-4198-a3f4-3e897152ef98",
+            "visibleWidth": 296
+          }
+        ],
+        "stage": "real-strip-scroll-clipping"
+      },
+      {
+        "stage": "owned-native-close-and-resource-cleanup"
+      },
+      {
+        "cycles": 5,
+        "elapsedMs": 4736,
+        "objectUrls": 0,
+        "remainingNativeWebviews": 1,
+        "resourcesCreated": 10,
+        "stage": "native-page-open-close-snapshot-cycles"
+      }
+    ],
+    "durable": {
+      "count": 45,
+      "runText": "Verify closureNative result after source pane closed",
+      "runs": [
+        {
+          "id": "e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "resultIdentity": "result:e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "status": "completed"
+        }
+      ],
+      "text": "....................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied"
+      ],
+      "unique": 45
+    },
+    "nativeWebviews": 1,
+    "passed": true,
+    "performance": {
+      "cases": [
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 36,
+          "editToFrameP95Ms": 41,
+          "mountMs": 30,
+          "mountedEditors": 1,
+          "outlineDomItems": 1004,
+          "panes": 1,
+          "viewUpdateMedianMs": 4
+        },
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 60,
+          "editToFrameP95Ms": 86,
+          "mountMs": 518,
+          "mountedEditors": 3,
+          "outlineDomItems": 3012,
+          "panes": 3,
+          "viewUpdateMedianMs": 16
+        },
+        {
+          "bullets": 1004,
+          "editToFrameMedianMs": 126,
+          "editToFrameP95Ms": 154,
+          "mountMs": 2798,
+          "mountedEditors": 10,
+          "outlineDomItems": 10040,
+          "panes": 10,
+          "viewUpdateMedianMs": 36
+        }
+      ],
+      "cycleMs": 8228,
+      "destroyedEditors": 20,
+      "heapBytes": null,
+      "objectUrls": 0,
+      "openCloseCycles": 20,
+      "remainingEditors": 10
+    }
+  },
+  "restart": {
+    "afterUndo": {
+      "count": 46,
+      "runs": [
+        {
+          "id": "e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "resultIdentity": "result:e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "status": "completed"
+        }
+      ],
+      "text": "...................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied"
+      ],
+      "unique": 46
+    },
+    "durableUndoAvailable": true,
+    "panes": {
+      "equal": true,
+      "ids": [
+        "primary"
+      ],
+      "outline": 1,
+      "text": "....................................BABullet 0",
+      "web": 0
+    },
+    "passed": true,
+    "persisted": {
+      "count": 45,
+      "runs": [
+        {
+          "id": "e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "resultIdentity": "result:e54d8a2c-ec0b-4b87-b0e4-2736ff822206",
+          "status": "completed"
+        }
+      ],
+      "text": "....................................BABullet 0",
+      "types": [
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.undo_applied",
+        "document.redo_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied",
+        "document.steps_applied"
+      ],
+      "unique": 45
+    },
+    "restart": true
+  }
+}

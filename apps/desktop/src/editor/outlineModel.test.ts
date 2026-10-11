@@ -142,6 +142,23 @@ describe('Workflowy-style outline interactions', () => {
     expect(child?.ancestorIds).toEqual(['alpha'])
   })
 
+  it('keeps the cached bullet index positions valid across nested structural edits', () => {
+    const before = editor.state.doc
+    const indexed = collectBullets(before)
+    expect(collectBullets(before)).toBe(indexed)
+    expect(moveBulletTo(editor, 'alpha-child', 'bravo', 'inside')).toBe(true)
+    const after = collectBullets(editor.state.doc)
+    expect(after).not.toBe(indexed)
+    expect(indexed.find(entry => entry.id === 'alpha-child')?.ancestorIds).toEqual(['alpha'])
+    expect(after.find(entry => entry.id === 'alpha-child')?.ancestorIds).toEqual(['bravo'])
+    for (const entry of after) {
+      const resolved = editor.state.doc.resolve(entry.pos)
+      expect(entry.parentListPos).toBe(resolved.before(resolved.depth))
+      expect(entry.siblingIndex).toBe(resolved.index(resolved.depth))
+      expect(editor.state.doc.nodeAt(entry.pos)).toBe(entry.node)
+    }
+  })
+
   it('ranks shallower and more-referenced search results higher', () => {
     editor.commands.setContent({
       type: 'doc',

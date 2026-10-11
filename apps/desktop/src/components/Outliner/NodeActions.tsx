@@ -1,3 +1,4 @@
+import { commandBinding } from '../../workspace/commands'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import {
@@ -54,6 +55,7 @@ interface NodeActionsProps {
   onError: (message: string) => void
   isShortcut: boolean
   onToggleShortcut: () => void
+  onOpenRight?: () => void
 }
 
 interface MoveDestinationOption {
@@ -357,6 +359,7 @@ export function NodeActions({
   onError,
   isShortcut,
   onToggleShortcut,
+  onOpenRight,
 }: NodeActionsProps) {
   const [moving, setMoving] = useState(request.moveImmediately === true)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -450,6 +453,7 @@ export function NodeActions({
           {isShortcut ? 'Remove from shortcuts' : 'Add to shortcuts'}
         </DropdownMenuItem>
         <DropdownMenuItem icon={Copy} shortcut="⌘D" onClick={() => { if (allowed('duplicate')) duplicateBullet(editor, request.nodeId); onClose() }}>Duplicate branch</DropdownMenuItem>
+        {onOpenRight && <DropdownMenuItem icon={ChevronRight} shortcut={commandBinding('openRight')} onClick={onOpenRight}>Open in right pane</DropdownMenuItem>}
         <DropdownMenuItem icon={Link} onClick={() => void copyNodeLink(request.nodeId).then(onClose).catch((error: unknown) => onError(error instanceof Error ? error.message : String(error)))}>
           Copy bullet link
         </DropdownMenuItem>

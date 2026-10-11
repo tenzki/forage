@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { editorPaneId } from '../../editor/documentAccess'
 import {
+  PanelLeftOpen,
+  PanelLeftClose,
   CalendarDays,
   Circle,
   GripVertical,
@@ -45,6 +48,7 @@ export interface SidebarStorageStatus {
 interface OutlinerSidebarProps {
   editor: Editor | null
   shortcuts: OutlineShortcut[]
+  onToggle?: () => void
   collapsed?: boolean
   trashCount?: number
   activeView?: 'outliner' | 'settings' | 'trash' | 'tasks'
@@ -133,6 +137,7 @@ export function OutlinerSidebar({
   editor,
   shortcuts,
   collapsed = false,
+  onToggle,
   trashCount = 0,
   activeView = 'outliner',
   shortcutsOpen = false,
@@ -210,10 +215,10 @@ export function OutlinerSidebar({
     if (!editor) return
     onOpenOutline()
     if (shortcut.type === 'tag') {
-      window.dispatchEvent(new CustomEvent(OUTLINE_TAG_EVENT, { detail: { tag: shortcut.target } }))
+      window.dispatchEvent(new CustomEvent(OUTLINE_TAG_EVENT, { detail: { tag: shortcut.target, sourcePaneId: editorPaneId(editor) } }))
     } else if (shortcut.type === 'search') {
       window.dispatchEvent(new CustomEvent(OUTLINER_OPEN_SEARCH_EVENT, {
-        detail: { query: shortcut.target, scopeId: shortcut.scopeId },
+        detail: { query: shortcut.target, scopeId: shortcut.scopeId, sourcePaneId: editorPaneId(editor) },
       }))
     } else if (entriesById.has(shortcut.target)) {
       setZoom(editor, shortcut.target)
@@ -237,7 +242,7 @@ export function OutlinerSidebar({
   function openSearch() {
     onOpenOutline()
     window.dispatchEvent(new CustomEvent(OUTLINER_OPEN_SEARCH_EVENT, {
-      detail: { query: '', scopeId: null },
+      detail: { query: '', scopeId: null, sourcePaneId: editor ? editorPaneId(editor) : undefined },
     }))
   }
 
@@ -303,6 +308,7 @@ export function OutlinerSidebar({
 
   return (
     <aside ref={sidebarRef} className={`outline-sidebar${collapsed ? ' is-collapsed' : ''}${dragOver ? ' is-drop-target' : ''}`} aria-label="Outline sidebar">
+      <button aria-keyshortcuts="Meta+\ Control+\" className="sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title="Toggle navigation (⌘\ / Ctrl+\)" onClick={onToggle}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
       <div className="sidebar-brand">
         {collapsed ? <ForageMark className="sidebar-brand-mark" /> : <ForageLockup />}
       </div>

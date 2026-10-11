@@ -8,6 +8,14 @@ export interface StreamingTextRange {
   delayMs?: number
 }
 
+export const STREAMING_PROJECTION_META = 'forageStreamingProjection'
+export function streamingDecorations(editor: Editor): DecorationSet {
+  return streamingTextKey.getState(editor.state) ?? DecorationSet.empty
+}
+export function isStreamingTransaction(transaction: import('@tiptap/pm/state').Transaction): boolean {
+  return transaction.getMeta(streamingTextKey) !== undefined
+}
+
 const streamingTextKey = new PluginKey<DecorationSet>('agentStreamingText')
 
 export const AgentStreamingText = Extension.create({
@@ -19,6 +27,8 @@ export const AgentStreamingText = Extension.create({
       state: {
         init: () => DecorationSet.empty,
         apply: (transaction, current) => {
+          const snapshot = transaction.getMeta(STREAMING_PROJECTION_META) as DecorationSet | undefined
+          if (snapshot) return snapshot
           const ranges = transaction.getMeta(streamingTextKey) as StreamingTextRange[] | undefined
           if (ranges) {
             return DecorationSet.create(transaction.doc, ranges

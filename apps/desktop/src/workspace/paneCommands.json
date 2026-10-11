@@ -1,0 +1,7 @@
+[
+  { "id": "openRight", "label": "Open in right pane", "key": "Enter", "code": "Enter", "nativeKeyCode": 36, "shift": true, "alt": false },
+  { "id": "split", "label": "Split right", "key": "\\", "code": "Backslash", "nativeKeyCode": 42, "shift": true, "alt": false },
+  { "id": "previous", "label": "Focus previous pane", "key": "ArrowLeft", "code": "ArrowLeft", "nativeKeyCode": 123, "shift": false, "alt": true },
+  { "id": "next", "label": "Focus next pane", "key": "ArrowRight", "code": "ArrowRight", "nativeKeyCode": 124, "shift": false, "alt": true },
+  { "id": "close", "label": "Close pane", "key": "w", "code": "KeyW", "nativeKeyCode": 13, "shift": false, "alt": false }
+]

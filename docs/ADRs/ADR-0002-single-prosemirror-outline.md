@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-14
-- **Amended:** 2026-08-31
+- **Amended:** 2026-09-30
 - **Deciders:** AI Chat project team
 - **Supersedes:** None (replaces an undocumented per-node-editor model)
 - **Superseded by:** None
@@ -23,7 +23,7 @@ ProseMirror already models nested documents and transaction mappings. TipTap exp
 
 ## Considered Options
 
-1. **One TipTap/ProseMirror document** — all bullets are nested `listItem` nodes in one editor.
+1. **One TipTap/ProseMirror document** — all bullets are nested `listItem` nodes in one canonical document, presented through full-document views.
 2. **One editor per bullet** — keep tree structure in an external store and mount an editor for each active row.
 3. **Headless tree model plus editing adapter** — make a custom tree the source of truth and translate edits to and from ProseMirror.
 
@@ -31,7 +31,17 @@ ProseMirror already models nested documents and transaction mappings. TipTap exp
 
 We will **represent the complete outline as one TipTap/ProseMirror document and use ProseMirror transactions plus durable compensating events for editing and undo** because **one document model keeps content, hierarchy, selection, and undo consistent across sessions and synchronized devices**.
 
-The document is the source of truth for outline content and structure. Zustand may hold settings, but it must not become a second outline store. ProseMirror's native undo plugin is disabled; Mod-Z and redo dispatch inverse or forward steps recorded in the durable event log. The in-memory undo index is derived from those events and is cleared or rebuilt at migration, remote, and other unsafe mapping boundaries. The editor remains mounted while the settings view is shown so its live document and selection are preserved.
+The document is the source of truth for outline content and structure. Zustand may hold settings, but it must not become a second outline store. ProseMirror's native undo plugin is disabled; Mod-Z and redo dispatch inverse or forward steps recorded in the durable event log. The in-memory undo index is derived from those events and is cleared or rebuilt at migration, remote, and other unsafe mapping boundaries. The canonical document session survives Settings and pane closure. Full-document views may mount and unmount independently; their selection and transient UI belong to each pane. The production workspace retains its mounted outline views across Settings, Tasks, and Trash.
+
+### Multiple full-document views (2026-09-30 amendment)
+
+One canonical ProseMirror state/revision owns document commits. View transactions identify their pane and base revision. Document-changing normalization and stable-ID assignment run once at that boundary; one capture subscriber receives the root plus appended transactions for one durable event. Project committed steps into each full-document view without repeating admission/normalization, capture, agent invocation, or history. Independent TipTap editors saving their copies or broadcasting `setContent` are not a coordination strategy.
+
+Map pane-local selections through every commit without stealing focus or scrolling inactive views. Rebase stale steps through retained mappings or return a recoverable conflict retaining typed input. Defer projections into a composing view, reconcile its buffered steps at composition completion, and retain input/DOM when safe mapping fails. A production adapter must coordinate with ProseMirror’s final composition DOM flush.
+
+All views use the same durable compensating-event undo/redo authority. Switching panes ends the typing group. Persistence, synchronization, and stable-ID-targeted agent work belong to the canonical session, not a rendered pane; closing an initiating pane cannot cancel or retarget accepted work. Persisted collapse is shared; selection, zoom, navigation, filtering, menus, and scroll are view-local.
+
+Production routing uses `src/editor/DocumentCoordinator.ts`, owned by `App`, with session-local pane order, location, history, and scroll managed by `src/workspace/WorkspaceController.ts`. Multiple full-document adapters share that authority without creating document events when opened, split, or navigated. Deleted targets remain unavailable until restored or explicitly navigated away from. The original feasibility fixtures remain under `src/editor/prototypes/`.
 
 ## Consequences
 
@@ -56,7 +66,7 @@ The document is the source of truth for outline content and structure. Zustand m
 - **Risk:** Full-document scans become slow as outlines grow.  
   **Mitigation:** Benchmark against the product target and add transaction-aware indexing only when measurements justify it.
 - **Risk:** React rerenders accidentally recreate the editor.  
-  **Mitigation:** Mount one `OutlinerEditor` for the app lifetime and hide it rather than unmounting it.
+  **Mitigation:** Retain the canonical document session for the app lifetime; attach/detach full-document views without recreating document or history authority. Hide the workspace across application view changes while retaining its outline adapters.
 
 ## Option Analysis
 
@@ -99,7 +109,7 @@ The document is the source of truth for outline content and structure. Zustand m
 
 ## Implementation Notes
 
-`src/editor/OutlinerEditor.tsx` mounts one editor with StarterKit's native undo/redo disabled and project extensions. Structural helpers in `src/editor/outlineModel.ts` must dispatch transactions against that editor. `src/App.tsx` keeps the editor mounted across view changes, captures transactions as events, and maintains the derived durable undo index.
+`src/editor/OutlinerEditor.tsx` mounts a production full-document view with native undo/redo and document append hooks disabled. Its dispatcher submits document mutations to the App-owned `DocumentCoordinator`; structural helpers may use the source view for local command context while commits, normalization, capture, and projections use the canonical authority. `src/App.tsx` retains one `OutlineSession`, capture callback, and derived durable undo index across view changes. Undo/redo, synchronization, accepted agent work, and asynchronous result placement use the canonical editor independently of rendered-view lifetime.
 
 Do not reintroduce a per-node editor, an external outline source of truth, or a competing undo authority without superseding this ADR. A transient history index derived from the durable event log is part of this decision, not a second source of truth.
 
@@ -108,6 +118,9 @@ Do not reintroduce a per-node editor, an external outline source of truth, or a 
 - Undo and redo restore text edits, indentation, moves, deletes, and generated branches as coherent actions.
 - Keyboard, drag, zoom, collapse, and search tests operate on nested documents.
 - Opening and closing Settings preserves document state and undo history.
+- Two full-document views normalize and capture one change once, preserve identities, map inactive selections, and project one compensating change.
+- Stale and composing input is safely reconciled or retained for explicit recovery; projection cannot steal focus.
+- Pane closure preserves canonical session and accepted asynchronous work.
 - Performance remains acceptable on an outline containing at least 1,000 bullets.
 
 ## References

@@ -42,40 +42,36 @@ interface JsonItemLocation {
   index: number
 }
 
+// Documents are immutable. Cache the linear index for selection-only updates
+// and callers that inspect the same projection more than once.
+const bulletIndexes = new WeakMap<ProseMirrorNode, BulletEntry[]>()
 export function collectBullets(doc: ProseMirrorNode): BulletEntry[] {
+  const cached = bulletIndexes.get(doc)
+  if (cached) return cached
   const entries: BulletEntry[] = []
-  doc.descendants((node, pos) => {
-    if (node.type.name !== 'listItem' || !node.attrs.nodeId) return
-    const resolved = doc.resolve(pos)
-    const ancestorIds: string[] = []
-    for (let depth = 1; depth <= resolved.depth; depth += 1) {
-      const ancestor = resolved.node(depth)
-      if (ancestor.type.name === 'listItem' && ancestor.attrs.nodeId) {
-        ancestorIds.push(ancestor.attrs.nodeId)
+  function visit(parent: ProseMirrorNode, parentPos: number, ancestors: string[]) {
+    parent.forEach((node, offset, siblingIndex) => {
+      const pos = parent.type.name === 'doc' ? offset : parentPos + 1 + offset
+      let descendants = ancestors
+      if (node.type.name === 'listItem' && node.attrs.nodeId) {
+        let noteText = ''
+        node.forEach(child => {
+          if (child.type.name === 'bulletNote') noteText = child.textBetween(0, child.content.size, '\n', '\n')
+        })
+        entries.push({
+          id: node.attrs.nodeId, text: node.firstChild?.textContent ?? '', noteText,
+          pos, node, parentListPos: parentPos, siblingIndex, ancestorIds: ancestors,
+          bulletKind: node.attrs.bulletKind === 'todo' ? 'todo' : 'bullet',
+          completed: Boolean(node.attrs.completed), systemRole: node.attrs.systemRole ?? null,
+          dailyDate: node.attrs.dailyDate ?? null,
+        })
+        descendants = [...ancestors, node.attrs.nodeId]
       }
-    }
-    let noteText = ''
-    for (let index = 0; index < node.childCount; index += 1) {
-      const child = node.child(index)
-      if (child.type.name === 'bulletNote') {
-        noteText = child.textBetween(0, child.content.size, '\n', '\n')
-      }
-    }
-    entries.push({
-      id: node.attrs.nodeId,
-      text: node.firstChild?.textContent ?? '',
-      noteText,
-      pos,
-      node,
-      parentListPos: resolved.before(resolved.depth),
-      siblingIndex: resolved.index(resolved.depth),
-      ancestorIds,
-      bulletKind: node.attrs.bulletKind === 'todo' ? 'todo' : 'bullet',
-      completed: Boolean(node.attrs.completed),
-      systemRole: node.attrs.systemRole ?? null,
-      dailyDate: node.attrs.dailyDate ?? null,
+      if (!node.isLeaf) visit(node, pos, descendants)
     })
-  })
+  }
+  visit(doc, -1, [])
+  bulletIndexes.set(doc, entries)
   return entries
 }
 

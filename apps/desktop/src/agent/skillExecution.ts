@@ -1,3 +1,4 @@
+import { documentEditor } from '../editor/documentAccess'
 import type { Editor } from '@tiptap/core'
 import { getProviderModels } from '@forage/pi-runtime/provider-catalog'
 import { isExtensionSkill } from './definitions'
@@ -93,7 +94,9 @@ async function executeInvocation(
   observers: SkillExecutionObservers,
   execution: { runId: string; controller: AbortController; registerCancellation: (cancel: (() => void) | null) => void },
 ): Promise<void> {
-  const { editor, prompt, invocationNodeId, steering, conversation } = request
+  const { prompt, invocationNodeId, steering, conversation } = request
+  const origin = request.editor
+  const editor = documentEditor(origin)
   const { onError, onActivity, onContextError, onBeforeServerRun, onAfterServerRun } = observers
   const { runId, controller, registerCancellation } = execution
   if (editor.isDestroyed) throw new Error('The outline is no longer open.')
@@ -120,7 +123,7 @@ async function executeInvocation(
           catalog: current.catalog, localConfiguration: current.configuration,
           portableConfigurationRevision: 0, runId, signal: controller.signal,
         })
-        showExtensionSkillContext(editor, prepared.context, prepared.admission.plan)
+        showExtensionSkillContext(origin, prepared.context, prepared.admission.plan)
         const identity = await repository.identity()
         const activeConfiguration = useExtensionStore.getState().configuration
         if (!activeConfiguration) throw new Error('Extension configuration is unavailable; refresh Extensions settings and retry.')
@@ -217,7 +220,7 @@ async function executeInvocation(
           placementPending: false,
           durationMs: Date.now() - startedAt,
         })
-        clearSkillContext(editor)
+        clearSkillContext(origin)
         onContextError?.(null)
       } finally {
         await prepared?.admission.release()
@@ -236,11 +239,11 @@ async function executeInvocation(
       })
       if (cancelled) {
         onError(null)
-        clearSkillContext(editor)
+        clearSkillContext(origin)
         onContextError?.(null)
       } else {
         onError(detail)
-        showSkillContextError(editor, invocationNodeId, detail)
+        showSkillContextError(origin, invocationNodeId, detail)
         onContextError?.(detail)
       }
     })
@@ -466,10 +469,10 @@ async function executeInvocation(
       ...clearAnswer,
     })
     onError(detail)
-    showSkillContextError(editor, invocationNodeId, detail)
+    showSkillContextError(origin, invocationNodeId, detail)
     onContextError?.(detail)
   })
-  clearSkillContext(editor)
+  clearSkillContext(origin)
   onContextError?.(null)
   return completion
 }

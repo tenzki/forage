@@ -4,7 +4,8 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 
 ## Features
 
-- **One outline, real nesting** — the entire document is a single TipTap editor. Undo/redo is native and works across any edit, including agent output.
+- **One outline, real nesting** — one canonical TipTap document powers every outline pane. Durable undo/redo works across panes, including agent output, and survives restart.
+- **Multiple panes** — compare branches and webpages side by side with independent navigation and scrolling. See the [workspace guide](docs/workspace.md) for controls and shortcuts.
 - **Keyboard-first navigation** — Tab/Shift-Tab to indent, Enter for siblings, Alt-Arrow to move branches, plus zoom/hoist into any bullet, drag-reorder, and search.
 - **Slash-command skills** — start a bullet with `/` to invoke a skill:
   - `/research <topic>` — investigate a topic and structure findings as child notes

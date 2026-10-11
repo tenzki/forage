@@ -7,7 +7,8 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  ArrowLeft,
+  PanelRightClose,
+  PanelRightOpen,  ArrowLeft,
   ArrowUp,
   Ban,
   BookOpen,
@@ -561,6 +562,7 @@ export function ActivitySidebar({
   canSteer,
   onSteer,
   collapsed = false,
+  onToggle,
 }: {
   calls: ActivityCall[]
   onClear: () => void
@@ -577,6 +579,7 @@ export function ActivitySidebar({
   canSteer?: (group: SkillCallGroup) => boolean
   /** Reply to a skill call: continue its conversation, or start its next version. */
   onSteer?: (group: SkillCallGroup, note: string) => void
+  onToggle?: () => void
   collapsed?: boolean
 }) {
   const groups = useMemo(() => groupSkillCalls(calls), [calls])
@@ -601,10 +604,9 @@ export function ActivitySidebar({
     <aside
       className={`activity-sidebar${collapsed ? ' is-collapsed' : ''}`}
       aria-label="Agent activity"
-      aria-hidden={collapsed || undefined}
       data-open={String(!collapsed)}
-      hidden={collapsed}
     >
+      <button aria-keyshortcuts="Meta+/ Control+/" className="sidebar-toggle" aria-label={collapsed ? 'Expand activity sidebar' : 'Collapse activity sidebar'} title="Toggle Activity (⌘/ / Ctrl+/)" onClick={onToggle}>{collapsed ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}</button>
       {!collapsed && openGroup && (
         <CallDetail
           group={openGroup}

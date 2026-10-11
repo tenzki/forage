@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/react'
 import type { Transaction } from '@tiptap/pm/state'
-import { OutlinerEditor } from './editor/OutlinerEditor'
+import { DocumentCoordinator } from './editor/DocumentCoordinator'
+import { documentEditor } from './editor/documentAccess'
+import { WorkspaceStrip } from './workspace/WorkspaceStrip'
+import { PaneActions } from './workspace/PaneActions'
+import { commandForKey, paneInputOwned, dispatchPaneCommand, paneCommands, type PaneCommand } from './workspace/commands'
+import { OutlinePane } from './workspace/OutlinePane'
+import { WorkspaceController } from './workspace/WorkspaceController'
+import { initialWorkspace, outlineTarget } from './workspace/workspaceState'
+import { OUTLINE_INTERNAL_LINK_EVENT, type InternalLinkRequest } from './editor/internalLinks'
 import { SlashMenu } from './components/Agent/SlashMenu'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
-import { OutlinerChrome } from './components/Outliner/OutlinerChrome'
-import { BacklinksPanel } from './components/Outliner/BacklinksPanel'
 import { OutlinerSidebar, type SidebarStorageStatus } from './components/Outliner/OutlinerSidebar'
 import { FormattingBubbleMenu } from './components/Outliner/FormattingBubbleMenu'
 import { InternalLinkMenu } from './components/Outliner/InternalLinkMenu'
@@ -18,7 +24,7 @@ import { conversationReply, recordReplacedOutput, requestSkillRun, steeredPrompt
 import { takeAiOutput } from './agent/insertIntoEditor'
 import { isExtensionSkill } from './agent/definitions'
 import { LinkPeekPane } from './components/Outliner/LinkPeekPane'
-import { pagePeekAvailable, preparePage } from './components/Outliner/pagePeek'
+import { pageResourceOwnedBy } from './components/Outliner/pagePeek'
 import { OUTLINE_LINK_PEEK_EVENT, type LinkPeekRequest } from './editor/externalLinks'
 import type { ActivityEvent } from './agent/activity'
 import { applyActivityEvent, callsFromHistory } from './agent/activityCalls'
@@ -63,9 +69,11 @@ import { useExtensionStore } from './store/extensionStore'
 import { placeRetainedExtensionSkillResult } from './agent/extensionResultPlacement'
 
 /** Delay before the link peek's page webview is created in the background. */
-const PAGE_PEEK_WARMUP_MS = 1500
 
 type View = 'outliner' | 'settings' | 'trash' | 'tasks'
+const emptyWorkspace = initialWorkspace()
+const emptyWorkspaceSnapshot = () => emptyWorkspace
+const emptyWorkspaceSubscription = () => () => {}
 
 const SAFETY_SYNC_INTERVAL_MS = 5 * 60_000
 
@@ -129,6 +137,10 @@ export default function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const shortcutsPresence = useMotionPresence(shortcutsOpen, 150)
   const [editor, setEditor] = useState<Editor | null>(null)
+  const [outlineDocument, setOutlineDocument] = useState<DocumentCoordinator | null>(null)
+  const canonicalEditor = outlineDocument?.editor ?? null
+  const [workspace, setWorkspace] = useState<WorkspaceController | null>(null)
+  const workspaceState = useSyncExternalStore(workspace?.subscribe ?? emptyWorkspaceSubscription, workspace?.getSnapshot ?? emptyWorkspaceSnapshot)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
   const [agentError, setAgentError] = useState<string | null>(null)
@@ -137,7 +149,6 @@ export default function App() {
   const agentErrorPresence = useMotionPresence(Boolean(agentError), 250)
   const [activityCalls, setActivityCalls] = useState<ActivityCall[]>([])
   const [activitySidebarCollapsed, setActivitySidebarCollapsed] = useState(false)
-  const [linkPeek, setLinkPeek] = useState<LinkPeekRequest | null>(null)
   const extensionRunCancellations = useRef(new Map<string, () => void>())
   const loadSettings = useSettingsStore((state) => state.load)
   const refreshExtensions = useExtensionStore((state) => state.refresh)
@@ -148,6 +159,9 @@ export default function App() {
   const syncInProgress = useRef(false)
   const synchronizeNow = useRef<(streamed?: StreamedBatch) => Promise<void>>(async () => undefined)
   const streamUnsupported = sessionStatus.streamSupported === false
+  const initialHashWorkspace = useRef<WorkspaceController | null>(null)
+  const handlePaneReady = useCallback(() => { if (workspace) setEditor(workspace.editor()) }, [workspace])
+  useEffect(() => { if (workspace) setEditor(workspace.editor()) }, [workspace, workspaceState.activePaneId, workspaceState.lastOutlinePaneId])
 
   const handleActivity = useCallback((event: ActivityEvent) => {
     setActivityCalls((current) => applyActivityEvent(current, event))
@@ -253,25 +267,58 @@ export default function App() {
 
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
 
-  // Warm up the link peek's page webview once the app has settled, so the
-  // first link does not wait for a web content process to start.
   useEffect(() => {
-    if (!pagePeekAvailable()) return undefined
-    const timer = window.setTimeout(() => {
-      void preparePage().catch(() => undefined)
-    }, PAGE_PEEK_WARMUP_MS)
-    return () => window.clearTimeout(timer)
-  }, [])
+    const focus = (event: Event) => {
+      const detail = (event as CustomEvent<{ resourceId: string; sourcePaneId: string }>).detail
+      if (view === 'outliner' && detail && pageResourceOwnedBy(detail.resourceId, detail.sourcePaneId)) workspace?.activate(detail.sourcePaneId, false)
+    }
+    window.addEventListener('forage-page-focus', focus)
+    return () => window.removeEventListener('forage-page-focus', focus)
+  }, [workspace, view])
 
   // Links open in the peek pane beside the outline.
   useEffect(() => {
     const onPeek = (event: Event) => {
       const request = (event as CustomEvent<LinkPeekRequest>).detail
-      if (request?.href) setLinkPeek(request)
+      if (request?.href && workspace) {
+        workspace.openRight(request.sourcePaneId ?? outlineTarget(workspace.getSnapshot()).id,
+          { kind: 'web', href: request.href, sourceNodeId: request.sourceNodeId })
+      }
     }
     window.addEventListener(OUTLINE_LINK_PEEK_EVENT, onPeek)
     return () => window.removeEventListener(OUTLINE_LINK_PEEK_EVENT, onPeek)
-  }, [])
+  }, [workspace])
+
+  useEffect(() => {
+    if (!workspace) return
+    const openInternal = (event: Event) => {
+      const request = (event as CustomEvent<InternalLinkRequest>).detail
+      if (!request?.targetId) return
+      const id = request.sourcePaneId ?? outlineTarget(workspace.getSnapshot()).id
+      if (request.openRight) workspace.openRight(id, { kind: 'outline', nodeId: request.targetId })
+      else if (workspace.navigate(id, { kind: 'outline', nodeId: request.targetId })) {
+        workspace.activate(id)
+        const editor = workspace.editor(id)
+        if (editor) selectBullet(editor, request.targetId)
+      }
+    }
+    const openHash = () => {
+      const nodeId = new URLSearchParams(window.location.hash.slice(1)).get('node')
+      if (!nodeId || !workspace.editor()) return
+      const id = outlineTarget(workspace.getSnapshot()).id
+      if (workspace.navigate(id, { kind: 'outline', nodeId })) workspace.activate(id)
+    }
+    if (initialHashWorkspace.current !== workspace && workspace.editor()) {
+      initialHashWorkspace.current = workspace
+      openHash()
+    }
+    window.addEventListener(OUTLINE_INTERNAL_LINK_EVENT, openInternal)
+    window.addEventListener('hashchange', openHash)
+    return () => {
+      window.removeEventListener(OUTLINE_INTERNAL_LINK_EVENT, openInternal)
+      window.removeEventListener('hashchange', openHash)
+    }
+  }, [workspace, editor])
 
   const readOutline = useCallback(async () => {
     setLoadError(null)
@@ -320,6 +367,7 @@ export default function App() {
   }, [loaded, session])
 
   useEffect(() => {
+    const editor = canonicalEditor
     if (!editor || !session.context()) return
     let disposed = false
     const synchronize = async (streamed?: StreamedBatch): Promise<void> => {
@@ -341,7 +389,7 @@ export default function App() {
           await session.synchronize(({ state: projected, historyInvalidated, appliedEvents }) => {
             if (disposed) return
             let application: HTMLElement | null = null
-            try { application = editor.view.dom.closest<HTMLElement>('#app') } catch { /* editor was destroyed */ }
+            try { application = document.getElementById('app') } catch { /* editor was destroyed */ }
             const wasEditable = editor.isEditable
             setEditorMutationLocked(editor, true)
             if (application) application.inert = true
@@ -422,7 +470,7 @@ export default function App() {
       window.removeEventListener('focus', synchronizeOnWake)
       window.removeEventListener('online', synchronizeOnWake)
     }
-  }, [editor, session])
+  }, [canonicalEditor, session])
 
   useEffect(() => {
     if (sessionStatus.storageBackend.kind !== 'server') return
@@ -500,6 +548,53 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let cancelled = false
+    void import('@tauri-apps/api/core').then(({ invoke }) => {
+      if (!cancelled) return invoke('workspace_shortcuts_set_active', { active: view === 'outliner' && Boolean(workspace), paneId: workspaceState.activePaneId })
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [workspace, view, workspaceState.activePaneId])
+
+  useEffect(() => {
+    if (!workspace) return
+    const keyboard = (event: KeyboardEvent) => {
+      const command = commandForKey(event)
+      if (!command) return
+      // Command-W is always consumed so the last outline cannot close the window.
+      if (view !== 'outliner') return
+      const owned = paneInputOwned(event)
+      if (owned) { if (command === 'close') event.preventDefault(); return }
+      event.preventDefault()
+      event.stopPropagation()
+      if (!event.repeat) dispatchPaneCommand(workspace, workspace.getSnapshot().activePaneId, command)
+    }
+    const native = (event: Event) => {
+      const detail = (event as CustomEvent<{ command: PaneCommand; nativePage?: boolean; sourcePaneId?: string; resourceId?: string }>).detail
+      if (!detail || !paneCommands.some(command => command.id === detail.command)) return
+      const sourceId = detail.sourcePaneId ?? workspace.getSnapshot().activePaneId
+      if (detail.nativePage && (!detail.resourceId || !pageResourceOwnedBy(detail.resourceId, sourceId))) return
+      if (detail.nativePage && workspace.getSnapshot().panes.find(pane => pane.id === sourceId)?.current.location.kind !== 'web') return
+      if (view === 'outliner' && !paneInputOwned(undefined, Boolean(detail.nativePage))) dispatchPaneCommand(workspace, sourceId, detail.command)
+    }
+    const compositionStart = () => { document.documentElement.dataset.paneComposing = 'true' }
+    const compositionEnd = () => { delete document.documentElement.dataset.paneComposing }
+    window.addEventListener('compositionstart', compositionStart, true)
+    window.addEventListener('compositionend', compositionEnd, true)
+    window.addEventListener('keydown', keyboard, true)
+    window.addEventListener('forage-pane-command', native)
+    return () => { window.removeEventListener('compositionstart', compositionStart, true); window.removeEventListener('compositionend', compositionEnd, true); delete document.documentElement.dataset.paneComposing; window.removeEventListener('keydown', keyboard, true); window.removeEventListener('forage-pane-command', native) }
+  }, [workspace, view])
+
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    const pane = workspaceState.panes.find(pane => pane.id === workspaceState.activePaneId)
+    if (view !== 'outliner' || pane?.current.location.kind === 'outline') {
+      void import('@tauri-apps/api/core').then(({ invoke }) => invoke('workspace_focus', { page: false })).catch(() => undefined)
+    }
+  }, [workspaceState.activePaneId, view])
+
   // On macOS the webview never sees Command+?; native code forwards it
   // (src-tauri/src/shortcuts_key.rs).
   useEffect(() => {
@@ -526,6 +621,7 @@ export default function App() {
     transaction: Parameters<typeof captureDocumentEvent>[0],
     appendedTransactions: Parameters<typeof captureDocumentEvent>[1],
   ) => {
+    if (![transaction, ...appendedTransactions].some(tr => tr.docChanged)) return
     const context = session.context()
     if (!context) return
     const systemMaintenance = transaction.getMeta(SYSTEM_MAINTENANCE_META) === true
@@ -570,13 +666,26 @@ export default function App() {
 
   const handleUndo = useCallback((currentEditor: Editor): boolean => {
     activeChangeGroup.current = null
-    return dispatchPersistentUndo(currentEditor, persistentHistory.current) !== null
+    return dispatchPersistentUndo(documentEditor(currentEditor), persistentHistory.current) !== null
   }, [])
 
   const handleRedo = useCallback((currentEditor: Editor): boolean => {
     activeChangeGroup.current = null
-    return dispatchPersistentRedo(currentEditor, persistentHistory.current) !== null
+    return dispatchPersistentRedo(documentEditor(currentEditor), persistentHistory.current) !== null
   }, [])
+
+  useEffect(() => {
+    if (!loaded) return
+    const document = new DocumentCoordinator(initialContent, {
+      onTransaction: handleEditorTransaction,
+      onDocChange: handleDocChange,
+      onPaneSwitch: () => { activeChangeGroup.current = null },
+      onRecovery: ({ reason, pending }) => setViewError(`${reason} Retained input: ${pending.doc.textContent}`),
+    })
+    setOutlineDocument(document)
+    setWorkspace(new WorkspaceController(document, setViewError))
+    return () => { document.destroy() }
+  }, [loaded, initialContent, handleEditorTransaction, handleDocChange])
 
   const domainContext = useCallback(() => {
     return session.context()
@@ -653,6 +762,8 @@ export default function App() {
     ? `server: ${storageBackend.origin}`
     : 'local'
   const storageStatus = sidebarStorageStatus(storageBackend.kind, storageBackendLabel, syncState, Boolean(saveError))
+  const overlayEditor = view === 'outliner'
+    && workspaceState.panes.find(pane => pane.id === workspaceState.activePaneId)?.current.location.kind === 'outline' ? editor : null
 
   function openInbox() {
     if (!editor) return
@@ -708,6 +819,7 @@ export default function App() {
         <OutlinerSidebar
           editor={editor}
           shortcuts={shortcuts}
+          onToggle={() => setSidebarCollapsed(value => !value)}
           collapsed={sidebarCollapsed}
           trashCount={trash.length}
           activeView={view}
@@ -724,8 +836,16 @@ export default function App() {
         />
         <section className="outline-workspace">
           <div className="outline-editor-view" hidden={view !== 'outliner'}>
-            <OutlinerChrome
-              editor={editor}
+            <WorkspaceStrip workspace={workspace} state={workspaceState}>
+            {id => { const pane = workspaceState.panes.find(pane => pane.id === id)!; return workspace && ( pane.current.location.kind === 'outline' ? <OutlinePane
+              key={pane.id}
+              workspace={workspace}
+              pane={pane}
+              active={workspaceState.activePaneId === pane.id}
+              globalTarget={outlineTarget(workspaceState).id === pane.id}
+              onReady={handlePaneReady}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
               trash={trash}
               onTrashChange={handleTrashChange}
               shortcuts={shortcuts}
@@ -739,19 +859,29 @@ export default function App() {
               onOpenInbox={openInbox}
               onOpenDailyNotes={openDailyNotes}
               onOpenTasks={openTasks}
-            />
-            <OutlinerEditor
-              initialContent={initialContent}
-              onDocChange={handleDocChange}
-              onTransaction={handleEditorTransaction}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-              onReady={setEditor}
-            />
-            {editor && <BacklinksPanel editor={editor} />}
-            <FormattingBubbleMenu editor={editor} />
+            /> : <section className="workspace-web-pane" data-pane-id={pane.id} key={pane.id} style={{ flexBasis: pane.width }}
+              tabIndex={-1} aria-label={`Web pane ${pane.current.location.href}`}
+              onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}
+              onFocusCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}>
+              {<LinkPeekPane
+                paneId={pane.id} active={workspaceState.activePaneId === pane.id} visible={view === 'outliner'}
+                onOpenRight={href => workspace.openRight(pane.id, { kind: 'web', href, sourceNodeId: pane.current.location.kind === 'web' ? pane.current.location.sourceNodeId : undefined })}
+                paneActions={<PaneActions workspace={workspace} id={pane.id} />}
+                editor={canonicalEditor}
+                href={pane.current.location.href}
+                sourceNodeId={pane.current.location.sourceNodeId}
+                navigation={{ scrollTop: pane.current.scrollTop, onScroll: scrollTop => workspace.scroll(pane.id, scrollTop), canBack: Boolean(pane.back.length), canForward: Boolean(pane.forward.length),
+                  onNavigate: href => workspace.navigate(pane.id, { ...pane.current.location, kind: 'web', href }),
+                  onBack: () => workspace.history(pane.id, 'back'), onForward: () => workspace.history(pane.id, 'forward') }}
+                onClose={() => workspace.close(pane.id)}
+              />}
+            </section>)}}
+            </WorkspaceStrip>
+            <FormattingBubbleMenu key={`format-${workspaceState.lastOutlinePaneId}`} editor={overlayEditor} />
             <SlashMenu
+              key={`slash-${workspaceState.lastOutlinePaneId}`}
               editor={editor}
+              interactive={Boolean(overlayEditor)}
               onError={setAgentError}
               onActivity={handleActivity}
               onBeforeServerRun={prepareServerAgentRun}
@@ -761,8 +891,8 @@ export default function App() {
                 else extensionRunCancellations.current.delete(runId)
               }}
             />
-            <TagMenu editor={editor} />
-            <InternalLinkMenu editor={editor} />
+            <TagMenu key={`tag-${workspaceState.lastOutlinePaneId}`} editor={overlayEditor} />
+            <InternalLinkMenu key={`link-${workspaceState.lastOutlinePaneId}`} editor={overlayEditor} />
           </div>
           {viewError && <div className="action-error" role="alert">{viewError}<button onClick={() => setViewError(null)}>Dismiss</button></div>}
           {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} registerExit={(exit) => { settingsExit.current = exit }} />}
@@ -781,15 +911,9 @@ export default function App() {
             <TasksPanel editor={editor} onClose={() => setView('outliner')} />
           )}
         </section>
-        {linkPeek ? (
-          <LinkPeekPane
-            editor={editor}
-            href={linkPeek.href}
-            sourceNodeId={linkPeek.sourceNodeId}
-            onClose={() => setLinkPeek(null)}
-          />
-        ) : <ActivitySidebar
+        <ActivitySidebar
           calls={activityCalls}
+          onToggle={() => setActivitySidebarCollapsed(value => !value)}
           collapsed={activitySidebarCollapsed}
           onClear={clearActivity}
           onOpenNode={openActivityNode}
@@ -799,7 +923,7 @@ export default function App() {
           describeNode={describeActivityNode}
           canSteer={canSteerCall}
           onSteer={steerCall}
-        />}
+        />
       </main>
       {shortcutsPresence.mounted && (
         <KeyboardShortcutsPanel onClose={closeShortcuts} motionState={shortcutsPresence.motionState} />

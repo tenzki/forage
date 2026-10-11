@@ -1,0 +1,103 @@
+{
+  "checks": [
+    {
+      "native": {
+        "clipWidth": 300,
+        "hidden": false,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 300
+      },
+      "scaleFactor": 2,
+      "stage": "partial"
+    },
+    {
+      "native": {
+        "clipWidth": 64,
+        "hidden": false,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 64
+      },
+      "scaleFactor": 2,
+      "stage": "horizontal-scroll"
+    },
+    {
+      "native": {
+        "clipWidth": 0,
+        "hidden": true,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 0
+      },
+      "scaleFactor": 2,
+      "stage": "offscreen"
+    },
+    {
+      "native": {
+        "clipWidth": 300,
+        "hidden": false,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 300
+      },
+      "scaleFactor": 2,
+      "stage": "sidebar-expanded"
+    },
+    {
+      "native": {
+        "clipWidth": 300,
+        "hidden": true,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 0
+      },
+      "scaleFactor": 2,
+      "stage": "modal"
+    },
+    {
+      "native": {
+        "clipWidth": 300,
+        "hidden": true,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 0
+      },
+      "scaleFactor": 2,
+      "stage": "settings"
+    },
+    {
+      "native": {
+        "clipWidth": 300,
+        "hidden": false,
+        "outsideHitsRejected": 4,
+        "pageWidth": 600,
+        "visibleWidth": 300
+      },
+      "scaleFactor": 2,
+      "stage": "restored"
+    },
+    {
+      "clipWidth": 360,
+      "pageWidth": 720,
+      "stage": "pane-resize-retains-resource"
+    },
+    {
+      "stage": "stale-presentation-rejected"
+    },
+    {
+      "stage": "independent-navigation-history-reload"
+    },
+    {
+      "stage": "native-focus-owned-command-delivery"
+    },
+    {
+      "stage": "url-policy-and-remote-command-plugin-isolation"
+    },
+    {
+      "nativeResourceCount": 0,
+      "stage": "closed-unknown-id-isolation-and-cleanup"
+    }
+  ],
+  "passed": true
+}

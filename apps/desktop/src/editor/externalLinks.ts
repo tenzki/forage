@@ -13,6 +13,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { normalizedUrl } from '../components/Outliner/FormattingBubbleMenu'
+import { editorPaneId } from './documentAccess'
 
 export const OUTLINE_LINK_PEEK_EVENT = 'outline:link-peek'
 
@@ -29,13 +30,14 @@ export function openExternally(href: string): void {
 }
 
 export interface LinkPeekRequest {
+  sourcePaneId?: string
   href: string
   /** The bullet holding the link, where Clip and Summarize write. */
   sourceNodeId?: string
 }
 
-export function requestLinkPeek(href: string, sourceNodeId?: string | null): void {
-  const detail: LinkPeekRequest = { href, ...(sourceNodeId ? { sourceNodeId } : {}) }
+export function requestLinkPeek(href: string, sourceNodeId?: string | null, sourcePaneId?: string): void {
+  const detail: LinkPeekRequest = { href, ...(sourceNodeId ? { sourceNodeId } : {}), ...(sourcePaneId ? { sourcePaneId } : {}) }
   window.dispatchEvent(new CustomEvent(OUTLINE_LINK_PEEK_EVENT, { detail }))
 }
 
@@ -83,7 +85,7 @@ export const ExternalLink = Extension.create({
             if (href.startsWith('mailto:') || event.metaKey || event.ctrlKey) {
               openExternally(href)
             } else {
-              requestLinkPeek(href, bulletIdAtDom(view, anchor))
+              requestLinkPeek(href, bulletIdAtDom(view, anchor), editorPaneId(this.editor))
             }
             return true
           },

@@ -82,6 +82,7 @@ function readSlashState(editor: Editor): MenuState | null {
 
 export function SlashMenu({
   editor,
+  interactive = true,
   onError,
   onActivity,
   onBeforeServerRun,
@@ -89,6 +90,7 @@ export function SlashMenu({
   onRegisterExtensionCancellation,
 }: {
   editor: Editor | null
+  interactive?: boolean
   onError: (message: string | null) => void
   onActivity?: ActivityReporter
   onBeforeServerRun?: () => Promise<void>
@@ -113,9 +115,12 @@ export function SlashMenu({
     ? choices.filter((command) => command.label.startsWith(menu.query))
     : []
 
+  useEffect(() => { if (!interactive) setMenu(null) }, [interactive])
+
   useEffect(() => {
     if (!editor) return
     const update = () => {
+      if (!interactive) { setMenu(null); return }
       const state = readSlashState(editor)
       if (isDismissed(state)) {
         setMenu(null)
@@ -140,7 +145,7 @@ export function SlashMenu({
       editor.off('selectionUpdate', update)
       editor.off('update', update)
     }
-  }, [editor])
+  }, [editor, interactive])
 
   useEffect(() => {
     if (!editor) return
@@ -150,7 +155,7 @@ export function SlashMenu({
       cancelPreview = undefined
       const state = readSlashState(editor)
       const invocationNodeId = currentListItemId(editor)
-      if (!editor.isFocused || !state || !invocationNodeId || isDismissed(state)) {
+      if (!interactive || !editor.isFocused || !state || !invocationNodeId || isDismissed(state)) {
         setContextError(null)
         clearSkillContext(editor)
         return
@@ -190,10 +195,10 @@ export function SlashMenu({
       editor.off('blur', blur)
       clearSkillContext(editor)
     }
-  }, [editor, skills, menu, completedCommand, active])
+  }, [editor, interactive, skills, menu, completedCommand, active])
 
   useEffect(() => {
-    if (!editor || !menu || matches.length === 0) return
+    if (!editor || !interactive || !menu || matches.length === 0) return
     const onKey = (event: KeyboardEvent) => {
       const command = matches[active] ?? matches[0]
       if (event.key === 'ArrowDown') {
@@ -220,10 +225,10 @@ export function SlashMenu({
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [editor, menu, matches, active])
+  }, [editor, interactive, menu, matches, active])
 
   useEffect(() => {
-    if (!editor || !completedCommand) return
+    if (!editor || !interactive || !completedCommand) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
       if (activeInternalLinkAtSelection(editor.state)) return
@@ -234,7 +239,7 @@ export function SlashMenu({
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [editor, completedCommand])
+  }, [editor, interactive, completedCommand])
 
   function complete(command: CommandChoice): void {
     if (!editor) return
@@ -327,7 +332,7 @@ export function SlashMenu({
     return () => window.removeEventListener(OUTLINE_RUN_SKILL_EVENT, onRunRequest)
   }, [editor, onError])
 
-  if (!menu || matches.length === 0) return null
+  if (!interactive || !menu || matches.length === 0) return null
 
   return (
     <ul className="slash-menu t-dropdown is-open" data-origin="top-left" style={{ top: menu.top, left: menu.left }}>
