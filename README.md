@@ -20,7 +20,7 @@ Forage is a second brain note taker with customizable agents. Powered by [Pi](ht
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22.19+
 - pnpm 10.32.1 (the repository's `packageManager` pin can be activated with Corepack)
 - Rust toolchain (Tauri build) — install via [rustup](https://rustup.rs/) if missing
 

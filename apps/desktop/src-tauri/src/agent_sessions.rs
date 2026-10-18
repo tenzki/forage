@@ -1,7 +1,7 @@
-//! Pi session files that keep each local skill call's agent conversation.
+//! Pi Durable conversation databases and legacy SDK session files that keep each local skill call's agent conversation.
 //!
-//! The sidecar writes `<agentDir>/agent-sessions/<callId>.jsonl`, where `agentDir`
-//! is `PI_CODING_AGENT_DIR` (`<appData>/pi-agent`, set in `piSdkClient.ts`). The
+//! The sidecar writes `<agentDir>/agent-sessions/<callId>.sqlite`, where `agentDir`
+//! is `PI_CODING_AGENT_DIR` (`<appData>/pi-agent`, set in `piSidecarClient.ts`). The
 //! files are a cache keyed by run rows in SQLite: a file is removed once no run
 //! of its call remains.
 
@@ -16,7 +16,9 @@ pub fn directory(app_data: &Path) -> PathBuf {
 
 /// The call ID a session file belongs to, if the name is one the sidecar writes.
 fn call_id(file_name: &str) -> Option<&str> {
-    let call_id = file_name.strip_suffix(".jsonl")?;
+    let call_id = [".sqlite-wal", ".sqlite-shm", ".sqlite", ".jsonl"]
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))?;
     let valid = (1..=128).contains(&call_id.len())
         && call_id
             .bytes()

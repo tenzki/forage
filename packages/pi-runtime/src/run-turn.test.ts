@@ -150,7 +150,7 @@ describe('runPiTurn', () => {
     await runPiTurn(request(), turnAdapters)
     expect(read).toHaveLength(16)
     expect(read).not.toContain('https://example.com/16')
-    expect(overflowResult).toBe(CALL_LIMIT_MESSAGE)
+    expect(overflowResult).toContain(CALL_LIMIT_MESSAGE)
   })
 
   it('fails with the tool round limit when the model keeps calling tools', async () => {
@@ -201,10 +201,10 @@ describe('runPiTurn', () => {
     afterEach(() => rmSync(directory, { recursive: true, force: true }))
 
     it('resumes the call transcript and answers a follow-up inline', async () => {
-      const conversation = createFileConversationStore(directory, directory)
+      const conversation = createFileConversationStore(directory)
       const thread = { callId: 'call-1', turn: 1 }
       const first = await adapters([emitOutline('Tides follow the moon.')], { conversation })
-      await runPiTurn(request({ thread }), first.adapters, { cwd: directory })
+      await runPiTurn(request({ thread }), first.adapters)
 
       let resumed: Context | undefined
       const second = await adapters([(context) => {
@@ -215,7 +215,7 @@ describe('runPiTurn', () => {
         thread: { callId: 'call-1', turn: 2 },
         prompt: 'why?',
         invocationOutline: ['- Tides follow the moon.'],
-      }), second.adapters, { cwd: directory })
+      }), second.adapters)
 
       expect(outcome).toEqual({ type: 'answer', text: 'Because of gravity.' })
       expect(resumed?.systemPrompt).toContain('This is a follow-up turn')
@@ -226,15 +226,15 @@ describe('runPiTurn', () => {
       ])
     })
 
-    it('rolls a failed follow-up back so the next reply resumes from the last completed turn', async () => {
-      const conversation = createFileConversationStore(directory, directory)
+    it('excludes a failed follow-up so the next reply resumes from the last completed turn', async () => {
+      const conversation = createFileConversationStore(directory)
       const first = await adapters([emitOutline('Tides follow the moon.')], { conversation })
-      await runPiTurn(request({ thread: { callId: 'call-1', turn: 1 } }), first.adapters, { cwd: directory })
+      await runPiTurn(request({ thread: { callId: 'call-1', turn: 1 } }), first.adapters)
 
       const failed = await adapters([
         fauxAssistantMessage([], { stopReason: 'error', errorMessage: 'Provider unavailable.' }),
       ], { conversation })
-      await expect(runPiTurn(request({ thread: { callId: 'call-1', turn: 2 }, prompt: 'first try' }), failed.adapters, { cwd: directory }))
+      await expect(runPiTurn(request({ thread: { callId: 'call-1', turn: 2 }, prompt: 'first try' }), failed.adapters))
         .rejects.toThrow('Provider unavailable.')
 
       let resumed: Context | undefined
@@ -242,8 +242,46 @@ describe('runPiTurn', () => {
         resumed = context
         return fauxAssistantMessage(fauxText('Answer.'))
       }], { conversation })
-      await runPiTurn(request({ thread: { callId: 'call-1', turn: 2 }, prompt: 'second try' }), retried.adapters, { cwd: directory })
+      await runPiTurn(request({ runId: 'run-retry', thread: { callId: 'call-1', turn: 2 }, prompt: 'second try' }), retried.adapters)
       expect(userTexts(resumed!).join('\n')).not.toContain('first try')
+    })
+
+    it('retries a failed model request without discarding completed external tool receipts', async () => {
+      const conversation = createFileConversationStore(directory)
+      let writes = 0
+      const input = request({ thread: { callId: 'call-1', turn: 1 }, effectiveToolIds: ['external_write'] })
+      const tool: RuntimeTool = { id: 'external_write', name: 'Write', description: 'Writes once.', execute: async () => { writes += 1; return 'write-receipt-1' } }
+      const first = await adapters([
+        fauxAssistantMessage(fauxToolCall('external_write', {})),
+        fauxAssistantMessage([], { stopReason: 'error', errorMessage: 'Provider unavailable.' }),
+      ], { conversation, runtimeTools: [tool] })
+      await expect(runPiTurn(input, first.adapters)).rejects.toThrow('Provider unavailable.')
+      const retry = await adapters([(context) => {
+        expect(JSON.stringify(context.messages)).toContain('write-receipt-1')
+        return emitOutline('Completed using the existing receipt.')
+      }], { conversation, runtimeTools: [tool] })
+      await expect(runPiTurn(input, retry.adapters)).resolves.toMatchObject({ type: 'outline' })
+      expect(writes).toBe(1)
+    })
+
+    it('allows the existing empty-response recovery to request a new answer', async () => {
+      const conversation = createFileConversationStore(directory)
+      const input = request({ executionMode: 'local', thread: { callId: 'call-1', turn: 1 } })
+      const empty = await adapters([fauxAssistantMessage('')], { conversation })
+      await expect(runPiTurn(input, empty.adapters)).rejects.toMatchObject({ code: 'empty_response' })
+      const retry = await adapters([fauxAssistantMessage('Recovered answer.')], { conversation })
+      await expect(runPiTurn(input, retry.adapters)).resolves.toEqual({ type: 'answer', text: 'Recovered answer.' })
+      expect(retry.scripted.faux.state.callCount).toBe(1)
+    })
+
+    it('returns a saved completed result without another provider request', async () => {
+      const conversation = createFileConversationStore(directory)
+      const input = request({ thread: { callId: 'call-1', turn: 1 } })
+      const first = await adapters([emitOutline('Saved result.')], { conversation })
+      const outcome = await runPiTurn(input, first.adapters)
+      const recovered = await adapters([], { conversation })
+      await expect(runPiTurn(input, recovered.adapters)).resolves.toEqual(outcome)
+      expect(recovered.scripted.faux.state.callCount).toBe(0)
     })
 
     it('fails a follow-up closed without a conversation store', async () => {

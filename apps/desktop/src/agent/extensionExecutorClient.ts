@@ -108,7 +108,7 @@ export class ExtensionExecutorClient implements ExtensionExecutorBridge {
     if (this.starting) return this.starting
     this.starting = (async () => {
       const entryPath = await resolveResource('resources/pi/sidecar/dist/executor.mjs')
-      const command = Command.create('node-sidecar', [entryPath], { env: { PI_SKIP_VERSION_CHECK: '1', PI_TELEMETRY: '0' } })
+      const command = Command.create('node-sidecar', [entryPath], { env: {} })
       let ready: () => void = () => undefined
       let fail: (error: Error) => void = () => undefined
       const startup = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject })

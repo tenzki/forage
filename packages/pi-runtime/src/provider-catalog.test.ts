@@ -13,9 +13,8 @@ describe('pinned Pi provider catalog', () => {
       : { providerId: descriptor.id, accessToken: 'catalog-test-key' })
     expect(runtime.getProvider(descriptor.id)?.auth[descriptor.authentication === 'api_key' ? 'apiKey' : 'oauth']).toBeDefined()
     if (descriptor.authentication === 'api_key') {
-      await runtime.setRuntimeApiKey(descriptor.id, 'catalog-test-key')
       await expect(runtime.getAuth(descriptor.id)).resolves.toMatchObject({ auth: { apiKey: 'catalog-test-key' } })
-      expect(runtime.isUsingOAuth(descriptor.id)).toBe(false)
+      expect((await runtime.checkAuth(descriptor.id))?.type).toBe('api_key')
     }
     for (const model of models) {
       expect(computeProfileSchema.safeParse({ version: 1, revision: 1, provider: descriptor.id, modelId: model.id, credentialRef: 'test-credential' }).success).toBe(true)

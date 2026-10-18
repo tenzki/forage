@@ -14,12 +14,15 @@ await build({
   ssr: { noExternal: true },
   build: {
     ssr: true,
-    target: 'node18',
+    target: 'node22.19',
     outDir: path.join(root, 'dist'),
     emptyOutDir: true,
     minify: false,
     sourcemap: true,
     rollupOptions: {
+      // Keep Node namespace re-exports intact across the shared entry chunks.
+      // Rollup otherwise drops bindings from the generated builtin namespace.
+      treeshake: false,
       input: {
         index: path.join(root, 'index.ts'),
         management: path.join(root, 'management.ts'),
@@ -46,7 +49,7 @@ for (const [id, directory] of Object.entries(supplied)) {
   await build({
     root, configFile: false, publicDir: false, logLevel: 'warn', ssr: { noExternal: true },
     build: {
-      ssr: true, target: 'node18', outDir: path.join(destination, 'dist'), emptyOutDir: true, minify: false,
+      ssr: true, target: 'node22.19', outDir: path.join(destination, 'dist'), emptyOutDir: true, minify: false,
       rollupOptions: {
         input: path.resolve(root, '../../../../../../extensions', directory, 'src/index.ts'),
         output: { entryFileNames: 'index.mjs', chunkFileNames: 'chunks/[name]-[hash].mjs' },

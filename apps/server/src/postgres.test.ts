@@ -1,7 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { Pool } from 'pg'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PostgresServerRepository } from './postgres'
@@ -82,7 +80,7 @@ const describePostgres = process.env.TEST_DATABASE_URL ? describe : describe.ski
 
 describePostgres('PostgreSQL server repository', () => {
   beforeAll(async () => {
-    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql', '0005_outline_stream.sql', '0006_call_conversations.sql', '0007_model_providers.sql']) {
+    for (const filename of ['0001_server.sql', '0002_agent_executor.sql', '0003_blank_bootstrap.sql', '0004_authority_and_execution.sql', '0005_outline_stream.sql', '0006_call_conversations.sql', '0007_model_providers.sql', '0008_pi_durable.sql']) {
       await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), 'utf8'))
     }
   })
@@ -596,7 +594,6 @@ describePostgres('PostgreSQL server repository', () => {
       })
       const credential = await credentials.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, apiKey)
       const toolIds = tools.map((tool) => tool.id)
-      const tempRoot = await mkdtemp(join(tmpdir(), 'forage-pg-calls-'))
       const admit = (runId: string, thread: RunThread, target = 'note_bullet') => repository.agentStore.admitRun({
         ownerId: bootstrap.ownerId, trigger: 'manual', triggerIdentity: `manual:${runId}`, maxAttempts: 3,
         conversationBudgetBytes: 2 * 1024 * 1024,
@@ -610,7 +607,7 @@ describePostgres('PostgreSQL server repository', () => {
         },
       })
       const runner = (workerId: string, responses: FauxResponseStep[]) => new ServerAgentRunner({
-        repository, credentials, tools, workerId, leaseMs: 30_000, conversationTempRoot: tempRoot,
+        repository, credentials, tools, workerId, leaseMs: 30_000,
         piModelFactory: async () => scriptedModel(responses),
       })
       /** Claim the next queued run as `workerId` and execute it with scripted responses. */
@@ -624,27 +621,42 @@ describePostgres('PostgreSQL server repository', () => {
       const turns = async (callId: string) => (await pool.query<{ turn: number; run_id: string; entries: unknown[]; entry_bytes: number }>(
         'SELECT turn, run_id, entries, entry_bytes FROM agent_call_turns WHERE call_id=$1 ORDER BY turn', [callId],
       )).rows
-      return { repository, bootstrap, admit, runner, work, turns, tempRoot }
+      return { repository, bootstrap, admit, runner, work, turns }
     }
 
     const emitOutline = (texts: string[]) => fauxAssistantMessage(fauxToolCall('emit_outline', {
       nodes: texts.map((text) => ({ text })), sources: [],
     }))
 
+    it('fences checkpoint writes across lease handoff and duplicate executor ownership', async () => {
+      const f = await conversationFixture()
+      await f.admit('durable-fence', { callId: 'durable-fence', turn: 1 })
+      await f.repository.agentStore.claimNext('worker-a', new Date(Date.now() + 2_000), 30_000)
+      const a = await f.repository.agentStore.openDurableExecution('durable-fence', 'worker-a')
+      const firstId = await a.storage.mintId()
+      await pool.query("UPDATE agent_runs SET lease_expires_at=now()-interval '1 second' WHERE id='durable-fence'")
+      await f.repository.agentStore.claimNext('worker-b', new Date(Date.now() + 2_000), 30_000)
+      const b = await f.repository.agentStore.openDurableExecution('durable-fence', 'worker-b')
+      expect(await b.storage.mintId()).toBeGreaterThan(firstId)
+      await expect(a.assertOwnership()).rejects.toMatchObject({ code: 'lease_lost' })
+      await expect(a.storage.mintId()).rejects.toMatchObject({ code: 'lease_lost' })
+      const replacement = await f.repository.agentStore.openDurableExecution('durable-fence', 'worker-b')
+      await expect(b.assertOwnership()).rejects.toMatchObject({ code: 'lease_lost' })
+      await replacement.assertOwnership()
+    })
+
     it('admits MCP runs with one attempt and does not recover their expired leases by replaying', async () => {
       const f = await conversationFixture([{ id: `mcp_s_${'a'.repeat(48)}`, name: 'MCP', description: 'External tool', execute: async () => 'ok' }])
-      try {
-        const admitted = await f.admit('mcp-run', { callId: 'mcp-run', turn: 1 })
-        expect(admitted.maxAttempts).toBe(1)
-        const now = new Date(Date.now() + 2_000)
-        expect(await f.repository.agentStore.claimNext('worker-mcp', now, 1_000)).toMatchObject({ id: 'mcp-run', attemptCount: 1 })
-        expect(await f.repository.agentStore.claimNext('other-worker', new Date(now.getTime() + 2_000), 1_000)).toBeNull()
-        expect(await f.repository.agentStore.getRun(f.bootstrap.outlineId, 'mcp-run')).toMatchObject({ status: 'failed', maxAttempts: 1, attemptCount: 1 })
-      } finally { await rm(f.tempRoot, { recursive: true, force: true }) }
+      const admitted = await f.admit('mcp-run', { callId: 'mcp-run', turn: 1 })
+      expect(admitted.maxAttempts).toBe(1)
+      const now = new Date(Date.now() + 2_000)
+      expect(await f.repository.agentStore.claimNext('worker-mcp', now, 1_000)).toMatchObject({ id: 'mcp-run', attemptCount: 1 })
+      expect(await f.repository.agentStore.claimNext('other-worker', new Date(now.getTime() + 2_000), 1_000)).toBeNull()
+      expect(await f.repository.agentStore.getRun(f.bootstrap.outlineId, 'mcp-run')).toMatchObject({ status: 'failed', maxAttempts: 1, attemptCount: 1 })
     })
     const userMessages = (context: Context) => context.messages.filter((message) => message.role === 'user')
 
-    it('resumes a call from stored turns on another worker, redacting credentials and removing temporary files', async () => {
+    it('resumes a call from stored turns on another worker and redacts credentials', async () => {
       const leaky: RuntimeTool = {
         id: 'web_read', name: 'Read webpage', description: 'Reads a page.',
         execute: async () => ({
@@ -653,141 +665,120 @@ describePostgres('PostgreSQL server repository', () => {
         }),
       }
       const fixture = await conversationFixture([leaky])
-      try {
-        await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
-        await fixture.work('worker-a', [
-          fauxAssistantMessage(fauxToolCall('web_read', { url: 'https://example.com' })),
-          emitOutline(['Version 1']),
-        ])
-        await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
-        let seen: Context | undefined
-        const answered = await fixture.work('worker-b', [(context) => {
-          seen = context
-          return fauxAssistantMessage(fauxText('The moon section.'))
-        }])
+      await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
+      await fixture.work('worker-a', [
+        fauxAssistantMessage(fauxToolCall('web_read', { url: 'https://example.com' })),
+        emitOutline(['Version 1']),
+      ])
+      await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
+      let seen: Context | undefined
+      const answered = await fixture.work('worker-b', [(context) => {
+        seen = context
+        return fauxAssistantMessage(fauxText('The moon section.'))
+      }])
 
-        expect(answered).toMatchObject({ status: 'completed', callId: 'run-call', callTurn: 2, answer: 'The moon section.', result: null })
-        expect(userMessages(seen!)).toHaveLength(2)
-        expect(JSON.stringify(seen!.messages)).toContain('[redacted]')
-        const stored = await fixture.turns('run-call')
-        expect(stored.map((turn) => [turn.turn, turn.run_id])).toEqual([[1, 'run-call'], [2, 'run-reply']])
-        expect(stored[0]!.entries[0]).toMatchObject({ type: 'session' })
-        for (const turn of stored) expect(turn.entry_bytes).toBe(Buffer.byteLength(JSON.stringify(turn.entries)))
-        const serialized = JSON.stringify(stored)
-        expect(serialized).not.toContain(apiKey)
-        expect(serialized).not.toContain('abc.def.ghi')
-        expect(await readdir(fixture.tempRoot)).toEqual([])
-      } finally {
-        await rm(fixture.tempRoot, { recursive: true, force: true })
-      }
+      expect(answered).toMatchObject({ status: 'completed', callId: 'run-call', callTurn: 2, answer: 'The moon section.', result: null })
+      expect(userMessages(seen!)).toHaveLength(2)
+      expect(JSON.stringify(seen!.messages)).toContain('[redacted]')
+      const stored = await fixture.turns('run-call')
+      expect(stored.map((turn) => [turn.turn, turn.run_id])).toEqual([[1, 'run-call'], [2, 'run-reply']])
+      expect(stored[0]!.entries[0]).toMatchObject({ kind: 'pi.user' })
+      for (const turn of stored) expect(turn.entry_bytes).toBe(Buffer.byteLength(JSON.stringify(turn.entries)))
+      const serialized = JSON.stringify(stored)
+      expect(serialized).not.toContain(apiKey)
+      expect(serialized).not.toContain('abc.def.ghi')
     })
 
     it('stores a reply turn exactly once when a worker loses its lease mid-turn', async () => {
       const fixture = await conversationFixture()
-      try {
-        await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
-        await fixture.work('worker-a', [emitOutline(['Version 1'])])
-        await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
-        const claimedByA = await fixture.repository.agentStore.claimNext('worker-a', new Date(Date.now() + 2_000), 30_000)
-        let seenByB: Context | undefined
-        await fixture.runner('worker-a', [async () => {
-          // A's lease expires mid-turn and worker B takes the run over and settles it.
-          await pool.query(`UPDATE agent_runs SET lease_expires_at = now() - interval '1 second' WHERE id = 'run-reply'`)
-          // A's activity writes briefly lock the run row, and claims skip locked rows.
-          let claimedByB: AgentRunRecord | null = null
-          for (let attempt = 0; !claimedByB && attempt < 50; attempt += 1) {
-            claimedByB = await fixture.repository.agentStore.claimNext('worker-b', new Date(Date.now() + 2_000), 30_000)
-            if (!claimedByB) await new Promise((resolve) => setTimeout(resolve, 20))
-          }
-          await fixture.runner('worker-b', [(context) => {
-            seenByB = context
-            return fauxAssistantMessage(fauxText('Answer from B.'))
-          }]).execute(claimedByB!)
-          return fauxAssistantMessage(fauxText('Answer from A.'))
-        }]).execute(claimedByA!)
+      await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
+      await fixture.work('worker-a', [emitOutline(['Version 1'])])
+      await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
+      const claimedByA = await fixture.repository.agentStore.claimNext('worker-a', new Date(Date.now() + 2_000), 30_000)
+      let seenByB: Context | undefined
+      await fixture.runner('worker-a', [async () => {
+        // A's lease expires mid-turn and worker B takes the run over and settles it.
+        await pool.query(`UPDATE agent_runs SET lease_expires_at = now() - interval '1 second' WHERE id = 'run-reply'`)
+        // A's activity writes briefly lock the run row, and claims skip locked rows.
+        let claimedByB: AgentRunRecord | null = null
+        for (let attempt = 0; !claimedByB && attempt < 50; attempt += 1) {
+          claimedByB = await fixture.repository.agentStore.claimNext('worker-b', new Date(Date.now() + 2_000), 30_000)
+          if (!claimedByB) await new Promise((resolve) => setTimeout(resolve, 20))
+        }
+        await fixture.runner('worker-b', [(context) => {
+          seenByB = context
+          return fauxAssistantMessage(fauxText('Answer from B.'))
+        }]).execute(claimedByB!)
+        return fauxAssistantMessage(fauxText('Answer from A.'))
+      }]).execute(claimedByA!)
 
-        const stored = await fixture.turns('run-call')
-        expect(stored.map((turn) => turn.turn)).toEqual([1, 2])
-        expect(JSON.stringify(stored[1]!.entries)).toContain('Answer from B.')
-        expect(JSON.stringify(stored)).not.toContain('Answer from A.')
-        expect(userMessages(seenByB!)).toHaveLength(2)
-        expect(await fixture.repository.agentStore.getRun(fixture.bootstrap.outlineId, 'run-reply'))
-          .toMatchObject({ status: 'completed', attemptCount: 2, answer: 'Answer from B.' })
-      } finally {
-        await rm(fixture.tempRoot, { recursive: true, force: true })
-      }
+      const stored = await fixture.turns('run-call')
+      expect(stored.map((turn) => turn.turn)).toEqual([1, 2])
+      expect(JSON.stringify(stored[1]!.entries)).toContain('Answer from B.')
+      expect(JSON.stringify(stored)).not.toContain('Answer from A.')
+      expect(userMessages(seenByB!)).toHaveLength(2)
+      expect(await fixture.repository.agentStore.getRun(fixture.bootstrap.outlineId, 'run-reply'))
+        .toMatchObject({ status: 'completed', attemptCount: 2, answer: 'Answer from B.' })
     })
 
     it('replaces the previous version and inserts the revision in one outline event', async () => {
       const fixture = await conversationFixture()
-      try {
-        await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
-        const first = await fixture.work('worker', [emitOutline(['Version 1', 'Version 1 detail'])])
-        const before = await fixture.repository.currentRevision(fixture.bootstrap.outlineId)
-        await fixture.admit('run-revise', { callId: 'run-call', turn: 2 })
-        const revised = await fixture.work('worker', [emitOutline(['Version 2'])])
+      await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
+      const first = await fixture.work('worker', [emitOutline(['Version 1', 'Version 1 detail'])])
+      const before = await fixture.repository.currentRevision(fixture.bootstrap.outlineId)
+      await fixture.admit('run-revise', { callId: 'run-call', turn: 2 })
+      const revised = await fixture.work('worker', [emitOutline(['Version 2'])])
 
-        expect(revised).toMatchObject({ status: 'completed', result: { firstRevision: before + 1 } })
-        const events = await fixture.repository.eventsAfter(fixture.bootstrap.outlineId, before, 10)
-        expect(events).toHaveLength(1)
-        expect(events[0]).toMatchObject({
-          type: 'agent.result_committed', eventVersion: 2, changeGroupId: 'run_run-revise',
-          payload: { replaces: { runId: 'run-call', rootNoteIds: first.result!.rootNoteIds } },
-        })
-        const texts = queryCanonicalOutline((await fixture.repository.checkpoint(fixture.bootstrap.outlineId)).state).nodes().map((node) => node.text)
-        expect(texts).toContain('Version 2')
-        expect(texts.filter((text) => text.startsWith('Version 1'))).toEqual([])
-        expect((await fixture.repository.searchOutline(fixture.bootstrap.outlineId, 'Version 1'))).toEqual([])
-        expect((await fixture.turns('run-call')).map((turn) => turn.turn)).toEqual([1, 2])
-      } finally {
-        await rm(fixture.tempRoot, { recursive: true, force: true })
-      }
+      expect(revised).toMatchObject({ status: 'completed', result: { firstRevision: before + 1 } })
+      const events = await fixture.repository.eventsAfter(fixture.bootstrap.outlineId, before, 10)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        type: 'agent.result_committed', eventVersion: 2, changeGroupId: 'run_run-revise',
+        payload: { replaces: { runId: 'run-call', rootNoteIds: first.result!.rootNoteIds } },
+      })
+      const texts = queryCanonicalOutline((await fixture.repository.checkpoint(fixture.bootstrap.outlineId)).state).nodes().map((node) => node.text)
+      expect(texts).toContain('Version 2')
+      expect(texts.filter((text) => text.startsWith('Version 1'))).toEqual([])
+      expect((await fixture.repository.searchOutline(fixture.bootstrap.outlineId, 'Version 1'))).toEqual([])
+      expect((await fixture.turns('run-call')).map((turn) => turn.turn)).toEqual([1, 2])
     })
 
     it('admits one of two concurrent replies to a call and rejects the other as call-busy', async () => {
       const fixture = await conversationFixture()
-      try {
-        await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
-        await fixture.work('worker', [emitOutline(['Version 1'])])
-        const replies = await Promise.allSettled([
-          fixture.admit('reply-a', { callId: 'run-call', turn: 2 }),
-          fixture.admit('reply-b', { callId: 'run-call', turn: 2 }),
-        ])
-        expect(replies.filter((reply) => reply.status === 'fulfilled')).toHaveLength(1)
-        const rejected = replies.find((reply) => reply.status === 'rejected') as PromiseRejectedResult
-        expect(rejected.reason).toBeInstanceOf(AgentStoreError)
-        expect(rejected.reason.code).toBe('call_busy')
-      } finally {
-        await rm(fixture.tempRoot, { recursive: true, force: true })
-      }
+      await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
+      await fixture.work('worker', [emitOutline(['Version 1'])])
+      const replies = await Promise.allSettled([
+        fixture.admit('reply-a', { callId: 'run-call', turn: 2 }),
+        fixture.admit('reply-b', { callId: 'run-call', turn: 2 }),
+      ])
+      expect(replies.filter((reply) => reply.status === 'fulfilled')).toHaveLength(1)
+      const rejected = replies.find((reply) => reply.status === 'rejected') as PromiseRejectedResult
+      expect(rejected.reason).toBeInstanceOf(AgentStoreError)
+      expect(rejected.reason.code).toBe('call_busy')
     })
 
     it('clears finished calls with their transcripts, keeps retained unplaced results, and prunes aged transcripts', async () => {
       const fixture = await conversationFixture()
-      try {
-        const { outlineId } = fixture.bootstrap
-        await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
-        await fixture.work('worker', [emitOutline(['Version 1'])])
-        await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
-        await fixture.work('worker', [fauxAssistantMessage(fauxText('Gravity.'))])
-        await fixture.admit('run-unplaced', { callId: 'run-unplaced', turn: 1 }, 'note_missing')
-        expect(await fixture.work('worker', [emitOutline(['Nowhere'])])).toMatchObject({ status: 'completed_unplaced' })
+      const { outlineId } = fixture.bootstrap
+      await fixture.admit('run-call', { callId: 'run-call', turn: 1 })
+      await fixture.work('worker', [emitOutline(['Version 1'])])
+      await fixture.admit('run-reply', { callId: 'run-call', turn: 2 })
+      await fixture.work('worker', [fauxAssistantMessage(fauxText('Gravity.'))])
+      await fixture.admit('run-unplaced', { callId: 'run-unplaced', turn: 1 }, 'note_missing')
+      expect(await fixture.work('worker', [emitOutline(['Nowhere'])])).toMatchObject({ status: 'completed_unplaced' })
 
-        expect(await fixture.repository.agentStore.clearFinishedHistory(outlineId)).toBe(2)
-        expect((await fixture.repository.agentStore.listRuns(outlineId, 10)).map((run) => run.id)).toEqual(['run-unplaced'])
-        expect(await fixture.turns('run-call')).toEqual([])
-        const orphans = await pool.query(`SELECT
-          (SELECT count(*)::int FROM agent_run_results WHERE run_id LIKE 'run-%' AND run_id <> 'run-unplaced') AS results,
-          (SELECT count(*)::int FROM agent_run_outputs WHERE run_id <> 'run-unplaced') AS outputs`)
-        expect(orphans.rows[0]).toEqual({ results: 0, outputs: 0 })
+      expect(await fixture.repository.agentStore.clearFinishedHistory(outlineId)).toBe(2)
+      expect((await fixture.repository.agentStore.listRuns(outlineId, 10)).map((run) => run.id)).toEqual(['run-unplaced'])
+      expect(await fixture.turns('run-call')).toEqual([])
+      const orphans = await pool.query(`SELECT
+        (SELECT count(*)::int FROM agent_run_results WHERE run_id LIKE 'run-%' AND run_id <> 'run-unplaced') AS results,
+        (SELECT count(*)::int FROM agent_run_outputs WHERE run_id <> 'run-unplaced') AS outputs`)
+      expect(orphans.rows[0]).toEqual({ results: 0, outputs: 0 })
 
-        expect(await fixture.repository.agentStore.pruneConversations(new Date(Date.now() - 60_000))).toBe(0)
-        expect(await fixture.repository.agentStore.pruneConversations(new Date(Date.now() + 60_000))).toBe(1)
-        expect(await fixture.turns('run-unplaced')).toEqual([])
-        expect(await fixture.repository.agentStore.getRun(outlineId, 'run-unplaced')).toMatchObject({ status: 'completed_unplaced' })
-      } finally {
-        await rm(fixture.tempRoot, { recursive: true, force: true })
-      }
+      expect(await fixture.repository.agentStore.pruneConversations(new Date(Date.now() - 60_000))).toBe(0)
+      expect(await fixture.repository.agentStore.pruneConversations(new Date(Date.now() + 60_000))).toBe(1)
+      expect(await fixture.turns('run-unplaced')).toEqual([])
+      expect(await fixture.repository.agentStore.getRun(outlineId, 'run-unplaced')).toMatchObject({ status: 'completed_unplaced' })
     })
   })
 })

@@ -1,177 +1,112 @@
-import { existsSync, mkdirSync, rmSync, statSync, truncateSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, openSync, closeSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
-import { SessionManager, type FileEntry, type SessionEntry } from '@earendil-works/pi-coding-agent'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { MemoryStorage, type Storage } from '@earendil-works/pi-durable'
+import { openNodeSqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite/node'
+import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite'
 import type { RunThread } from '@forage/agent-runtime'
 
 export type { RunThread }
-
 export const CONVERSATION_UNAVAILABLE = "This conversation's history is no longer available. Run the skill again to start a new one."
-
 const CALL_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 export interface ConversationTurn {
-  sessionManager: SessionManager
-  /** Entries this turn appended after the resumed transcript, in order. */
-  appendedEntries: () => SessionEntry[]
-  /**
-   * Undo this turn's transcript writes after a failed or cancelled turn, so the
-   * next reply resumes from the last completed turn. Safe to call repeatedly.
-   */
-  rollback: () => void | Promise<void>
+  storage: Storage
+  /** Only used on first open, to import existing SDK sessions during upgrade. */
+  legacyEntries?: readonly unknown[]
+  /** Capture successful entries for the existing atomic result/turn contract. */
+  complete?: (entries: unknown[]) => void
+  close: () => Promise<void>
 }
 
-/**
- * Where a call's agent conversation lives. Turn 1 starts a new conversation; later
- * turns resume the stored one and fail closed with CONVERSATION_UNAVAILABLE when it
- * is missing or unreadable. Local mode keeps a JSONL file per call; the server
- * rehydrates committed turns into a temporary file.
- */
 export interface ConversationStore {
   openTurn: (thread: RunThread) => Promise<ConversationTurn>
-}
-
-/** The local store: `<directory>/<callId>.jsonl`, appended to by Pi and truncated on rollback. */
-export function createFileConversationStore(directory: string, cwd = process.cwd()): ConversationStore {
-  return { openTurn: async (thread) => openConversationTurn(directory, thread, cwd) }
 }
 
 export function parseRunThread(value: unknown): RunThread | undefined {
   if (value === undefined) return undefined
   const thread = value as Partial<RunThread> | null
-  if (
-    !thread || typeof thread !== 'object'
-    || typeof thread.callId !== 'string' || !CALL_ID.test(thread.callId)
-    || typeof thread.turn !== 'number' || !Number.isInteger(thread.turn) || thread.turn < 1
-  ) {
+  if (!thread || typeof thread !== 'object' || typeof thread.callId !== 'string' || !CALL_ID.test(thread.callId)
+    || typeof thread.turn !== 'number' || !Number.isInteger(thread.turn) || thread.turn < 1) {
     throw new Error('Agent invocation has an invalid conversation turn.')
   }
   return { callId: thread.callId, turn: thread.turn }
 }
 
-/** Session directory for call conversations under the agent data directory. */
 export function conversationDirectory(agentDir: string): string {
   if (!agentDir) throw new Error('Conversation storage is unavailable.')
   return join(agentDir, 'agent-sessions')
 }
 
-/** The call's session file. The path is derived only from a validated call ID. */
 export function conversationPath(directory: string, callId: string): string {
-  if (!CALL_ID.test(callId)) throw new Error('Agent invocation has an invalid conversation turn.')
-  return join(directory, `${callId}.jsonl`)
+  parseRunThread({ callId, turn: 1 })
+  return join(directory, `${callId}.sqlite`)
 }
 
-/**
- * Open the session for one turn of a call. Turn 1 starts a new conversation and
- * discards any stale file left by an interrupted first attempt; later turns resume
- * the stored conversation and fail closed when it is missing or unreadable.
- */
-export function openConversationTurn(directory: string, thread: RunThread, cwd = process.cwd()): ConversationTurn {
-  const path = conversationPath(directory, thread.callId)
-  if (thread.turn === 1) {
-    mkdirSync(directory, { recursive: true })
-    rmSync(path, { force: true })
-    const sessionManager = SessionManager.open(path, directory, cwd)
-    return {
-      sessionManager,
-      appendedEntries: () => sessionManager.getEntries(),
-      rollback: () => rmSync(path, { force: true }),
+/** One exclusively owned SQLite connection per call; committed checkpoints survive sidecar death. */
+export function createFileConversationStore(directory: string): ConversationStore {
+  return { openTurn: async (thread) => {
+    parseRunThread(thread)
+    const path = conversationPath(directory, thread.callId)
+    const legacyPath = join(directory, `${thread.callId}.jsonl`)
+    const existing = existsSync(path)
+    let legacyEntries: unknown[] | undefined
+    if (thread.turn > 1) {
+      if (!existing && !existsSync(legacyPath)) throw new Error(CONVERSATION_UNAVAILABLE)
+      if (existsSync(legacyPath)) {
+        try {
+          legacyEntries = readFileSync(legacyPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
+          if (!legacyEntries.some((entry) => entry && typeof entry === 'object' && (entry as { type?: string }).type === 'message')) throw new Error(CONVERSATION_UNAVAILABLE)
+        } catch { if (!existing) throw new Error(CONVERSATION_UNAVAILABLE) }
+      }
     }
-  }
-
-  if (!existsSync(path)) throw new Error(CONVERSATION_UNAVAILABLE)
-  let sessionManager: SessionManager
-  try {
-    sessionManager = SessionManager.open(path, directory, cwd)
-  } catch {
-    throw new Error(CONVERSATION_UNAVAILABLE)
-  }
-  if (!sessionManager.getEntries().some((entry) => entry.type === 'message')) {
-    throw new Error(CONVERSATION_UNAVAILABLE)
-  }
-  // Pi only appends to an opened session, so truncating restores the last completed turn.
-  const size = statSync(path).size
-  const resumedEntries = sessionManager.getEntries().length
-  return {
-    sessionManager,
-    appendedEntries: () => sessionManager.getEntries().slice(resumedEntries),
-    rollback: () => {
-      if (existsSync(path) && statSync(path).size > size) truncateSync(path, size)
-    },
-  }
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    closeSync(openSync(path, 'a', 0o600))
+    chmodSync(path, 0o600)
+    const database = await openNodeSqliteDatabase(path, { busyTimeoutMs: 250 }).catch((error: unknown) => {
+      if (error instanceof Error && /not a database|malformed/i.test(error.message)) throw new Error(CONVERSATION_UNAVAILABLE)
+      throw error
+    })
+    try {
+      // The upstream adapter has no process ownership. SQLite's exclusive locking
+      // mode retains its lock until close, including between Harness commits.
+      await database.exec('PRAGMA locking_mode = EXCLUSIVE')
+      await database.exec('BEGIN EXCLUSIVE')
+      await database.exec('COMMIT')
+      await database.exec('PRAGMA synchronous = FULL')
+      const storage = await SqliteStorage.open(database)
+      return { storage, legacyEntries, close: () => storage.close(BACKGROUND_CONTEXT) }
+    } catch (error) {
+      await database.close()
+      throw error
+    }
+  } }
 }
 
-/**
- * A call conversation rebuilt from the entries a database stored for its settled turns.
- * Turn 1 starts in memory; a later turn writes the stored entries to a temporary
- * session file, resumes it, and reports what the turn appended so the caller can store
- * those entries when the run settles. Nothing is written back: a failed attempt leaves
- * the stored turns untouched, so a retry resumes from the last settled turn.
- */
 export interface RehydratedConversation {
   store: ConversationStore
-  /** Entries the opened turn appended; a first turn's entries begin with the session header. */
-  appendedEntries: () => FileEntry[]
-  /** Remove the temporary session file. Safe to call repeatedly. */
+  appendedEntries: () => unknown[]
   dispose: () => Promise<void>
 }
 
-/**
- * @param committed The call's stored entries in turn order, starting with the session header.
- * @param tempRoot Where the per-attempt session directory is created; the OS temp directory by default.
- */
+/** In-memory import is used by tests and old transcripts; production supplies durable storage. */
 export function createRehydratedConversation(
   committed: readonly unknown[],
-  options: { tempRoot?: string; cwd?: string } = {},
+  openStorage?: () => Promise<Storage>,
 ): RehydratedConversation {
-  const cwd = options.cwd ?? process.cwd()
-  let opened: { sessionManager: SessionManager; appended: () => FileEntry[] } | undefined
-  let directory: string | undefined
+  let storage: Storage | undefined
+  let entries: unknown[] = []
   return {
-    store: {
-      openTurn: async (thread) => {
-        if (opened) throw new Error('A rehydrated conversation opens one turn.')
-        if (thread.turn === 1) {
-          const sessionManager = SessionManager.inMemory(cwd)
-          const header = sessionManager.getHeader()
-          opened = { sessionManager, appended: () => [...(header ? [header] : []), ...sessionManager.getEntries()] }
-        } else {
-          if (!isStoredTranscript(committed)) throw new Error(CONVERSATION_UNAVAILABLE)
-          directory = await mkdtemp(join(options.tempRoot ?? tmpdir(), 'forage-call-'))
-          const path = join(directory, 'session.jsonl')
-          await writeFile(path, committed.map((entry) => `${JSON.stringify(entry)}\n`).join(''), { mode: 0o600 })
-          let sessionManager: SessionManager
-          try {
-            sessionManager = SessionManager.open(path, directory, cwd)
-          } catch {
-            throw new Error(CONVERSATION_UNAVAILABLE)
-          }
-          if (!sessionManager.getEntries().some((entry) => entry.type === 'message')) throw new Error(CONVERSATION_UNAVAILABLE)
-          const resumed = sessionManager.getEntries().length
-          opened = { sessionManager, appended: () => sessionManager.getEntries().slice(resumed) }
-        }
-        const turn = opened
-        return { sessionManager: turn.sessionManager, appendedEntries: () => turn.appended().filter(isSessionEntry), rollback: () => undefined }
-      },
-    },
-    appendedEntries: () => opened?.appended() ?? [],
-    dispose: async () => {
-      if (directory) await rm(directory, { recursive: true, force: true })
-    },
+    store: { openTurn: async () => {
+      if (storage) throw new Error('A conversation opens one turn.')
+      storage = openStorage ? await openStorage() : new MemoryStorage()
+      return {
+        storage, legacyEntries: committed,
+        complete: (appended) => { entries = appended },
+        close: () => storage!.close(BACKGROUND_CONTEXT),
+      }
+    } },
+    appendedEntries: () => entries,
+    dispose: async () => { await storage?.close(BACKGROUND_CONTEXT) },
   }
-}
-
-function isStoredTranscript(entries: readonly unknown[]): entries is FileEntry[] {
-  const [header, ...rest] = entries
-  return isRecord(header) && header.type === 'session'
-    && rest.length > 0 && rest.every((entry) => isRecord(entry) && typeof entry.type === 'string' && entry.type !== 'session')
-}
-
-function isSessionEntry(entry: FileEntry): entry is SessionEntry {
-  return entry.type !== 'session'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

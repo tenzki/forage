@@ -143,7 +143,7 @@ export function insertAiChild(editor: Editor): string | null {
   return insertAiChildAt(editor, li.pos, li.node)
 }
 
-export function insertAiChildUnder(editor: Editor, parentNodeId: string): string | null {
+export function insertAiChildUnder(editor: Editor, parentNodeId: string, outputNodeId?: string): string | null {
   let parent: { pos: number; node: ProseMirrorNode } | null = null
   editor.state.doc.descendants((node, pos) => {
     if (node.type.name !== 'listItem' || node.attrs.nodeId !== parentNodeId) return
@@ -152,11 +152,10 @@ export function insertAiChildUnder(editor: Editor, parentNodeId: string): string
   })
   if (!parent) return null
   const target = parent as { pos: number; node: ProseMirrorNode }
-  return insertAiChildAt(editor, target.pos, target.node)
+  return insertAiChildAt(editor, target.pos, target.node, outputNodeId)
 }
 
-function insertAiChildAt(editor: Editor, parentPos: number, parentNode: ProseMirrorNode): string | null {
-  const nodeId = newNodeId()
+function insertAiChildAt(editor: Editor, parentPos: number, parentNode: ProseMirrorNode, nodeId = newNodeId()): string | null {
   const item = editor.schema.nodes.listItem.create(
     { nodeId, nodeType: 'ai' }, editor.schema.nodes.paragraph.create(),
   )
@@ -353,7 +352,7 @@ export function replaceAiOutput(
   // A revision is its own undo step, so one undo restores the previous version.
   closeHistory(transaction)
   transaction.setMeta('forageOrigin', 'agent')
-  transaction.setMeta('forageChangeGroup', runId)
+  transaction.setMeta('forageChangeGroup', `agent-result:${runId}`)
   editor.view.dispatch(transaction)
 
   const nodeIds = items
@@ -594,6 +593,7 @@ export function commitStructuredAgentResult(
   invocationNodeId: string,
   skillLabel: string,
   result: StructuredResult,
+  runId?: string,
 ): string[] {
   const materializable = requireStructuredResultV1(result)
   let invocation: { pos: number; node: ProseMirrorNode } | null = null
@@ -620,6 +620,7 @@ export function commitStructuredAgentResult(
   const insertPosition = transaction.mapping.map(originalInsertPosition, -1)
   transaction.insert(insertPosition, editor.schema.nodes.bulletList.create(null, items))
   transaction.setMeta('forageOrigin', 'agent')
+  if (runId) transaction.setMeta('forageChangeGroup', `agent-result:${runId}`)
   editor.view.dispatch(transaction)
   const nodeIds = items
     .map((item) => item.attrs.nodeId)
@@ -912,6 +913,7 @@ export function commitStructuredAgentResultInto(
   rootNodeId: string,
   skillLabel: string,
   result: StructuredResult,
+  runId?: string,
 ): string[] {
   const materializable = requireStructuredResultV1(result)
   let invocation: { pos: number; node: ProseMirrorNode } | null = null
@@ -943,7 +945,7 @@ export function commitStructuredAgentResultInto(
   if (prefixLength) transaction.delete(target.pos + 2, target.pos + 2 + prefixLength)
   replaceAiListContent(transaction, list, items)
   transaction.setMeta('forageOrigin', 'agent')
-  transaction.setMeta('forageChangeGroup', rootNodeId)
+  transaction.setMeta('forageChangeGroup', runId ? `agent-result:${runId}` : rootNodeId)
   editor.view.dispatch(transaction)
 
   const nodeIds = items

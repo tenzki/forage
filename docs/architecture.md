@@ -15,7 +15,7 @@ flowchart LR
     IPC --> VAULT[Local credential storage in SQLite]
     IPC --> TRANSPORT[Origin-pinned server transport]
     IPC --> STREAM[Origin-pinned outline stream client]
-    APP --> SIDECAR[Local Node.js Pi SDK sidecar]
+    APP --> SIDECAR[Local Node.js Pi Durable sidecar]
     APP --> EXTMGMT[Credential-free extension management]
     EXTMGMT --> FORAGECFG[(~/.forage configuration and packages)]
     FORAGECFG --> SIDECAR
@@ -52,7 +52,7 @@ Responsibilities are divided by capability:
 | React/TypeScript desktop | Editor behavior, application orchestration, event capture, deterministic projection, synchronization policy, agent context and tool policy, and UI state |
 | Shared TypeScript packages | ProseMirror schema and operations, event envelopes and reduction, protocol validation, rebase behavior, agent configuration, run inputs, activity, and structured-result contracts |
 | Tauri/Rust boundary | SQLite durability, checkpoints and outbox state, local content-addressed asset bytes, local credential storage, and origin-pinned authenticated server transport |
-| Local Node.js sidecar | Pi SDK sessions and per-call conversation transcripts, local model/tool execution, the private native-extension adapter, streaming lifecycle events, structured output, cancellation, and process cleanup |
+| Local Node.js sidecar | Pi Durable execution checkpoints and per-call conversations, local model/tool execution, the private native-extension adapter, streaming lifecycle events, structured output, cancellation, and process cleanup |
 | Forage extension host | Manifest-only inventory, device-local configuration/package lifecycle, trust and revision checks, native tool/hook loading, and bounded extension execution outside the webview |
 | Optional server | Authentication, global event sequencing, authoritative server-mode projection, Notes API, asset transfer, agent configuration, and durable agent work |
 | PostgreSQL | Authoritative server-mode events, revisions, projections, credentials, automation policy, durable agent queues, leases, activity, and result identity |
@@ -65,7 +65,7 @@ Guided onboarding composes the same provider, extension, and MCP controls around
 
 ### Local mode
 
-Local mode requires no account or server. SQLite in the platform application-data directory is authoritative for immutable events, checkpoints, persistent history, local agent-run state, and synchronization metadata. Asset bytes live beside it in a verified content-addressed store. Local agent conversations are Pi JSONL session files under `pi-agent/agent-sessions/` in the same directory: a derived agent cache keyed by run rows, never outline data (ADR-0022). Local mode is intentionally single-device and does not use iCloud for document synchronization.
+Local mode requires no account or server. SQLite in the platform application-data directory is authoritative for immutable events, checkpoints, persistent history, local agent-run state, and synchronization metadata. Asset bytes live beside it in a verified content-addressed store. Local agent conversations and execution checkpoints are exclusively owned SQLite databases under `pi-agent/agent-sessions/<callId>.sqlite` in the same directory (ADR-0026). Unfinished execution state is durable recovery data; the outline remains in the native event store. Legacy SDK JSONL conversations import when resumed. Local mode is intentionally single-device and does not use iCloud for document synchronization.
 
 ### Server mode
 
@@ -105,7 +105,7 @@ Local custom HTTP tools retain their stored permission IDs, including legacy UUI
 
 The desktop supports two execution locations behind shared run and result contracts:
 
-- Local execution launches the Node.js sidecar, which embeds the Pi SDK and uses an explicitly selected Anthropic, OpenRouter, OpenCode Go, or OpenAI API key, or short-lived ChatGPT OAuth credential. Each run receives only the admitted provider credential, explicitly selected outline context, and authorized tools.
+- Local execution launches the Node.js sidecar, which embeds Pi Durable and uses an explicitly selected Anthropic, OpenRouter, OpenCode Go, or OpenAI API key, or short-lived ChatGPT OAuth credential. Each run receives only the admitted provider credential, explicitly selected outline context, and authorized tools.
 - Server execution accepts a small invocation intent and resolves current canonical context, portable configuration, compute, credentials, and capabilities at admission. PostgreSQL-backed workers claim bounded leases and append sanitized activity. The application-level desktop run manager observes multiple runs across popup closure, restart, disconnect, and reconnect.
 
 Both paths return validated structured outline nodes. Server output is persisted before placement and enters the outline as one atomic `agent.result_committed` event. A missing or trashed target produces `completed_unplaced`; the intact stored output can later be placed exactly once under another live node. There is no parallel agent-owned outline, and the editor remains available while runs and synchronization continue.
@@ -114,14 +114,18 @@ Connection Settings manages environment-owned accounts and an explicit provider/
 
 ### Call conversations
 
-In local mode, a skill call is a conversation (ADR-0022). Every local run carries a `thread` of call ID and turn number. The first turn starts a Pi session file named after the call ID; a reply from the activity panel resumes that file and sends the reply, together with the current outline context and the bullets under the invocation, as the next user message. The sidecar derives the file path only from the validated call ID, and a failed or cancelled turn is rolled back so the next reply resumes from the last completed turn. A missing or unreadable transcript fails closed and asks the user to run the skill again.
+A skill call is a conversation in its execution environment (ADR-0026). Each admitted run maps to a durable submission and a conversation forked from the last successful turn. An unfinished submission resumes its saved generation/tool tasks after restart; failed or cancelled runs stay outside the next reply's context. Local calls use a SQLite database per call, and server calls use PostgreSQL execution journals fenced by worker lease, attempt and execution nonce. Completed server turn entries are still stored atomically with the run's result for admission, retention and upgrade compatibility.
+
+Local startup requeues only snapshots explicitly marked `runtime: 'pi-durable'`. Recovery uses the original admitted context, model and credential reference. It targets the canonical editor by stable IDs. An unavailable destination retains the result. Local outline results are stored before placement, and the final document event and placement status commit in one native SQLite transaction. A recovered completed submission returns its saved result without another model call.
+
+Built-in read tools allow safe replay. Interrupted MCP, custom HTTP and extension tools default to an interrupted outcome rather than automatic replay. Source verification, generated image references and tool-round consumption survive recovery. Credentials and credential-shaped text are redacted before values enter persisted tool results, model partials or checkpoints. Extension lifecycle hooks record intent and completion so recovery cannot silently repeat them.
 
 The agent chooses the outcome of each reply:
 
 - **Answer.** A question is answered in plain text. The answer is stored as the run's result and shown in the activity thread; the outline is unchanged.
 - **Revision.** A requested change ends with `emit_outline`. The new result replaces the call's previous agent-written bullets and images under the invocation bullet in one undoable transaction, keeping the user's own bullets, and becomes the call's next version.
 
-Clearing activity history deletes the session files of the calls it removes; calls with a retained unplaced result keep their files. At startup, session files whose call has no remaining run are pruned. Server-mode calls, extension skills and older history keep single-shot steering, and a local conversation cannot be continued in server mode. Server conversations are designed in `openspec/changes/run-pi-on-server`.
+Clearing finished activity history removes entire eligible calls and their execution state, while retaining active calls and unplaced results. Local cleanup removes orphan SQLite/WAL/SHM files and legacy JSONL transcripts. Server journals share PostgreSQL's backup and retention lifecycle, are bounded to 32 MiB per call and materialize retained history in memory; settled transcript admission retains its separate 2 MiB budget. Existing SDK conversations import on first use. Missing history fails closed, and conversations cannot move between local and server execution.
 
 ### Local extensions
 

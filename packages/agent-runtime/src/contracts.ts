@@ -305,6 +305,7 @@ export const runThreadSchema = z.object({
 export type RunThread = z.infer<typeof runThreadSchema>
 
 export const runInputSchema = z.object({
+  runtime: z.literal('pi-durable').optional(),
   version: z.literal(1),
   runId: runtimeIdSchema,
   executionMode: z.enum(['local', 'server']),

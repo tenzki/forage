@@ -1,5 +1,5 @@
 import { Type } from '@earendil-works/pi-ai'
-import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { defineTool, type ToolDefinition } from './tools'
 import type { SourceReference, VerifiedSources } from './sources'
 
 export const EMIT_OUTLINE_TOOL = 'emit_outline'
@@ -25,6 +25,8 @@ export interface OutlineImage {
 /** Resolves image IDs returned by image tools in this turn. */
 export interface ImageReferences {
   get(imageId: string): OutlineImage | undefined
+  snapshot?: () => Record<string, OutlineImage>
+  restore?: (images: Record<string, OutlineImage>) => void
 }
 
 export type MaterializedOutline =
@@ -56,13 +58,9 @@ export function createEmitOutlineTool(images: ImageReferences, sources: Verified
 
   return defineTool({
     name: EMIT_OUTLINE_TOOL,
+    replay: 'safe',
     label: 'Emit Outline',
     description: 'Return the final answer as structured text or image outline nodes. A generated image must be a separate image-only node using the imageId returned by an image tool. List the pages you read in sources.',
-    promptSnippet: 'Emit the final response as nested text nodes and separate generated-image nodes',
-    promptGuidelines: [
-      'Use emit_outline as the final action for every task.',
-      'Emit each generated image as its own image-only node with imageId and imageAlt; never attach it to a text node.',
-    ],
     parameters: Type.Object({
       nodes: Type.Array(RootNode, { minItems: 1, maxItems: 100 }),
       sources: Type.Optional(Type.Array(Source, { maxItems: 100 })),

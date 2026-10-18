@@ -9,7 +9,7 @@ const STDOUT_LINE_LIMIT = 8_000_000
 // MCP stdio cleanup can use two 2-second termination grace periods.
 const ABORT_GRACE_MS = 6_500
 
-export type PiRpcEvent = Record<string, unknown> & { type: string }
+export type PiSidecarEvent = Record<string, unknown> & { type: string }
 
 export interface PiProcessOptions {
   provider: ModelProvider
@@ -49,18 +49,23 @@ async function probeRuntime(commandName: string, label: string): Promise<PiRunti
   }
 }
 
-export function probePiRuntime(): Promise<PiRuntimeStatus> {
-  return probeRuntime('node-version', 'Pi SDK')
+export async function probePiRuntime(): Promise<PiRuntimeStatus> {
+  const status = await probeRuntime('node-version', 'Pi Durable')
+  const version = /^v?(\d+)\.(\d+)/.exec(status.version ?? '')
+  if (status.available && (!version || Number(version[1]) < 22 || (Number(version[1]) === 22 && Number(version[2]) < 19))) {
+    return { available: false, version: status.version, error: 'Pi Durable requires Node.js 22.19 or later.' }
+  }
+  return status
 }
 
 export function probeCodexRuntime(): Promise<PiRuntimeStatus> {
   return probeRuntime('codex-version', 'Codex')
 }
 
-export class PiRpcClient {
+export class PiSidecarClient {
   private child: Child | null = null
   private command: Command<string> | null = null
-  private listeners = new Set<(event: PiRpcEvent) => void>()
+  private listeners = new Set<(event: PiSidecarEvent) => void>()
   private stderr = ''
   private stdoutBuffer = ''
   private stopping = false
@@ -95,8 +100,6 @@ export class PiRpcClient {
     const args = [indexPath]
     const env = {
       PI_CODING_AGENT_DIR: `${agentDir.replace(/\/$/, '')}/pi-agent`,
-      PI_SKIP_VERSION_CHECK: '1',
-      PI_TELEMETRY: '0',
       AI_CHAT_PROVIDER: options.provider,
       AI_CHAT_API_KEY: options.apiKey,
       AI_CHAT_ACCOUNT_ID: options.accountId,
@@ -116,7 +119,7 @@ export class PiRpcClient {
           resolve()
         } else if (event.type === 'process_error') {
           unsubscribeStartup()
-          reject(new Error(String(event.error || 'Pi SDK sidecar failed during startup.')))
+          reject(new Error(String(event.error || 'Pi Durable sidecar failed during startup.')))
         }
       })
     })
@@ -124,7 +127,7 @@ export class PiRpcClient {
       this.child = await this.command.spawn()
     } catch (error) {
       unsubscribeStartup()
-      throw new Error(`Could not start the Pi SDK sidecar. Install dependencies with 'pnpm install' from the repository root. ${message(error)}`)
+      throw new Error(`Could not start the Pi Durable sidecar. Install dependencies with 'pnpm install' from the repository root. ${message(error)}`)
     }
     try {
       await startup
@@ -133,7 +136,7 @@ export class PiRpcClient {
     }
   }
 
-  onEvent(listener: (event: PiRpcEvent) => void): () => void {
+  onEvent(listener: (event: PiSidecarEvent) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -154,7 +157,7 @@ export class PiRpcClient {
       if (!child || !this.aborting) return
       this.child = null
       void child.kill().catch(() => undefined)
-      this.handleExit(new Error('Pi SDK did not stop within the cancellation grace period.'))
+      this.handleExit(new Error('Pi Durable did not stop within the cancellation grace period.'))
     }, ABORT_GRACE_MS)
     await this.write({ type: 'abort' })
   }
@@ -163,13 +166,13 @@ export class PiRpcClient {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         unsubscribe()
-        reject(new Error(`Timed out waiting for Pi SDK. ${this.stderr}`))
+        reject(new Error(`Timed out waiting for Pi Durable. ${this.stderr}`))
       }, timeoutMs)
       const unsubscribe = this.onEvent((event) => {
         if (event.type === 'process_error') {
           window.clearTimeout(timer)
           unsubscribe()
-          reject(new Error(String(event.error || 'Pi SDK sidecar failed.')))
+          reject(new Error(String(event.error || 'Pi Durable sidecar failed.')))
         } else if (event.type === 'agent_settled') {
           window.clearTimeout(timer)
           unsubscribe()
@@ -191,7 +194,7 @@ export class PiRpcClient {
       try {
         await child.kill()
       } catch (error) {
-        console.warn('[pi-sdk] failed to stop subprocess:', error)
+        console.warn('[pi-sidecar] failed to stop subprocess:', error)
       }
     }
     this.listeners.clear()
@@ -210,14 +213,14 @@ export class PiRpcClient {
     command.on('error', (error) => this.handleExit(new Error(error)))
     command.on('close', ({ code, signal }) => {
       if (this.stopping) return
-      this.handleExit(new Error(`Pi SDK exited unexpectedly (code ${code}, signal ${signal}). ${this.stderr}`))
+      this.handleExit(new Error(`Pi Durable exited unexpectedly (code ${code}, signal ${signal}). ${this.stderr}`))
     })
   }
 
   private handleStdout(data: string): void {
     this.stdoutBuffer += data
     if (this.stdoutBuffer.length > STDOUT_LINE_LIMIT) {
-      this.handleExit(new Error('Pi SDK output exceeded the allowed message size.'))
+      this.handleExit(new Error('Pi Durable output exceeded the allowed message size.'))
       return
     }
     const lines = this.stdoutBuffer.split('\n')
@@ -251,13 +254,13 @@ export class PiRpcClient {
         const child = this.child
         this.child = null
         void child?.kill().catch(() => undefined)
-        this.handleExit(new Error('Pi SDK emitted malformed protocol output.'))
+        this.handleExit(new Error('Pi Durable emitted malformed protocol output.'))
         return
       }
     }
   }
 
-  private route(event: PiRpcEvent): void {
+  private route(event: PiSidecarEvent): void {
     if (this.aborting && event.type !== 'agent_settled' && event.type !== 'process_error') return
     if (event.type === 'agent_settled' || event.type === 'process_error') {
       this.aborting = false
@@ -268,9 +271,9 @@ export class PiRpcClient {
 
   private write(command: Record<string, unknown>): Promise<void> {
     const child = this.child
-    if (!child) return Promise.reject(new Error('Pi SDK subprocess is not running.'))
+    if (!child) return Promise.reject(new Error('Pi Durable subprocess is not running.'))
     return child.write(`${JSON.stringify(command)}\n`).catch((error) => {
-      throw new Error(`Could not write to Pi SDK: ${message(error)}`)
+      throw new Error(`Could not write to Pi Durable: ${message(error)}`)
     })
   }
 
@@ -292,7 +295,7 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function validProtocolEvent(value: unknown): value is PiRpcEvent {
+function validProtocolEvent(value: unknown): value is PiSidecarEvent {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const event = value as Record<string, unknown>
   if (!boundedJson(event, STDOUT_LINE_LIMIT) || typeof event.type !== 'string') return false

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Forage SDK Sidecar — embeds the Pi SDK directly instead of shelling out
- * to `pi --mode rpc`.  Communicates with the Tauri webview via JSONL over
+ * Forage Durable Sidecar — runs Pi Durable through the shared runtime.
+ * Communicates with the Tauri webview via JSONL over
  * stdin/stdout using the same event vocabulary the frontend already expects.
  *
  * Protocol (stdin):
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     model = resolved.model
     if (resolved.warning && process.env.PI_CODING_AGENT_DIR) {
       // Non-fatal; log but continue.
-      process.stderr.write(`[pi-sdk-sidecar] model warning: ${resolved.warning}\n`)
+      process.stderr.write(`[pi-sidecar] model warning: ${resolved.warning}\n`)
     }
   } catch (error) {
     emit({ type: 'process_error', error: errorMessage(error) })
@@ -78,6 +78,7 @@ async function main(): Promise<void> {
 
   // ── stdin reader (manual, not readline — avoids Unicode splitting bugs) ─
 
+  const shutdownController = new AbortController()
   let stdinBuffer = ''
   let currentAbort: AbortController | null = null
   let currentRun: Promise<void> | null = null
@@ -99,7 +100,7 @@ async function main(): Promise<void> {
     emit({ type: 'mcp_oauth_token_request', requestId, connectionId, resource })
   })
   const shutdown = () => {
-    currentAbort?.abort()
+    shutdownController.abort()
     void (currentRun ?? Promise.resolve()).finally(() => process.exit(0))
     setTimeout(() => process.exit(1), 6_000).unref()
   }
@@ -155,6 +156,7 @@ async function main(): Promise<void> {
       accessToken: accessToken!,
       agentDir: process.env.PI_CODING_AGENT_DIR || '',
       signal: abortController.signal,
+      suspendSignal: shutdownController.signal,
       emit,
       mcpAuthorization: { accessToken: requestToken, unauthorized: (connectionId) => emit({ type: 'mcp_oauth_required', connectionId }) },
     })

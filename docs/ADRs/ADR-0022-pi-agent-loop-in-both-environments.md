@@ -4,7 +4,7 @@
 - **Date:** 2026-09-25
 - **Deciders:** Forage maintainers
 - **Supersedes:** ADR-0013 in part (in-memory-only sessions; a server runtime separate from Pi)
-- **Superseded by:** None
+- **Superseded by:** [ADR-0026](ADR-0026-pi-durable-execution.md) in part (SDK sessions and execution recovery)
 
 ## Context
 

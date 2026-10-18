@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => ({
     setupFiles: ['./apps/desktop/src/test-setup.ts'],
     exclude: [
       '**/node_modules/**',
+      '**/.claude/worktrees/**',
       '**/dist/**',
       '**/target/**',
       'scripts/**',

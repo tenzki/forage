@@ -6,7 +6,7 @@ import {
 } from '@forage/agent-runtime'
 
 import { validateCustomTool, type CustomToolConfig } from './tools'
-import { parseRunThread, type PiTurnRequest, type RunThread } from '@forage/pi-runtime'
+import { fingerprintAdmission, parseRunThread, type PiTurnRequest, type RunThread } from '@forage/pi-runtime'
 
 export const MAX_PAYLOAD_BYTES = 512_000
 const MAX_CONTEXT_CHARACTERS = 40_000
@@ -99,6 +99,11 @@ function parseExtensionSecrets(value: unknown): Record<string, Record<string, st
 export function turnRequest(payload: RunPayload): PiTurnRequest {
   return {
     runId: payload.runId,
+    admissionFingerprint: fingerprintAdmission({
+      customTools: payload.customTools, outlineSnapshot: payload.outlineSnapshot,
+      extensionSnapshot: payload.extensionSnapshot,
+      mcpSnapshot: payload.mcpConnections?.map(({ connection }) => connection),
+    }),
     executionMode: 'local',
     instructions: [payload.instructions],
     prompt: payload.prompt,

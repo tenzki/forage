@@ -35,7 +35,7 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 
 vi.mock('./mcpOAuthClient', () => ({ resolveMcpAccessToken: resolveToken, markMcpSignInRequired: markRequired }))
 
-import { PiRpcClient } from './piSdkClient'
+import { PiSidecarClient } from './piSidecarClient'
 
 beforeEach(() => {
   startupEvent.value = { type: 'process_error', error: 'Missing AI_CHAT_API_KEY' }
@@ -47,10 +47,10 @@ beforeEach(() => {
   stderrHandler = undefined
 })
 
-describe('Pi SDK startup', () => {
+describe('Pi Durable startup', () => {
   it('keeps OAuth token IPC private and restricts it to the admitted endpoint', async () => {
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
     const events: unknown[] = []
     client.onEvent((event) => events.push(event))
     await client.start({ provider: 'openai', modelId: 'test', apiKey: 'model-key', accountId: '' })
@@ -72,7 +72,7 @@ describe('Pi SDK startup', () => {
     await client.stop()
   })
   it('rejects start immediately when the sidecar reports a startup error', async () => {
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
 
     await expect(client.start({
       provider: 'openai',
@@ -85,7 +85,7 @@ describe('Pi SDK startup', () => {
 
   it('resolves start only after the sidecar reports ready', async () => {
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
 
     await expect(client.start({
       provider: 'openai',
@@ -98,7 +98,7 @@ describe('Pi SDK startup', () => {
 
   it('does not wait for an RPC response to start a run', async () => {
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
     await client.start({
       provider: 'openai',
       modelId: 'gpt-test',
@@ -117,7 +117,7 @@ describe('Pi SDK startup', () => {
 
   it('passes OAuth expiry to the sidecar environment', async () => {
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
     await client.start({
       provider: 'openai-codex',
       modelId: 'gpt-test',
@@ -139,7 +139,7 @@ describe('Pi SDK startup', () => {
   it('terminates an unresponsive run after the cancellation grace period', async () => {
     vi.useFakeTimers()
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
     const starting = client.start({ provider: 'openai', modelId: 'gpt-test', apiKey: 'test-key', accountId: '' })
     await vi.runAllTicks()
     await starting
@@ -152,7 +152,7 @@ describe('Pi SDK startup', () => {
 
   it.each(['anthropic', 'openrouter', 'opencode-go', 'openai'] as const)('sends %s secrets only through the child environment and redacts stderr', async (provider) => {
     startupEvent.value = { type: 'ready' }
-    const client = new PiRpcClient()
+    const client = new PiSidecarClient()
     await client.start({ provider, modelId: 'gpt-test', apiKey: 'model-secret', accountId: '' })
     expect(createCommand.mock.calls[0]?.[2]).toMatchObject({ env: { AI_CHAT_PROVIDER: provider, AI_CHAT_API_KEY: 'model-secret' } })
     expect(JSON.stringify(createCommand.mock.calls[0]?.[1])).not.toContain('model-secret')

@@ -1,5 +1,5 @@
 import { Type } from '@earendil-works/pi-ai'
-import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { defineTool, type ToolDefinition } from '@forage/pi-runtime'
 import { extensionToolResultSchema } from '@forage/agent-runtime'
 import type { OutlineImage } from '@forage/pi-runtime'
 import type { ExtensionRuntimeLog, LoadedForageExtension } from '@forage/extension-host'

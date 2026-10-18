@@ -1,3 +1,4 @@
+import { openPostgresDurableExecution } from './postgresDurableStorage.js'
 import type { Pool, PoolClient, QueryResultRow } from 'pg'
 import {
   activityEventSchema,
@@ -37,6 +38,10 @@ import {
 } from './agentStore.js'
 
 export class PostgresAgentStore implements AgentStore {
+  openDurableExecution(runId: string, workerId: string) {
+    return openPostgresDurableExecution(this.pool, runId, workerId)
+  }
+
   constructor(private readonly pool: Pool) {}
 
   async currentConfiguration(outlineId: string): Promise<PublishedConfiguration | null> {
@@ -159,7 +164,7 @@ export class PostgresAgentStore implements AgentStore {
           admission.invocationId ?? null, admission.intentHash ?? null,
           input.source.nodeId ?? null, input.target.parentId, input,
           { agent: input.agent, skill: input.skill, effectiveToolIds: input.effectiveToolIds, policyId: admission.policyId ?? null },
-          input.configurationRevision, input.credentialRef, hasMcpTools(input.effectiveToolIds) ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null,
+          input.configurationRevision, input.credentialRef, hasMcpTools(input.effectiveToolIds) && input.runtime !== 'pi-durable' ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)), admission.retryOfRunId ?? null,
           thread?.callId ?? null, thread?.turn ?? null],
       )
       return admitted(result.rows[0]!, admission)
@@ -417,18 +422,19 @@ export class PostgresAgentStore implements AgentStore {
   }
 
   async pruneConversations(before: Date): Promise<number> {
-    const result = await this.pool.query(
-      `DELETE FROM agent_call_turns WHERE call_id IN (
-         SELECT turn.call_id FROM agent_call_turns turn
-         WHERE NOT EXISTS (
-           SELECT 1 FROM agent_runs run WHERE run.call_id = turn.call_id
-             AND run.status NOT IN ('completed','completed_unplaced','failed','cancelled','interrupted')
-         )
-         GROUP BY turn.call_id HAVING max(turn.created_at) < $1
-       )`,
-      [before],
-    )
-    return result.rowCount ?? 0
+    return this.transaction(async (client) => {
+      const calls = await client.query<{ call_id: string }>(
+        `SELECT turn.call_id FROM agent_call_turns turn
+         WHERE NOT EXISTS (SELECT 1 FROM agent_runs run WHERE run.call_id=turn.call_id
+           AND run.status NOT IN ('completed','completed_unplaced','failed','cancelled','interrupted'))
+         GROUP BY turn.call_id HAVING max(turn.created_at) < $1`, [before],
+      )
+      const ids = calls.rows.map((row) => row.call_id)
+      if (!ids.length) return 0
+      await client.query('DELETE FROM agent_durable_calls WHERE call_id=ANY($1::text[])', [ids])
+      const result = await client.query('DELETE FROM agent_call_turns WHERE call_id=ANY($1::text[])', [ids])
+      return result.rowCount ?? 0
+    })
   }
 
   async placeOutput(outlineId: string, runId: string, resultIdentity: string, result: AgentRunResult): Promise<AgentRunResult> {

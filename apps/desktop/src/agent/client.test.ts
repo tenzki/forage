@@ -137,18 +137,19 @@ describe('Codex tool loop', () => {
     expect(activities).toEqual([['searching: current outliner apps']])
     expect(deltas).toEqual(['Current finding'])
     const firstContext = mocks.streamSimple.mock.calls[0][1] as Context
-    expect(firstContext.messages[0]).toMatchObject({
+    expect(firstContext.messages.find((message) => message.role === 'user')).toMatchObject({
       content: expect.stringContaining(
         'Direct sibling bullets (same parent):\n- Existing comparison\n- Open questions',
       ),
     })
     const secondContext = mocks.streamSimple.mock.calls[1][1] as Context
     expect(secondContext.messages.map((message) => message.role)).toEqual([
+      'system',
       'user',
       'assistant',
       'toolResult',
     ])
-    expect(secondContext.messages[2]).toMatchObject({
+    expect(secondContext.messages.find((message) => message.role === 'toolResult')).toMatchObject({
       role: 'toolResult',
       toolName: WEB_SEARCH_TOOL_ID,
       isError: false,

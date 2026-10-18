@@ -349,7 +349,7 @@ export class PostgresServerRepository implements ServerRepository {
       } catch { continue }
       const runId = `run_${randomUUID()}`
       const input: RunInput = {
-        version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
+        version: 1, runtime: 'pi-durable', runId, executionMode: 'server', outlineId: principal.outlineId,
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
         credentialRef, computeProfile: { version: 1, revision: Number(compute.revision), provider: compute.provider, modelId: compute.model_id, credentialRef }, agent: resolvedAgent, skill, effectiveToolIds,

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
 import {
   AgentRuntimeError,
   MAX_ANSWER_CHARS,
@@ -74,6 +73,10 @@ export class ServerImageReferences implements ImageReferences {
     return imageId
   }
 
+  snapshot(): Record<string, OutlineImage> { return Object.fromEntries(this.images) }
+
+  restore(images: Record<string, OutlineImage>): void { for (const [id, image] of Object.entries(images)) this.images.set(id, image) }
+
   get(imageId: string): OutlineImage | undefined {
     return this.images.get(imageId)
   }
@@ -98,6 +101,8 @@ export interface ServerPiTurnOptions {
   sources?: UntrustedSourceMaterial[]
   onActivity: (event: ActivityEvent) => Promise<void>
   signal: AbortSignal
+  secrets?: () => readonly string[]
+  assertOwnership?: () => Promise<void>
   maxToolRounds?: number
   /** The call's conversation for a run that carries a thread; replies require it. */
   conversation?: ConversationStore
@@ -117,12 +122,13 @@ export async function runServerPiTurn(input: RunInput, options: ServerPiTurnOpti
       ...options.model,
       runtimeTools: options.tools.map((tool) => withImageReferences(tool, images)),
       images,
+      secrets: options.secrets,
+      assertOwnership: options.assertOwnership,
       ...(options.conversation ? { conversation: options.conversation } : {}),
       onActivity: (event) => { activity = activity.then(() => options.onActivity(event)) },
     }, {
       signal: options.signal,
       ...(options.maxToolRounds === undefined ? {} : { maxToolRounds: options.maxToolRounds }),
-      cwd: tmpdir(),
     })
   } catch (error) {
     await activity.catch(() => undefined)

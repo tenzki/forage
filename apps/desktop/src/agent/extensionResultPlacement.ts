@@ -2,7 +2,7 @@ import { documentEditor } from '../editor/documentAccess'
 import type { Editor } from '@tiptap/react'
 import { parseStructuredResult } from '@forage/agent-runtime'
 import type { LocalAgentRun } from '../persistence/eventStore'
-import { insertExtensionSkillResult } from './insertIntoEditor'
+import { commitStructuredAgentResult, insertExtensionSkillResult } from './insertIntoEditor'
 
 export interface ExtensionResultPlacementRepository {
   placeAgentRunResult(runId: string, placedAt: string): Promise<void>
@@ -20,8 +20,11 @@ export async function placeRetainedExtensionSkillResult(
   repository: ExtensionResultPlacementRepository,
   now: () => string = () => new Date().toISOString(),
 ): Promise<string[]> {
-  if (run.status !== 'completed_unplaced' || run.snapshot.version !== 2 || !run.result) {
-    throw new Error('This run has no retained extension result awaiting placement.')
+  if (run.status !== 'completed_unplaced' || !run.result || 'type' in run.result) {
+    throw new Error('This run has no retained result awaiting placement.')
+  }
+  if (run.snapshot.version === 1) {
+    return commitStructuredAgentResult(documentEditor(editor), targetNodeId, run.snapshot.skill.label, run.result, run.id)
   }
   const result = parseStructuredResult(run.result, {
     allowedReferenceIds: run.snapshot.plan.admittedReferenceIds,

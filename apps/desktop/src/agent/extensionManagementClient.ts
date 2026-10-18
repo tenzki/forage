@@ -35,10 +35,7 @@ export class ExtensionManagementClient {
     if (this.child) throw new Error('Extension management subprocess is already running.')
     this.stopping = false
     const entryPath = await resolveResource('resources/pi/sidecar/dist/management.mjs')
-    this.command = Command.create('node-sidecar', [entryPath], { env: {
-      PI_SKIP_VERSION_CHECK: '1',
-      PI_TELEMETRY: '0',
-    } })
+    this.command = Command.create('node-sidecar', [entryPath], { env: {} })
     this.attach(this.command)
     let ready: () => void = () => undefined
     let fail: (error: Error) => void = () => undefined

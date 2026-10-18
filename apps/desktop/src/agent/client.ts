@@ -8,6 +8,7 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from '@earendil-works/pi-ai'
+import { normalizeContext } from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import type { CodexAuthMode } from '../store/settingsStore'
@@ -193,7 +194,7 @@ async function streamTurn(
   apiKey: string,
   options: GenerateOptions,
 ): Promise<AssistantMessage> {
-  const stream = provider.streamSimple(model, context, {
+  const stream = provider.streamSimple(model, normalizeContext(context), {
     apiKey,
     fetch: desktopFetch,
     maxTokens: MAX_TOKENS,

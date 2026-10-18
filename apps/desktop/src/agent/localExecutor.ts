@@ -18,7 +18,7 @@ export interface LocalRunRepository {
   cancelAgentRun(runId: string, cancelledAt: string): Promise<void>
   settleAgentRun(
     runId: string,
-    status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>,
+    status: Extract<RunStatus, 'completed' | 'completed_unplaced' | 'failed' | 'cancelled' | 'interrupted'>,
     resultIdentity: string | null,
     result: LocalRunResult | null,
     errorCode: string | null,
@@ -66,6 +66,15 @@ export class LocalAgentExecutor {
   async retry(originalRunId: string, rawInput: RunInput, options: AgentInvocationOptions = {}): Promise<AgentExecutionHandle> {
     const input = this.localInput(rawInput)
     await this.repository.retryAgentRun(originalRunId, this.runRecord(input, originalRunId))
+    return this.start(input, options)
+  }
+
+  async resume(rawInput: RunInput, options: AgentInvocationOptions = {}): Promise<AgentExecutionHandle> {
+    const input = this.localInput(rawInput)
+    const stored = await this.repository.agentRun(input.runId)
+    if (input.runtime !== 'pi-durable' || !stored || stored.snapshot.version !== 1 || stored.status !== 'queued' || stored.cancelRequestedAt || JSON.stringify(this.localInput(stored.snapshot)) !== JSON.stringify(input)) {
+      throw new Error('This local run is not available for recovery.')
+    }
     return this.start(input, options)
   }
 
@@ -142,7 +151,7 @@ export class LocalAgentExecutor {
       }
       await this.repository.settleAgentRun(
         input.runId,
-        'completed',
+        isLocalAnswerResult(result) || input.runtime !== 'pi-durable' ? 'completed' : 'completed_unplaced',
         `result:${input.runId}`,
         result,
         null,

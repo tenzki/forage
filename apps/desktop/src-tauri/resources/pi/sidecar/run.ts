@@ -1,5 +1,5 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
-import type { AgentSessionEvent, ModelRuntime } from '@earendil-works/pi-coding-agent'
+import type { PiSessionEvent, ModelRuntime } from '@forage/pi-runtime'
 import { AgentRuntimeError, isAbortError } from '@forage/agent-runtime'
 import { mcpSecretValues, openMcpTools, type McpAuthorization } from '@forage/mcp-host'
 import {
@@ -13,7 +13,7 @@ import {
   verifyLocalExtensionSnapshot,
   type LoadedForageExtension,
 } from '@forage/extension-host'
-import { conversationDirectory, createFileConversationStore, runPiTurn } from '@forage/pi-runtime'
+import { conversationDirectory, createFileConversationStore, runPiTurn, RunSuspended } from '@forage/pi-runtime'
 
 import {
   createCustomHttpTool,
@@ -33,6 +33,7 @@ export interface RunCommandDependencies {
   /** Pi agent directory; call conversations are stored under it. */
   agentDir: string
   signal: AbortSignal
+  suspendSignal?: AbortSignal
   emit: (value: unknown) => void
   mcpAuthorization?: McpAuthorization
 }
@@ -54,8 +55,7 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
     else emitEvent(value)
   }
   let currentSecrets: string[] = [dependencies.accessToken]
-  let finishExtensions: ((outcome: ExtensionOutcome) => Promise<void>) | undefined
-  let extensionOutcome: ExtensionOutcome = 'failed'
+  let releaseExtensions: (() => Promise<void>) | undefined
   let mcp: Awaited<ReturnType<typeof openMcpTools>> | undefined
 
   try {
@@ -70,7 +70,7 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
     const customToolConfigs = payload.customTools.filter((t) => toolSet.has(t.name))
     const admittedExtensions = await loadAdmittedExtensions(payload, customToolConfigs.map((tool) => tool.name), knownSecrets)
     const extensions = admittedExtensions.extensions
-    finishExtensions = () => admittedExtensions.release()
+    releaseExtensions = () => admittedExtensions.release()
     const extensionToolOwners = new Map(extensions.flatMap((extension) => (
       [...extension.tools.keys()].map((toolId) => [toolId, {
         installationId: extension.entry.source.installationId,
@@ -96,16 +96,8 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
     })
 
     const extensionExecution = { signal, onLog: emitLog }
-    finishExtensions = async (outcome) => {
-      try {
-        await runExtensionEndHooks(extensions, payload.runId, outcome, extensionExecution)
-      } finally {
-        await admittedExtensions.release()
-      }
-    }
-    await runExtensionStartHooks(extensions, payload.runId, extensionExecution)
 
-    const forwardSessionEvent = (event: AgentSessionEvent) => {
+    const forwardSessionEvent = (event: PiSessionEvent) => {
       if (event.type === 'message_update') {
         emit(event)
       } else if (event.type === 'tool_execution_start') {
@@ -146,31 +138,37 @@ export async function runCommand(encodedPayload: string, dependencies: RunComman
         ...extensionTools,
       ],
       images: generatedImages,
+      secrets: () => currentSecrets,
+      ...(extensions.length ? {
+        beforeRun: () => runExtensionStartHooks(extensions, payload.runId, extensionExecution),
+        afterRun: async (outcome: ExtensionOutcome) => {
+          try { await runExtensionEndHooks(extensions, payload.runId, outcome, extensionExecution) }
+          catch (error) { process.stderr.write(`[forage-extension] run:end failed: ${sanitizeExtensionText(errorMessage(error), currentSecrets)}\n`) }
+        },
+      } : {}),
       runtimeTools: mcp.tools,
       conversation: createFileConversationStore(conversationDirectory(dependencies.agentDir)),
       onSessionEvent: forwardSessionEvent,
-    }, { signal, agentDir: dependencies.agentDir })
+    }, { signal, suspendSignal: dependencies.suspendSignal })
 
-    extensionOutcome = 'completed'
     emit(outcome.type === 'outline'
       ? { type: 'agent_settled', outcome: 'outline' }
       : { type: 'agent_settled', outcome: 'text', text: outcome.text })
   } catch (error) {
+    if (error instanceof RunSuspended) return
     if (signal.aborted || isAbortError(error)) {
-      extensionOutcome = 'cancelled'
       emit({ type: 'agent_settled', outcome: 'text' })
     } else if (error instanceof AgentRuntimeError && error.code === 'empty_response') {
-      // The desktop retries an empty turn once; its transcript was already rolled back.
-      extensionOutcome = 'completed'
+      // The desktop retries an empty turn once; Durable retains its tool receipts.
       emit({ type: 'agent_settled', outcome: 'text' })
     } else {
       emit({ type: 'process_error', error: sanitizeExtensionText(errorMessage(error), currentSecrets) })
     }
   } finally {
     await mcp?.close()
-    if (finishExtensions) {
-      try { await finishExtensions(extensionOutcome) } catch (error) {
-        process.stderr.write(`[forage-extension] run:end failed: ${sanitizeExtensionText(errorMessage(error), currentSecrets)}\n`)
+    if (releaseExtensions) {
+      try { await releaseExtensions() } catch (error) {
+        process.stderr.write(`[forage-extension] release failed: ${sanitizeExtensionText(errorMessage(error), currentSecrets)}\n`)
       }
     }
     if (terminalEvent) emitEvent(terminalEvent)

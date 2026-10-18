@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { BulletAttributes } from './extensions'
@@ -18,8 +18,11 @@ function item(id: string, text: string, children: object[] = [], nodeType: 'user
   }
 }
 
+const editors: Editor[] = []
+afterEach(() => { for (const editor of editors.splice(0)) editor.destroy() })
+
 function makeEditor(items: object[]): Editor {
-  return new Editor({
+  const editor = new Editor({
     element: document.createElement('div'),
     extensions: [
       StarterKit.configure({ bulletList: false, listItem: false, trailingNode: false }),
@@ -32,6 +35,8 @@ function makeEditor(items: object[]): Editor {
     ],
     content: { type: 'doc', content: [{ type: 'bulletList', content: items }] },
   })
+  editors.push(editor)
+  return editor
 }
 
 function childTexts(editor: Editor, parentId: string): string[] {

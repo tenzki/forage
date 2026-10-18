@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -48,8 +48,7 @@ async function conversationServer(options: { engine?: AgentEngine; budget?: numb
   const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'sync'))
   await repository.seedOutline(device, seedState())
   const assetRoot = await mkdtemp(join(tmpdir(), 'forage-call-assets-'))
-  const tempRoot = await mkdtemp(join(tmpdir(), 'forage-call-sessions-'))
-  cleanups.push(() => rm(assetRoot, { recursive: true, force: true }), () => rm(tempRoot, { recursive: true, force: true }))
+  cleanups.push(() => rm(assetRoot, { recursive: true, force: true }))
   const credentials = new ServerCredentialService(new InMemoryProviderCredentialStore(), {
       validateApiKey: async () => undefined,
     encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 4).toString('base64') }],
@@ -86,7 +85,6 @@ async function conversationServer(options: { engine?: AgentEngine; budget?: numb
   const scripts: FauxResponseStep[][] = []
   const runnerFor = (engine: AgentEngine) => new ServerAgentRunner({
     repository, credentials, tools: options.tools ?? [], workerId: 'worker', leaseMs: 30_000, engine,
-    conversationTempRoot: tempRoot,
     piModelFactory: async () => scriptedModel(scripts.shift() ?? []),
     modelFactory: () => { throw new Error('The legacy model is not used in these tests.') },
   })
@@ -113,11 +111,11 @@ async function conversationServer(options: { engine?: AgentEngine; budget?: numb
     return (await app.inject({ method: 'GET', url: `/api/v1/outlines/${OUTLINE_ID}/agent-runs/${run.id}`, headers })).json()
   }
   const outlineTexts = async () => queryCanonicalOutline((await repository.checkpoint(OUTLINE_ID)).state).nodes().map((node) => node.text)
-  return { app, serverFor, runnerFor, repository, device, headers, admit, work, outlineTexts, tempRoot }
+  return { app, serverFor, runnerFor, repository, device, headers, admit, work, outlineTexts }
 }
 
 function emitOutline(nodes: unknown[]) {
-  return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes, sources: [] }))
+  return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: nodes as Parameters<typeof fauxToolCall>[1]['nodes'], sources: [] }))
 }
 
 function userTexts(context: Context): string[] {
@@ -195,7 +193,6 @@ describe('server call conversations', () => {
     // Run views carry what another device needs to show the call's thread.
     expect(list.json().runs[1]).toMatchObject({ sourceNodeId: CALL_BULLET, prompt: 'Which part matters most?' })
     expect(list.json().runs[2].prompt).toBe('Research tides.')
-    expect(await readdir(server.tempRoot)).toEqual([])
   })
 
   it('refuses a reply while the call is busy, for a turn already taken, and over the transcript budget', async () => {

@@ -682,6 +682,12 @@ fn returns_recent_agent_runs_with_activity_and_clears_them_per_outline() {
     assert_eq!(history[0].activity[0].event["label"], json!("Thinking"));
     assert!(history[1].activity.is_empty());
 
+    // Active work survives clearing activity; settled runs can be forgotten.
+    assert_eq!(store.clear_agent_runs("outline-1").unwrap(), 0);
+    for run_id in ["run-old", "run-new"] {
+        store.begin_agent_attempt(run_id, "2026-08-31T10:00:02.000Z").unwrap();
+        store.settle_agent_run(run_id, "completed", None, None, None, "2026-08-31T10:00:03.000Z").unwrap();
+    }
     let removed = store.clear_agent_runs("outline-1").expect("clear runs");
     assert_eq!(removed, 2);
     assert!(store
@@ -860,4 +866,27 @@ fn keeps_enough_checkpoint_history_to_survive_a_corrupted_newest_one() {
         selected.id,
         format!("checkpoint-{}", EventStore::CHECKPOINT_RETENTION + 4)
     );
+}
+
+#[test]
+fn durable_runs_resume_and_placement_settles_with_the_document_event() {
+    let store = EventStore::open_in_memory().unwrap();
+    let mut run = agent_run("durable-run", "queued");
+    run.snapshot["runtime"] = json!("pi-durable");
+    store.admit_agent_run(&run).unwrap();
+    store.begin_agent_attempt("durable-run", "2026-10-18T10:00:00Z").unwrap();
+    store.interrupt_unfinished_agent_runs("2026-10-18T10:00:01Z").unwrap();
+    let queued = store.agent_run("durable-run").unwrap().unwrap();
+    assert_eq!(queued.status, "queued");
+    assert_eq!(queued.error_code.as_deref(), Some("desktop_restarted"));
+    assert_eq!(store.begin_agent_attempt("durable-run", "2026-10-18T10:00:02Z").unwrap(), 2);
+    let result = json!({ "version": 1, "nodes": [{ "type": "text", "text": "Recovered" }], "sources": [] });
+    store.settle_agent_run("durable-run", "completed_unplaced", Some("result:durable-run"), Some(&result), None, "2026-10-18T10:00:03Z").unwrap();
+    let mut placed = event("placement-event", 0);
+    placed.envelope["type"] = json!("document.steps_applied");
+    placed.envelope["changeGroupId"] = json!("agent-result:durable-run");
+    store.append(&placed).unwrap();
+    assert_eq!(store.agent_run("durable-run").unwrap().unwrap().status, "completed");
+    store.append(&placed).unwrap();
+    assert_eq!(store.events_after_sequence("outline-1", 0).unwrap().len(), 1);
 }

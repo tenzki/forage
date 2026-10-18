@@ -6,15 +6,11 @@ import { discoverMcp } from '@forage/mcp-host'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fauxAssistantMessage,
-  fauxProvider,
   fauxText,
   fauxToolCall,
-  InMemoryCredentialStore,
   type Context,
-  type FauxResponseStep,
-  type ModelsStoreEntry,
 } from '@earendil-works/pi-ai'
-import { ModelRuntime } from '@earendil-works/pi-coding-agent'
+import { scriptedModel, type FauxResponseStep } from '@forage/pi-runtime/test-support'
 import { UNTRUSTED_MATERIAL_RULE, VERIFIED_CITATION_RULE } from '@forage/pi-runtime'
 
 const transport = vi.hoisted(() => ({ fetch: vi.fn() }))
@@ -24,23 +20,6 @@ import { runCommand } from './run'
 
 type Emitted = Record<string, unknown>
 
-async function scriptedModel(responses: FauxResponseStep[]) {
-  const faux = fauxProvider()
-  const entries = new Map<string, ModelsStoreEntry>()
-  const modelRuntime = await ModelRuntime.create({
-    credentials: new InMemoryCredentialStore(),
-    modelsStore: {
-      read: async (providerId) => entries.get(providerId),
-      write: async (providerId, entry) => { entries.set(providerId, entry) },
-      delete: async (providerId) => { entries.delete(providerId) },
-    },
-    allowModelNetwork: false,
-    refreshOnCreate: false,
-  })
-  modelRuntime.registerNativeProvider(faux.provider)
-  faux.setResponses(responses)
-  return { modelRuntime, model: faux.getModel() }
-}
 
 function encode(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')

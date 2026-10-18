@@ -57,7 +57,7 @@ describe('isolated MCP OAuth worker packaging', () => {
       }
       response.writeHead(405).end()
     })
-    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, 'localhost', resolve) })
     cleanup.push(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }))
     origin = `http://localhost:${(server.address() as { port: number }).port}`
     const worker = start(fileURLToPath(new URL(entry, import.meta.url)))
@@ -110,9 +110,9 @@ describe('isolated MCP OAuth worker packaging', () => {
       expect(body).not.toContain('model-secret')
       response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', token_type: 'Bearer', expires_in: 3600 }))
     })
-    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, 'localhost', resolve) })
     cleanup.push(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }))
-    const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const origin = `http://localhost:${(server.address() as { port: number }).port}`
     const credential = { resource: `${origin}/mcp`, issuer: origin, clientInformation: { client_id: 'forage' },
       discovery: { authorizationServerUrl: origin, authorizationServerMetadata: { issuer: origin, token_endpoint: `${origin}/token` } },
       tokens: { access_token: 'expired-access', refresh_token: 'refresh-private', token_type: 'Bearer' }, expiresAt: 0 }

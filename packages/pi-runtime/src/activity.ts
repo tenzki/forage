@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { PiSessionEvent } from './tools'
 import {
   activityEventSchema,
   boundedActivityId,
@@ -22,7 +22,7 @@ export class ActivityMapper {
     this.thinkingId = boundedActivityId(`thinking-${runId}`, 1)
   }
 
-  handle(event: AgentSessionEvent): void {
+  handle(event: PiSessionEvent): void {
     switch (event.type) {
       case 'agent_start':
         if (this.thinking !== 'idle') return

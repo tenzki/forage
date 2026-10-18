@@ -1,5 +1,5 @@
 import { Type } from '@earendil-works/pi-ai'
-import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { defineTool, type ToolDefinition } from './tools'
 import {
   boundedSafeError,
   boundedToolOutput,
@@ -17,6 +17,7 @@ import type { VerifiedSources } from './sources'
 export function adaptRuntimeTool(tool: RuntimeTool, sources: VerifiedSources): ToolDefinition {
   return defineTool({
     name: tool.id,
+    replay: ['web_search', 'web_fetch', 'web_read', 'x_read', 'youtube_transcript', 'search_outline'].includes(tool.id) ? 'safe' : 'unsafe',
     label: tool.name,
     description: tool.description,
     parameters: tool.inputSchema ? Type.Unsafe(tool.inputSchema) : Type.Object({}, { additionalProperties: true }),

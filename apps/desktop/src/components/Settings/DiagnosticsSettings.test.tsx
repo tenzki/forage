@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { invoke } from '@tauri-apps/api/core'
-import { probeCodexRuntime, probePiRuntime } from '../../agent/piSdkClient'
+import { probeCodexRuntime, probePiRuntime } from '../../agent/piSidecarClient'
 import { DiagnosticsSettings, diagnosticVersion } from './DiagnosticsSettings'
 import { InheritedCompute } from './InheritedCompute'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
-vi.mock('../../agent/piSdkClient', () => ({ probeCodexRuntime: vi.fn(), probePiRuntime: vi.fn() }))
+vi.mock('../../agent/piSidecarClient', () => ({ probeCodexRuntime: vi.fn(), probePiRuntime: vi.fn() }))
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(invoke).mockRejectedValue(new Error('api-key=secret-password https://private.example/token'))

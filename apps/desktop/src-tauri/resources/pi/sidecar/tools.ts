@@ -1,5 +1,5 @@
 import { Type } from '@earendil-works/pi-ai'
-import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent'
+import { defineTool, type ToolDefinition } from '@forage/pi-runtime'
 import { fetch as undiciFetch } from 'undici'
 
 // ── bounds ──────────────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ function duckResults(html: string, count: number): string {
 export function createWebSearchTool(): ToolDefinition {
   return defineTool({
     name: 'web_search',
+    replay: 'safe',
     label: 'Web Search',
     description: 'Search the web for current information and source URLs.',
     parameters: Type.Object({
@@ -115,6 +116,7 @@ export function createWebSearchTool(): ToolDefinition {
 export function createWebFetchTool(sources?: { register(url: string): void }): ToolDefinition {
   return defineTool({
     name: 'web_fetch',
+    replay: 'safe',
     label: 'Read Webpage',
     description: 'Read a public webpage as clean Markdown through Jina Reader.',
     parameters: Type.Object({ url: Type.String({ minLength: 1, maxLength: 4_000 }) }),
@@ -132,13 +134,9 @@ export function createWebFetchTool(sources?: { register(url: string): void }): T
 export function createSearchOutlineTool(snapshot: () => OutlineSnapshotNode[]): ToolDefinition {
   return defineTool({
     name: 'search_outline',
+    replay: 'safe',
     label: 'Search Outline',
     description: 'Search the current outline for existing nodes whose text matches the query. Returns matching nodes with their path for context.',
-    promptSnippet: 'Search existing notes using search_outline before writing duplicate content',
-    promptGuidelines: [
-      'Use search_outline before writing about a topic to check if the user already has notes about it.',
-      'When search_outline returns existing nodes, reference or expand them rather than duplicating.',
-    ],
     parameters: Type.Object({
       query: Type.String({ minLength: 1, maxLength: 500 }),
       maxResults: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),

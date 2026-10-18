@@ -1,6 +1,6 @@
 import { resolveCodexAuth, type CodexAuthConfig, type GenerateInput, type GenerateOptions } from './client'
 import { validateGeneratedImage, type GeneratedImageData } from '../editor/generatedImage'
-import { PiRpcClient, type PiRpcEvent } from './piSdkClient'
+import { PiSidecarClient, type PiSidecarEvent } from './piSidecarClient'
 import { safeToolDetail, type ActivityReporter } from './activity'
 import { hasMcpTools, type LocalExtensionSnapshot, type RunThread, type McpRunConnection } from '@forage/agent-runtime'
 
@@ -51,7 +51,7 @@ export async function generateWithPi(
   options: PiGenerateOptions,
 ): Promise<string> {
   const resolvedAuth = await resolveCodexAuth(auth, options.signal)
-  const client = new PiRpcClient()
+  const client = new PiSidecarClient()
   const allowedTools = new Set(input.agent?.toolIds ?? [])
   const enabledToolIds = (input.enabledToolIds ?? []).filter((id) => allowedTools.has(id))
   const enabledSet = new Set(enabledToolIds)
@@ -140,7 +140,7 @@ export async function generateWithPi(
     }
     if (event.type === 'agent_settled' && !outline) {
       const finalText = typeof event.text === 'string' ? event.text.trim() : ''
-      if (!text && finalText) {
+      if (finalText && finalText !== text) {
         beginOutput()
         text = finalText
         options.onDelta(text)
@@ -203,19 +203,19 @@ export async function generateWithPi(
   }
 }
 
-function textDelta(event: PiRpcEvent): string | null {
+function textDelta(event: PiSidecarEvent): string | null {
   if (event.type !== 'message_update') return null
   const update = asRecord(event.assistantMessageEvent)
   return update?.type === 'text_delta' && typeof update.delta === 'string' ? update.delta : null
 }
 
-function toolStart(event: PiRpcEvent): string | null {
+function toolStart(event: PiSidecarEvent): string | null {
   return event.type === 'tool_execution_start' && typeof event.toolName === 'string'
     ? event.toolName
     : null
 }
 
-function emittedOutline(event: PiRpcEvent): { nodes: PiOutlineNode[]; sources: PiSourceReference[] } | null {
+function emittedOutline(event: PiSidecarEvent): { nodes: PiOutlineNode[]; sources: PiSourceReference[] } | null {
   if (event.type !== 'tool_execution_end' || event.toolName !== 'emit_outline') return null
   const details = asRecord(asRecord(event.result)?.details)
   if (details?.action !== 'emit_outline' || !Array.isArray(details.nodes)) return null
@@ -257,11 +257,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
 }
 
-function extensionActivityLabel(event: PiRpcEvent, fallback: string): string {
+function extensionActivityLabel(event: PiSidecarEvent, fallback: string): string {
   return typeof event.extensionId === 'string' ? `${fallback} · ${event.extensionId}` : fallback
 }
 
-function extensionActivityDetail(event: PiRpcEvent, detail: string): string {
+function extensionActivityDetail(event: PiSidecarEvent, detail: string): string {
   return typeof event.installationId === 'string' ? `${detail} · ${event.installationId}` : detail
 }
 

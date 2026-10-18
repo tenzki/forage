@@ -7,7 +7,7 @@ import {
   type RuntimeTool,
   type McpRunConnection,
 } from '@forage/agent-runtime'
-import { openMcpTools } from '@forage/mcp-host'
+import { mcpSecretValues, openMcpTools } from '@forage/mcp-host'
 import { CONVERSATION_UNAVAILABLE } from '@forage/pi-runtime'
 import type { AgentRunRecord, CallTurnEntries } from './agentStore.js'
 import { AgentStoreError } from './agentStore.js'
@@ -32,8 +32,6 @@ export interface ServerAgentRunnerOptions {
   piModelFactory?: (credential: ResolvedModelCredential, run: AgentRunRecord) => Promise<ServerPiModel>
   /** The legacy engine's model adapter. */
   modelFactory?: (credential: ResolvedModelCredential, run: AgentRunRecord) => ModelAdapter
-  /** Where a reply's temporary session file is written; the OS temp directory by default. */
-  conversationTempRoot?: string
   mcpConnections?: McpRunConnection[]
 }
 
@@ -111,10 +109,14 @@ export class ServerAgentRunner {
     const model = this.options.piModelFactory
       ? await this.options.piModelFactory(credential, run)
       : await createServerPiModel(credential, run.input.agent.modelId)
-    const conversation = await openCallConversation(this.options.repository.agentStore, run, this.options.conversationTempRoot)
+    const execution = await this.options.repository.agentStore.openDurableExecution(run.id, this.options.workerId)
+    const conversation = await openCallConversation(this.options.repository.agentStore, run, async () => execution.storage)
     try {
       const result = await runServerPiTurn(run.input, {
-        model, tools, onActivity, signal, ...(conversation ? { conversation: conversation.store } : {}),
+        model, tools, onActivity, signal,
+        assertOwnership: execution.assertOwnership,
+        secrets: () => [credential.provider === 'openai-codex' ? credential.accessToken : credential.apiKey,
+          ...(this.options.mcpConnections ?? []).filter(({ connection }) => run.input.mcpSnapshot?.some((admitted) => admitted.id === connection.id)).flatMap(({ config }) => mcpSecretValues(config))], ...(conversation ? { conversation: conversation.store } : {}),
       })
       return { result, ...(conversation ? { turn: settledTurnEntries(conversation.appendedEntries(), credential) } : {}) }
     } finally {

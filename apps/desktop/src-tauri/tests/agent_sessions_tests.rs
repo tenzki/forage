@@ -133,3 +133,14 @@ fn pruning_a_missing_session_directory_is_a_no_op() {
     let dir = std::env::temp_dir().join(format!("forage-missing-{}", Uuid::new_v4()));
     assert_eq!(agent_sessions::prune_orphaned(&store, &dir).unwrap(), 0);
 }
+
+#[test]
+fn prunes_durable_databases_and_wal_files_without_removing_live_calls() {
+    let dir = session_dir();
+    for name in ["old.sqlite", "old.sqlite-wal", "old.sqlite-shm", "live.sqlite", "bad.name.sqlite", "notes.txt"] { write(&dir, name); }
+    let keep = ["live".to_string()].into_iter().collect();
+    assert_eq!(agent_sessions::prune(&dir, &keep).unwrap(), 3);
+    assert!(dir.join("live.sqlite").exists());
+    assert!(dir.join("bad.name.sqlite").exists());
+    std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
+}

@@ -14,8 +14,8 @@ const rpc = vi.hoisted(() => ({
   stop: vi.fn(async () => undefined),
 }))
 
-vi.mock('./piSdkClient', () => ({
-  PiRpcClient: class {
+vi.mock('./piSidecarClient', () => ({
+  PiSidecarClient: class {
     onEvent(listener: (event: TestEvent) => void) {
       rpc.listener = listener
       return () => { rpc.listener = undefined }
@@ -167,7 +167,7 @@ describe('generateWithPi activity', () => {
     expect(onDelta).toHaveBeenCalledWith('Fallback response')
   })
 
-  it('does not duplicate settled text after a streamed response', async () => {
+  it('uses the durable final answer to replace an incomplete streamed response', async () => {
     const onDelta = vi.fn()
     rpc.emitDefaultText = false
     rpc.promptEvents = [
@@ -181,8 +181,9 @@ describe('generateWithPi activity', () => {
       skill: SKILLS[0], prompt: 'test', context: [], enabledToolIds: [],
     }, { onDelta })
 
-    expect(result).toBe('Streamed response')
-    expect(onDelta).toHaveBeenCalledTimes(1)
+    expect(result).toBe('Final response')
+    expect(onDelta).toHaveBeenCalledTimes(2)
+    expect(onDelta).toHaveBeenLastCalledWith('Final response')
   })
 
   it('does not use settled text after an outline tool result', async () => {

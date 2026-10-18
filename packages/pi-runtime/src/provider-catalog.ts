@@ -5,7 +5,7 @@ import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import { MODEL_PROVIDERS, type ModelProvider, type ProviderCapability } from '@forage/agent-runtime'
 
-const factories = {
+export const providerFactories = {
   anthropic: anthropicProvider,
   openrouter: openrouterProvider,
   'opencode-go': opencodeGoProvider,
@@ -14,7 +14,7 @@ const factories = {
 }
 
 export function getProviderModels(provider: ModelProvider) {
-  return factories[provider]().getModels()
+  return providerFactories[provider]().getModels()
 }
 
 export function getProviderCapabilities(providers: readonly ModelProvider[]): ProviderCapability[] {

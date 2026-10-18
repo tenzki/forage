@@ -32,10 +32,10 @@ export interface AgentEncryptionKey { version: number; keyBase64: string }
 /** `pi` runs the shared Pi agent loop; `legacy` keeps the previous loop for one release as a rollback path. */
 export type AgentEngine = 'pi' | 'legacy'
 
-/** The Pi SDK the server runs agents on requires this Node.js version. */
+/** The Pi Durable the server runs agents on requires this Node.js version. */
 export const MINIMUM_NODE_VERSION = '22.19.0'
 
-/** Fail fast when the running Node.js is older than the Pi SDK supports. */
+/** Fail fast when the running Node.js is older than the Pi Durable supports. */
 export function assertSupportedNodeVersion(version: string = process.versions.node): void {
   const [major = 0, minor = 0, patch = 0] = version.replace(/^v/, '').split('.').map((part) => Number.parseInt(part, 10) || 0)
   const [minimumMajor, minimumMinor, minimumPatch] = MINIMUM_NODE_VERSION.split('.').map(Number) as [number, number, number]

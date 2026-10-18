@@ -39,7 +39,7 @@ describe('ExtensionManagementClient', () => {
     await client.start()
     const options = createCommand.mock.calls[0]![2] as { env: Record<string, string> }
     expect(createCommand.mock.calls[0]![1]).toEqual(['/resources/resources/pi/sidecar/dist/management.mjs'])
-    expect(options.env).toEqual({ PI_SKIP_VERSION_CHECK: '1', PI_TELEMETRY: '0' })
+    expect(options.env).toEqual({})
     expect(JSON.stringify(options)).not.toMatch(/API_KEY|access.token|forage-extension\//i)
     await client.stop()
   })

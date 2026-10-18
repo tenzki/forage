@@ -16,6 +16,8 @@ export class VerifiedSources {
     this.urls.add(normalizedSourceUrl(url))
   }
 
+  values(): string[] { return [...this.urls] }
+
   has(url: string): boolean {
     return this.urls.has(normalizedSourceUrl(url))
   }

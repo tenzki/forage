@@ -10,10 +10,10 @@ import { discoverOAuthServerInfo } from '@modelcontextprotocol/client'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { await Promise.all(cleanup.splice(0).map((close) => close())) })
-async function listen(server: Server) {
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+async function listen(server: Server, host = '127.0.0.1') {
+  await new Promise<void>((resolve) => server.listen(0, host, resolve))
   cleanup.push(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()) }))
-  return `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  return `http://${host}:${(server.address() as { port: number }).port}`
 }
 
 async function fixture(options: { unsupported?: boolean; issuerMismatch?: boolean; failure?: number; rotation?: boolean; invalidGrant?: boolean; metadataClient?: boolean; disconnect?: boolean; hang?: boolean; privateIssuer?: boolean; oidc?: boolean; registrationSecret?: 'none' | 'client_secret_post' | 'omitted' } = {}) {
@@ -268,7 +268,7 @@ describe('local MCP OAuth', () => {
     setDefaultAutoSelectFamily(autoSelectFamily)
     try {
       const server = createServer((_request, response) => response.end('metadata'))
-      const origin = (await listen(server)).replace('127.0.0.1', 'localhost')
+      const origin = await listen(server, 'localhost')
       const response = await oauthFetch(`${origin}/mcp`, new AbortController().signal)(`${origin}/metadata`)
       expect(await response.text()).toBe('metadata')
     } finally { setDefaultAutoSelectFamily(previous) }

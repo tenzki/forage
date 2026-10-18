@@ -1,3 +1,4 @@
+import { JournalStorage, type JournalCommit, type Storage } from '@forage/pi-runtime'
 import {
   activityEventSchema,
   hasMcpTools,
@@ -91,7 +92,10 @@ export interface AdmitRunInput {
   conversationBudgetBytes?: number
 }
 
+export interface DurableExecutionStore { storage: Storage; assertOwnership: () => Promise<void> }
+
 export interface AgentStore {
+  openDurableExecution(runId: string, workerId: string): Promise<DurableExecutionStore>
   currentConfiguration(outlineId: string): Promise<PublishedConfiguration | null>
   publishConfiguration(outlineId: string, baseRevision: number, configuration: SupportedAgentConfiguration, publishedBy?: string): Promise<PublishedConfiguration>
   currentComputeProfile(outlineId: string): Promise<PublishedComputeProfile | null>
@@ -134,6 +138,37 @@ interface StoredTurn { runId: string; outlineId: string; entries: unknown[]; ent
 interface StoredRun extends AgentRunRecord { resultIdentity: string | null }
 
 export class InMemoryAgentStore implements AgentStore {
+  private readonly durableCalls = new Map<string, { nonce: symbol; nextId: number; commits: JournalCommit[]; bytes: number }>()
+
+  async openDurableExecution(runId: string, workerId: string): Promise<DurableExecutionStore> {
+    const run = this.requireLease(runId, workerId)
+    const key = `${run.outlineId}:${run.callId ?? run.id}`
+    const saved = this.durableCalls.get(key) ?? { nonce: Symbol(), nextId: 2, commits: [], bytes: 0 }
+    const nonce = Symbol()
+    saved.nonce = nonce
+    this.durableCalls.set(key, saved)
+    const attempt = run.attemptCount
+    const assertOwnership = async () => {
+      const current = this.requireLease(runId, workerId)
+      if (saved.nonce !== nonce || current.attemptCount !== attempt || !current.leaseExpiresAt || Date.parse(current.leaseExpiresAt) <= Date.now()) {
+        throw new AgentStoreError('lease_lost', 'Worker no longer owns durable execution.')
+      }
+    }
+    const storage = await JournalStorage.open({
+      load: async () => { await assertOwnership(); return structuredClone(saved.commits) },
+      mintId: async (minimum) => { await assertOwnership(); saved.nextId = Math.max(saved.nextId, minimum); return saved.nextId++ },
+      append: async (commit) => {
+        await assertOwnership()
+        const bytes = Buffer.byteLength(JSON.stringify(commit.writes))
+        if (saved.bytes + bytes > 32 * 1024 * 1024) throw new AgentStoreError('invalid_state', 'Conversation checkpoint budget exceeded.')
+        if (commit.sequence !== saved.commits.length + 1) throw new AgentStoreError('lease_lost', 'Durable execution was replaced.')
+        saved.commits.push(structuredClone(commit)); saved.bytes += bytes
+      },
+      close: async () => undefined,
+    })
+    return { storage, assertOwnership }
+  }
+
   private readonly configurations = new Map<string, PublishedConfiguration>()
   private readonly automations = new Map<string, PublishedAutomation>()
   private readonly computeProfiles = new Map<string, PublishedComputeProfile>()
@@ -209,7 +244,7 @@ export class InMemoryAgentStore implements AgentStore {
       triggerIdentity: admission.triggerIdentity, input,
       skillId: input.skill.id, policyId: admission.policyId ?? null,
       configurationRevision: input.configurationRevision, credentialReference: input.credentialRef,
-      status: 'queued', attemptCount: 0, maxAttempts: hasMcpTools(input.effectiveToolIds) ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)),
+      status: 'queued', attemptCount: 0, maxAttempts: hasMcpTools(input.effectiveToolIds) && input.runtime !== 'pi-durable' ? 1 : Math.max(1, Math.min(admission.maxAttempts, 20)),
       availableAt: now, leaseOwner: null, leaseExpiresAt: null, cancelRequestedAt: null,
       errorCode: null, retryOfRunId: admission.retryOfRunId ?? null,
       invocationId: admission.invocationId ?? null, intentHash: admission.intentHash ?? null,
@@ -400,6 +435,7 @@ export class InMemoryAgentStore implements AgentStore {
         deleted += 1
       }
       this.turns.delete(key)
+      this.durableCalls.delete(`${outlineId}:${key}`)
     }
     return deleted
   }
@@ -411,6 +447,7 @@ export class InMemoryAgentStore implements AgentStore {
       const active = [...this.runs.values()].some((run) => run.callId === callId && !isTerminal(run.status))
       if (active || latest >= before.toISOString()) continue
       this.turns.delete(callId)
+      for (const key of this.durableCalls.keys()) if (key.endsWith(`:${callId}`)) this.durableCalls.delete(key)
       pruned += turns.size
     }
     return pruned

@@ -28,7 +28,7 @@ describe('createAuthenticatedModelRuntime', () => {
     await expect(runtime.getAuth('openai')).resolves.toMatchObject({
       auth: { apiKey: 'sk-test' },
     })
-    expect(runtime.isUsingOAuth('openai')).toBe(false)
+    expect((await runtime.checkAuth('openai'))?.type).toBe('api_key')
   })
 
   it('resolves ChatGPT authentication as OAuth', async () => {
@@ -44,6 +44,6 @@ describe('createAuthenticatedModelRuntime', () => {
       auth: { apiKey: 'oauth-access' },
       source: 'OAuth',
     })
-    expect(runtime.isUsingOAuth('openai-codex')).toBe(true)
+    expect((await runtime.checkAuth('openai-codex'))?.type).toBe('oauth')
   })
 })

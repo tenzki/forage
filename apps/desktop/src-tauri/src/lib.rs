@@ -14,7 +14,7 @@ pub mod sync_commands;
 //   - plugin-store: persist settings and non-secret credential metadata
 //   - plugin-http:   stream OpenAI requests without webview CORS restrictions
 //   - plugin-opener: open the ChatGPT subscription login page
-//   - plugin-shell:  run the embedded Pi SDK in an isolated Node.js sidecar
+//   - plugin-shell:  run Pi Durable in an isolated Node.js sidecar
 //   - plugin-dialog: pick local extension directories with the native folder picker
 
 /// Webviews that run the app's own pages. Any other webview, such as the link

@@ -360,7 +360,7 @@ async function executeInvocation(
       ? { callId: conversation.callId, turn: conversation.turn }
       : { callId: runId, turn: 1 }
     const input: RunInput = {
-      version: 1, runId, executionMode: 'local', outlineId: identity.outlineId,
+      version: 1, runtime: 'pi-durable', runId, executionMode: 'local', outlineId: identity.outlineId,
       // A reply's prompt is the reply; its source text keeps the call's first prompt.
       source: { nodeId: invocationNodeId, text: followUp ? steering?.basePrompt ?? '' : prompt },
       target: { parentId: invocationNodeId },
@@ -392,7 +392,7 @@ async function executeInvocation(
     })
     controller.signal.throwIfAborted()
     if (!followUp) {
-      localOutputNodeId = insertAiChildUnder(editor, invocationNodeId)
+      localOutputNodeId = insertAiChildUnder(editor, invocationNodeId, `agent-output-${runId}`)
       if (!localOutputNodeId) throw new Error('Could not create live agent output.')
       setAgentActivity(editor, localOutputNodeId, ['Thinking…'])
     }
@@ -434,6 +434,7 @@ async function executeInvocation(
         localOutputNodeId!,
         skill.label,
         result,
+        runId,
       )
       localOutputNodeId = null
     }

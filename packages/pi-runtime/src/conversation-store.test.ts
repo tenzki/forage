@@ -1,181 +1,92 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { SessionManager } from '@earendil-works/pi-coding-agent'
+import { fauxAssistantMessage, fauxText, fauxToolCall } from '@earendil-works/pi-ai'
+import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context'
+import { CONVERSATION_UNAVAILABLE, conversationDirectory, conversationPath, createFileConversationStore, createRehydratedConversation, parseRunThread } from './conversation-store'
+import { runPiTurn, type PiTurnRequest } from './run-turn'
+import { scriptedModel } from './scripted-model.test-support'
 
-import {
-  CONVERSATION_UNAVAILABLE,
-  conversationDirectory,
-  conversationPath,
-  createFileConversationStore,
-  createRehydratedConversation,
-  openConversationTurn,
-  parseRunThread,
-} from './conversation-store'
-
-function userMessage(text: string) {
-  return { role: 'user' as const, content: [{ type: 'text' as const, text }], timestamp: Date.now() }
+function request(turn = 1, runId = `run-${turn}`): PiTurnRequest {
+  return { runId, executionMode: 'local', instructions: [], prompt: turn === 1 ? 'Research tides.' : 'Why?', context: [],
+    effectiveToolIds: [], requiredToolIds: [], thread: { callId: 'call-1', turn } }
 }
+const images = { get: () => undefined }
 
-function assistantMessage(text: string) {
-  return {
-    role: 'assistant' as const,
-    content: [{ type: 'text' as const, text }],
-    api: 'openai-responses', provider: 'openai', model: 'gpt-5.5',
-    usage: {
-      input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: 'stop' as const,
-    timestamp: Date.now(),
-  }
-}
-
-function completeTurn(sessionManager: SessionManager, question: string, answer: string): void {
-  sessionManager.appendMessage(userMessage(question))
-  sessionManager.appendMessage(assistantMessage(answer) as never)
-}
-
-function transcript(sessionManager: SessionManager): string[] {
-  return sessionManager.buildSessionContext().messages.map((message) => {
-    const content = (message as { content: Array<{ type: string; text?: string }> }).content
-    return `${message.role}: ${content.map((part) => part.text ?? '').join('')}`
-  })
-}
-
-describe('call conversation store', () => {
-  let agentDir: string
+describe('durable conversation storage', () => {
   let directory: string
+  beforeEach(() => { directory = mkdtempSync(join(tmpdir(), 'forage-durable-store-')) })
+  afterEach(() => rmSync(directory, { recursive: true, force: true }))
 
-  beforeEach(() => {
-    agentDir = mkdtempSync(join(tmpdir(), 'forage-conversations-'))
-    directory = conversationDirectory(agentDir)
+  it('derives paths only from validated call IDs', () => {
+    expect(conversationDirectory(directory)).toBe(join(directory, 'agent-sessions'))
+    expect(conversationPath(directory, 'call-1')).toBe(join(directory, 'call-1.sqlite'))
+    for (const callId of ['../outside', '/tmp/outside', '', 'a.b', 'a'.repeat(129)]) {
+      expect(() => conversationPath(directory, callId)).toThrow('invalid conversation')
+    }
+    expect(parseRunThread(undefined)).toBeUndefined()
+    expect(() => parseRunThread({ callId: 'valid', turn: 0 })).toThrow('invalid conversation')
   })
 
-  afterEach(() => rmSync(agentDir, { recursive: true, force: true }))
-
-  it('stores a call under agent-sessions/<callId>.jsonl and resumes it on the next turn', () => {
-    const first = openConversationTurn(directory, { callId: 'call-1', turn: 1 })
-    completeTurn(first.sessionManager, 'Task: research tides', 'Tides follow the moon.')
-    expect(first.sessionManager.getSessionFile()).toBe(join(agentDir, 'agent-sessions', 'call-1.jsonl'))
+  it('persists a completed call and resumes it after every connection closes', async () => {
+    const conversation = createFileConversationStore(directory)
+    const first = await scriptedModel([fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: [{ text: 'The moon.' }] }))])
+    await runPiTurn(request(), { ...first, conversation, images })
     expect(existsSync(conversationPath(directory, 'call-1'))).toBe(true)
-
-    const second = openConversationTurn(directory, { callId: 'call-1', turn: 2 })
-    expect(transcript(second.sessionManager)).toEqual([
-      'user: Task: research tides',
-      'assistant: Tides follow the moon.',
-    ])
-    completeTurn(second.sessionManager, 'User follow-up: why?', 'Gravity.')
-
-    const third = openConversationTurn(directory, { callId: 'call-1', turn: 3 })
-    expect(transcript(third.sessionManager)).toHaveLength(4)
+    const second = await scriptedModel([(context) => {
+      expect(JSON.stringify(context.messages)).toContain('The moon.')
+      return fauxAssistantMessage(fauxText('Gravity.'))
+    }])
+    await expect(runPiTurn(request(2), { ...second, conversation: createFileConversationStore(directory), images }))
+      .resolves.toEqual({ type: 'answer', text: 'Gravity.' })
   })
 
-  it('implements the conversation store interface and reports only the entries a resumed turn appended', async () => {
+  it('fails closed when a reply has no readable stored history', async () => {
+    const conversation = createFileConversationStore(directory)
+    await expect(conversation.openTurn({ callId: 'missing', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
+    writeFileSync(join(directory, 'broken.jsonl'), 'not json')
+    await expect(conversation.openTurn({ callId: 'broken', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
+  })
+
+  it('exclusively owns a call until its SQLite connection closes', async () => {
     const store = createFileConversationStore(directory)
     const first = await store.openTurn({ callId: 'call-1', turn: 1 })
-    completeTurn(first.sessionManager, 'Task: research tides', 'Tides follow the moon.')
-    expect(first.appendedEntries().filter((entry) => entry.type === 'message')).toHaveLength(2)
-
-    const second = await store.openTurn({ callId: 'call-1', turn: 2 })
-    expect(transcript(second.sessionManager)).toEqual([
-      'user: Task: research tides',
-      'assistant: Tides follow the moon.',
-    ])
-    expect(second.appendedEntries()).toEqual([])
-    completeTurn(second.sessionManager, 'User follow-up: why?', 'Gravity.')
-    expect(second.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
-
-    await expect(store.openTurn({ callId: 'missing', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
+    try { await expect(store.openTurn({ callId: 'call-1', turn: 1 })).rejects.toThrow(/locked|busy/i) }
+    finally { await first.storage.close(BACKGROUND_CONTEXT) }
+    const next = await store.openTurn({ callId: 'call-1', turn: 1 })
+    await next.close()
   })
 
-  it('fails a reply closed when the conversation is missing or unreadable', () => {
-    expect(() => openConversationTurn(directory, { callId: 'missing', turn: 2 })).toThrow(CONVERSATION_UNAVAILABLE)
-
-    openConversationTurn(directory, { callId: 'call-1', turn: 1 })
-    writeFileSync(conversationPath(directory, 'corrupt'), 'not a session\n')
-    expect(() => openConversationTurn(directory, { callId: 'corrupt', turn: 2 })).toThrow(CONVERSATION_UNAVAILABLE)
-    expect(existsSync(conversationPath(directory, 'missing'))).toBe(false)
+  it('imports a legacy SDK conversation without modifying its source file', async () => {
+    const path = join(directory, 'call-1.jsonl')
+    const legacy = [
+      { type: 'session', version: 3, id: 'old-session' },
+      { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: 'Remember kelp.', timestamp: 1 } },
+      { type: 'message', id: 'a1', parentId: 'u1', message: fauxAssistantMessage('Kelp remembered.') },
+    ].map((entry) => JSON.stringify(entry)).join('\n') + '\n'
+    writeFileSync(path, legacy)
+    // Opening before the import commits simulates an interrupted first upgrade.
+    const interrupted = await createFileConversationStore(directory).openTurn({ callId: 'call-1', turn: 2 })
+    await interrupted.close()
+    const model = await scriptedModel([(context) => {
+      expect(JSON.stringify(context.messages)).toContain('Remember kelp.')
+      return fauxAssistantMessage('Kelp.')
+    }])
+    await expect(runPiTurn(request(2), { ...model, conversation: createFileConversationStore(directory), images }))
+      .resolves.toEqual({ type: 'answer', text: 'Kelp.' })
+    expect(readFileSync(path, 'utf8')).toBe(legacy)
   })
 
-  it('rolls a failed reply back to the last completed turn', () => {
-    const first = openConversationTurn(directory, { callId: 'call-1', turn: 1 })
-    completeTurn(first.sessionManager, 'Task: research tides', 'Tides follow the moon.')
-
-    const failed = openConversationTurn(directory, { callId: 'call-1', turn: 2 })
-    completeTurn(failed.sessionManager, 'User follow-up: cancelled question', 'Partial answer')
-    failed.rollback()
-    failed.rollback()
-
-    const resumed = openConversationTurn(directory, { callId: 'call-1', turn: 2 })
-    expect(transcript(resumed.sessionManager)).toEqual([
-      'user: Task: research tides',
-      'assistant: Tides follow the moon.',
-    ])
-  })
-
-  it('discards a failed first turn and restarts a stale first attempt', () => {
-    const failed = openConversationTurn(directory, { callId: 'call-1', turn: 1 })
-    completeTurn(failed.sessionManager, 'Task: first attempt', 'Partial')
-    failed.rollback()
-    expect(existsSync(conversationPath(directory, 'call-1'))).toBe(false)
-
-    const interrupted = openConversationTurn(directory, { callId: 'call-2', turn: 1 })
-    completeTurn(interrupted.sessionManager, 'Task: interrupted attempt', 'Partial')
-    const retried = openConversationTurn(directory, { callId: 'call-2', turn: 1 })
-    expect(transcript(retried.sessionManager)).toEqual([])
-  })
-
-  it('derives paths only from validated call identity', () => {
-    expect(parseRunThread(undefined)).toBeUndefined()
-    expect(parseRunThread({ callId: 'call-1', turn: 2 })).toEqual({ callId: 'call-1', turn: 2 })
-    for (const thread of [
-      { callId: '../escape', turn: 1 }, { callId: 'a/b', turn: 1 }, { callId: '', turn: 1 },
-      { callId: 'call-1', turn: 0 }, { callId: 'call-1', turn: 1.5 }, { callId: 'call-1' }, null, 'call-1',
-    ]) {
-      expect(() => parseRunThread(thread)).toThrow(/invalid conversation turn/i)
-    }
-    expect(() => conversationPath(directory, '../escape')).toThrow()
-    expect(() => conversationDirectory('')).toThrow(/unavailable/i)
-  })
-
-  describe('rehydrated from stored turns', () => {
-    it('keeps a first turn in memory and reports its entries after the session header', async () => {
-      const conversation = createRehydratedConversation([], { tempRoot: agentDir })
-      const turn = await conversation.store.openTurn({ callId: 'call-1', turn: 1 })
-      completeTurn(turn.sessionManager, 'Task: research tides', 'Tides follow the moon.')
-
-      expect(conversation.appendedEntries().map((entry) => entry.type)).toEqual(['session', 'message', 'message'])
-      expect(turn.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
-      expect(readdirSync(agentDir)).toEqual([])
-      await conversation.dispose()
-    })
-
-    it('resumes the stored turns from a temporary file, reports only new entries, and removes the file', async () => {
-      const first = createRehydratedConversation([], { tempRoot: agentDir })
-      completeTurn((await first.store.openTurn({ callId: 'call-1', turn: 1 })).sessionManager, 'Task: research tides', 'Tides follow the moon.')
-      const stored = JSON.parse(JSON.stringify(first.appendedEntries())) as unknown[]
-
-      const reply = createRehydratedConversation(stored, { tempRoot: agentDir })
-      const turn = await reply.store.openTurn({ callId: 'call-1', turn: 2 })
-      expect(transcript(turn.sessionManager)).toEqual(['user: Task: research tides', 'assistant: Tides follow the moon.'])
-      expect(readdirSync(agentDir)).toHaveLength(1)
-      completeTurn(turn.sessionManager, 'User follow-up: why?', 'Gravity.')
-      expect(reply.appendedEntries().map((entry) => entry.type)).toEqual(['message', 'message'])
-
-      await reply.dispose()
-      await reply.dispose()
-      expect(readdirSync(agentDir)).toEqual([])
-    })
-
-    it('fails a reply closed when the stored transcript is missing or unreadable', async () => {
-      for (const stored of [[], [{ type: 'message' }], [{ type: 'session', version: 3, id: 'x', timestamp: '', cwd: '/' }], ['bad']]) {
-        const conversation = createRehydratedConversation(stored, { tempRoot: agentDir })
-        await expect(conversation.store.openTurn({ callId: 'call-1', turn: 2 })).rejects.toThrow(CONVERSATION_UNAVAILABLE)
-        await conversation.dispose()
-      }
-      expect(readdirSync(agentDir)).toEqual([])
-    })
+  it('captures only the new successful turn for the atomic server settlement contract', async () => {
+    const first = createRehydratedConversation([])
+    await runPiTurn(request(), { ...await scriptedModel([fauxAssistantMessage('The moon.')]), conversation: first.store, images })
+    expect(first.appendedEntries().length).toBeGreaterThan(0)
+    const second = createRehydratedConversation(first.appendedEntries())
+    await runPiTurn(request(2), { ...await scriptedModel([fauxAssistantMessage('Gravity.')]), conversation: second.store, images })
+    const entries = JSON.stringify(second.appendedEntries())
+    expect(entries).toContain('Gravity.')
+    expect(entries).not.toContain('The moon.')
+    await first.dispose(); await second.dispose()
   })
 })

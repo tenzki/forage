@@ -29,7 +29,7 @@ The endpoint contracts are documented by [Anthropic](https://platform.claude.com
 
 ## Compatibility and verification
 
-Local and Pi-engine server execution support all five identities through the pinned Pi 0.84.2 adapters. Legacy-engine servers advertise only OpenAI and ChatGPT. Servers without `supportedProviders` remain readable, but redesigned account/default edits require an upgrade. Unsupported selections and unavailable servers never substitute device accounts or local execution. Workspace disconnect restores the retained local selection without importing server credentials.
+Local and Pi-engine server execution support all five identities through the pinned Pi AI/Durable 1.3.0 adapters. Legacy-engine servers advertise only OpenAI and ChatGPT. Servers without `supportedProviders` remain readable, but redesigned account/default edits require an upgrade. Unsupported selections and unavailable servers never substitute device accounts or local execution. Workspace disconnect restores the retained local selection without importing server credentials.
 
 Model connectivity does not imply every optional tool is usable. Server image generation still requires an OpenAI API-key credential; ChatGPT and other providers do not silently acquire a billed Images API key.
 

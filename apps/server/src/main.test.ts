@@ -16,7 +16,7 @@ function start(version?: string) {
 }
 
 describe('server startup', () => {
-  it('exits before loading the server on a Node.js older than the Pi SDK requires', () => {
+  it('exits before loading the server on a Node.js older than the Pi Durable requires', () => {
     const result = start('22.18.0')
     expect(result.status).toBe(1)
     expect(result.stderr.trim()).toBe('Forage server requires Node.js 22.19.0 or newer to run agents; this is Node.js 22.18.0.')

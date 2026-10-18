@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getProviderModels } from '@forage/pi-runtime/provider-catalog'
-import { probeCodexRuntime, probePiRuntime } from '../../agent/piSdkClient'
+import { probeCodexRuntime, probePiRuntime } from '../../agent/piSidecarClient'
 import { TauriServerAgentTransport } from '../../agent/serverExecutor'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/Button'

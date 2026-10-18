@@ -353,7 +353,7 @@ export class InMemoryServerRepository implements ServerRepository {
         })
       } catch { continue }
       const input: RunInput = {
-        version: 1, runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: this.outlineId,
+        version: 1, runtime: 'pi-durable', runId: `run_${randomUUID()}`, executionMode: 'server', outlineId: this.outlineId,
         source: { nodeId: noteId, text: capture.text, ...(capture.source ? { properties: capture.source } : {}) },
         target: { parentId: noteId }, baseRevision, configurationRevision: configuration.revision,
         credentialRef, computeProfile: structuredClone(compute), agent: resolvedAgent, skill, effectiveToolIds,

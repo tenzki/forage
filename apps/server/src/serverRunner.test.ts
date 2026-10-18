@@ -118,7 +118,7 @@ async function fixture(options: FixtureOptions = {}) {
 }
 
 function emitOutline(nodes: unknown[], sources: Array<{ url: string; label: string }> = []) {
-  return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes, sources }))
+  return fauxAssistantMessage(fauxToolCall('emit_outline', { nodes: nodes as Parameters<typeof fauxToolCall>[1]['nodes'], sources }))
 }
 
 describe('backend MCP execution', () => {

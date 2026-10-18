@@ -142,6 +142,7 @@ impl StorageMode {
 
 pub struct EventStore {
     connection: Mutex<Connection>,
+    agent_recovery_done: std::sync::atomic::AtomicBool,
 }
 
 impl EventStore {
@@ -177,6 +178,7 @@ impl EventStore {
         }
         Ok(Self {
             connection: Mutex::new(connection),
+            agent_recovery_done: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -262,33 +264,14 @@ impl EventStore {
     }
 
     pub fn append(&self, event: &EventRecord) -> StoreResult<i64> {
-        let envelope_json = serde_json::to_string(&event.envelope)
-            .expect("serde_json::Value serialization cannot fail");
-        let connection = self.connection()?;
-        let inserted = connection.execute(
-            "INSERT OR IGNORE INTO outline_events
-             (id, outline_id, base_revision, server_revision, envelope_json, status, superseded_by, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![event.id, event.outline_id, event.base_revision, event.server_revision,
-                envelope_json, event.status, event.superseded_by, event.created_at],
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        append_event(&transaction, event)?;
+        let sequence = transaction.query_row(
+            "SELECT local_sequence FROM outline_events WHERE id = ?1", [&event.id], |row| row.get(0),
         )?;
-        if inserted == 0 {
-            let existing: String = connection.query_row(
-                "SELECT envelope_json FROM outline_events WHERE id = ?1",
-                [&event.id],
-                |row| row.get(0),
-            )?;
-            if existing != envelope_json {
-                return Err(StoreError::EventIdConflict(event.id.clone()));
-            }
-        }
-        connection
-            .query_row(
-                "SELECT local_sequence FROM outline_events WHERE id = ?1",
-                [&event.id],
-                |row| row.get(0),
-            )
-            .map_err(StoreError::from)
+        transaction.commit()?;
+        Ok(sequence)
     }
 
     pub fn commit_rebase(
@@ -1065,7 +1048,11 @@ impl EventStore {
         )?;
         let removed = transaction.execute(
             "DELETE FROM local_agent_runs
-             WHERE outline_id = ?1 AND status <> 'completed_unplaced'",
+             WHERE outline_id = ?1 AND COALESCE(json_extract(snapshot_json, '$.thread.callId'), id) IN (
+               SELECT COALESCE(json_extract(snapshot_json, '$.thread.callId'), id) FROM local_agent_runs
+               WHERE outline_id = ?1 GROUP BY COALESCE(json_extract(snapshot_json, '$.thread.callId'), id)
+               HAVING min(status IN ('completed','failed','cancelled','interrupted')) = 1
+             )",
             [outline_id],
         )?;
         transaction.commit()?;
@@ -1208,10 +1195,13 @@ impl EventStore {
     }
 
     pub fn interrupt_unfinished_agent_runs(&self, interrupted_at: &str) -> StoreResult<usize> {
+        // Outline switches reuse this store. Only process startup can reclaim old attempts.
+        if self.agent_recovery_done.swap(true, std::sync::atomic::Ordering::SeqCst) { return Ok(0); }
         let mut connection = self.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = transaction.execute(
-            "UPDATE local_agent_runs SET status = 'interrupted', error_code = 'desktop_restarted', updated_at = ?1
+            "UPDATE local_agent_runs SET status = CASE WHEN json_extract(snapshot_json, '$.runtime') = 'pi-durable'
+               THEN 'queued' ELSE 'interrupted' END, error_code = 'desktop_restarted', updated_at = ?1
              WHERE status IN ('queued', 'running', 'retry_wait')",
             [interrupted_at],
         )?;
@@ -1335,6 +1325,18 @@ fn append_event(transaction: &Transaction<'_>, event: &EventRecord) -> StoreResu
         )?;
         if existing != envelope_json {
             return Err(StoreError::EventIdConflict(event.id.clone()));
+        }
+    }
+    if event.envelope.get("type").and_then(Value::as_str) == Some("document.steps_applied") {
+        if let Some(run_id) = event.envelope.get("changeGroupId").and_then(Value::as_str)
+            .and_then(|group| group.strip_prefix("agent-result:")) {
+            transaction.execute(
+                "UPDATE local_agent_runs SET status = 'completed', updated_at = ?3
+                 WHERE id = ?1 AND outline_id = ?2 AND status = 'completed_unplaced'
+                   AND result_identity IS NOT NULL AND result_json IS NOT NULL
+                   AND json_extract(snapshot_json, '$.runtime') = 'pi-durable'",
+                params![run_id, event.outline_id, event.created_at],
+            )?;
         }
     }
     Ok(())

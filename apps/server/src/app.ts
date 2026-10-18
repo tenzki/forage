@@ -690,7 +690,7 @@ async function makeRunInput(
   }))
   const runId = `run_${randomUUID()}`
   const input = buildInputFromConfiguration(options, configuration, {
-    version: 1, runId, executionMode: 'server', outlineId: principal.outlineId,
+    version: 1, runtime: 'pi-durable', runId, executionMode: 'server', outlineId: principal.outlineId,
     source: { nodeId: body.sourceNodeId, text: context.sourceText }, target: { parentId: targetParentId },
     baseRevision: context.baseRevision, configurationRevision: configuration.revision, credentialRef,
     computeProfile: compute.profile,

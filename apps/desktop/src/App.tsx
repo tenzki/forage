@@ -1,3 +1,4 @@
+import { recoverLocalAgentRuns } from './agent/localRunRecovery'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Editor } from '@tiptap/react'
 import type { Transaction } from '@tiptap/pm/state'
@@ -198,6 +199,7 @@ export default function App() {
       const run = await session.agentRun(runId)
       if (!run) throw new Error('The retained extension result is no longer available.')
       const nodeIds = await placeRetainedExtensionSkillResult(editor, run, targetNodeId, session)
+      await session.acknowledgeEdits()
       setActivityCalls((calls) => calls.map((call) => call.id === runId
         ? { ...call, placementPending: false, status: 'complete' }
         : call))
@@ -372,12 +374,20 @@ export default function App() {
   useEffect(() => {
     if (!loaded) return
     let disposed = false
-    void session.agentRunHistory().then((history) => {
+    void session.agentRunHistory(200).then((history) => {
       if (disposed || !history.length) return
       setActivityCalls((current) => current.length ? current : callsFromHistory(history))
+      if (canonicalEditor && session.getSnapshot().storageBackend.kind === 'local') void recoverLocalAgentRuns(canonicalEditor, history, {
+        onActivity: handleActivity,
+        registerCancellation: (id, cancel) => {
+          if (cancel) extensionRunCancellations.current.set(id, cancel)
+          else extensionRunCancellations.current.delete(id)
+        },
+        acknowledgeEdits: () => session.acknowledgeEdits(),
+      })
     }).catch(() => undefined)
     return () => { disposed = true }
-  }, [loaded, session])
+  }, [loaded, session, canonicalEditor, handleActivity])
 
   useEffect(() => {
     const editor = canonicalEditor

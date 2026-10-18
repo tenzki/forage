@@ -72,7 +72,7 @@ describe('server configuration', () => {
     expect(() => loadServerConfig({ ...base, FORAGE_AGENT_CONVERSATION_MAX_AGE_DAYS: '0' })).toThrow()
   })
 
-  it('refuses to start on a Node.js older than the Pi SDK requires', () => {
+  it('refuses to start on a Node.js older than the Pi Durable requires', () => {
     expect(() => assertSupportedNodeVersion('22.18.0')).toThrow('Forage server requires Node.js 22.19.0 or newer to run agents; this is Node.js 22.18.0.')
     expect(() => assertSupportedNodeVersion('v20.19.5')).toThrow(/22\.19\.0/)
     expect(() => assertSupportedNodeVersion('18.20.0')).toThrow(/22\.19\.0/)
