@@ -31,7 +31,8 @@
     },
     "forage-sidecar#build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/extensions/**"]
     },
     "test": {
       "cache": false,

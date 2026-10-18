@@ -8,6 +8,8 @@ The remaining presentation references are Diagnostics `aP053`, provider setup `K
 
 ## General
 
+**Getting started** opens or resumes the five-step local setup without replacing your outline. Existing installations enter it explicitly; paused, skipped, and completed setup do not reopen automatically. Server mode explains that guided setup is local-only. See [getting started](onboarding.md) for note editing, AI, extension, and MCP steps.
+
 Theme supports System, Light, and Dark. System follows operating-system appearance changes while the app is open. Outline typography supports the existing default, system, serif, and monospace stacks, with Default or 12, 14, 16, 18, 20, and 24 px sizes. The static nested preview and the real outline share presentation variables; neither preference changes nor the preview create document events, undo entries, or portable agent configuration changes.
 
 Preferences apply immediately and save automatically on this device, in `localSettingsV1` inside `settings.json`. Rapid changes serialize with account mutations and retain the latest selection. Failed persistence retains the visible preference and offers **Retry saving appearance**. Missing or unsupported preference values use compatible defaults. Preferences do not transfer to the server and remain unchanged when switching workspace modes.

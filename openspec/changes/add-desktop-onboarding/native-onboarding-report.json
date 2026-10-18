@@ -1,0 +1,579 @@
+{
+  "passed": true,
+  "platform": "darwin",
+  "timestamp": "2026-10-11T14:18:25.400Z",
+  "flow": {
+    "checks": [
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09A-note",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "brokenGridDetected": true
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "09A-note-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 504,
+        "width": 480
+      },
+      {
+        "detail": "a492808d-2f55-4a40-9283-0ec1092d6de5",
+        "noteId": "ec5784bb-a83b-45ad-abdb-34e335748371"
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09B-provider-form",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 465,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "providerForm-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 465
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 465,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09B-provider-pending",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 465,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "pendingProvider-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 465
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 465,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09C-connected",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 465,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "connectedProvider-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 465
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 555,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09D-command",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "command-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 0,
+        "scans": 0,
+        "scrollHeight": 528,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09D-command-pending",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "pendingCommand-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 528,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09E-result",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "result-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 647,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09F-extensions",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 660,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "extensions-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 647,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09G-extension-configuration",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 1146,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "configureExtension-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 1170,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09H-mcp",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "mcp-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 504,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09I-mcp-url",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 673,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "mcpUrl-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 720,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09J-mcp-command",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 857,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "mcpCommand-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 898,
+        "width": 480
+      },
+      {
+        "bodyHeight": 652,
+        "column": {
+          "left": 200,
+          "width": 560
+        },
+        "height": 728,
+        "label": "09K-complete",
+        "navigation": {
+          "bottom": 728,
+          "top": 652
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 652,
+        "width": 960
+      },
+      {
+        "bodyHeight": 504,
+        "column": {
+          "left": 20,
+          "width": 440
+        },
+        "height": 568,
+        "label": "completion-narrow",
+        "navigation": {
+          "bottom": 568,
+          "top": 504
+        },
+        "runs": 1,
+        "scans": 0,
+        "scrollHeight": 619,
+        "width": 480
+      }
+    ],
+    "passed": true,
+    "persistence": {
+      "events": 6,
+      "noteText": "InboxDaily NotesPlan a useful projectI have one free afternoonSuggest a few ideas for this noteNative onboarding idea edited",
+      "progress": {
+        "compute": {
+          "credentialRef": "local-openai",
+          "modelId": "gpt-5.5",
+          "provider": "openai"
+        },
+        "extensions": [],
+        "invocationId": "3ecbb270-e644-49c7-9ba9-8b3e7e41401f",
+        "mcp": [],
+        "noteId": "ec5784bb-a83b-45ad-abdb-34e335748371",
+        "outlineId": "outline_1b9d5831-afbd-442e-85e0-e829dda7bc39",
+        "runId": "0d637d93-3e4e-485c-9f8a-d94a38faa73c",
+        "skipped": [
+          "extensions",
+          "mcp"
+        ],
+        "status": "paused",
+        "step": "mcp",
+        "version": 1
+      }
+    }
+  },
+  "restart": {
+    "passed": true,
+    "persistence": {
+      "events": 0,
+      "noteText": "InboxDaily NotesPlan a useful projectI have one free afternoonSuggest a few ideas for this noteNative onboarding idea edited",
+      "progress": {
+        "compute": {
+          "credentialRef": "local-openai",
+          "modelId": "gpt-5.5",
+          "provider": "openai"
+        },
+        "extensions": [],
+        "invocationId": "3ecbb270-e644-49c7-9ba9-8b3e7e41401f",
+        "mcp": [],
+        "noteId": "ec5784bb-a83b-45ad-abdb-34e335748371",
+        "outlineId": "outline_1b9d5831-afbd-442e-85e0-e829dda7bc39",
+        "runId": "0d637d93-3e4e-485c-9f8a-d94a38faa73c",
+        "skipped": [
+          "extensions",
+          "mcp"
+        ],
+        "status": "in-progress",
+        "step": "mcp",
+        "version": 1
+      }
+    },
+    "ready": {
+      "resources": "/Users/bojanbabic/Projects/forage/apps/desktop/src-tauri/target/debug/resources/resources/pi/sidecar/dist/management.mjs",
+      "status": "paused",
+      "step": "mcp"
+    }
+  },
+  "activeResume": {
+    "passed": true,
+    "persistence": {
+      "events": 0,
+      "noteText": "InboxDaily NotesPlan a useful projectI have one free afternoonSuggest a few ideas for this noteNative onboarding idea edited",
+      "progress": {
+        "compute": {
+          "credentialRef": "local-openai",
+          "modelId": "gpt-5.5",
+          "provider": "openai"
+        },
+        "extensions": [],
+        "invocationId": "3ecbb270-e644-49c7-9ba9-8b3e7e41401f",
+        "mcp": [],
+        "noteId": "ec5784bb-a83b-45ad-abdb-34e335748371",
+        "outlineId": "outline_1b9d5831-afbd-442e-85e0-e829dda7bc39",
+        "runId": "0d637d93-3e4e-485c-9f8a-d94a38faa73c",
+        "skipped": [
+          "extensions",
+          "mcp"
+        ],
+        "status": "completed",
+        "step": "complete",
+        "version": 1
+      }
+    },
+    "ready": {
+      "resources": "/Users/bojanbabic/Projects/forage/apps/desktop/src-tauri/target/debug/resources/resources/pi/sidecar/dist/management.mjs",
+      "status": "in-progress",
+      "step": "mcp"
+    }
+  },
+  "completedRestart": {
+    "passed": true,
+    "persistence": {
+      "events": 0,
+      "noteText": "InboxDaily NotesPlan a useful projectI have one free afternoonSuggest a few ideas for this noteNative onboarding idea edited",
+      "progress": {
+        "compute": {
+          "credentialRef": "local-openai",
+          "modelId": "gpt-5.5",
+          "provider": "openai"
+        },
+        "extensions": [],
+        "invocationId": "3ecbb270-e644-49c7-9ba9-8b3e7e41401f",
+        "mcp": [],
+        "noteId": "ec5784bb-a83b-45ad-abdb-34e335748371",
+        "outlineId": "outline_1b9d5831-afbd-442e-85e0-e829dda7bc39",
+        "runId": "0d637d93-3e4e-485c-9f8a-d94a38faa73c",
+        "skipped": [
+          "extensions",
+          "mcp"
+        ],
+        "status": "completed",
+        "step": "complete",
+        "version": 1
+      }
+    },
+    "ready": {
+      "resources": "/Users/bojanbabic/Projects/forage/apps/desktop/src-tauri/target/debug/resources/resources/pi/sidecar/dist/management.mjs",
+      "status": "completed",
+      "step": "complete"
+    }
+  }
+}

@@ -151,6 +151,7 @@ describe('OutlineSession opening', () => {
     const opened = await session.open()
 
     expect(opened.storageBackend).toEqual({ kind: 'local' })
+    expect(opened.createdLocalOutline).toBe(true)
     expect(opened.state.doc).toEqual(expect.objectContaining({ type: 'doc' }))
     expect(await opened.history).toEqual({ undo: [], redo: [] })
     expect(session.context()).toMatchObject({

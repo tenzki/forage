@@ -67,6 +67,9 @@ import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { useMotionPresence } from './components/ui/useMotionPresence'
 import { useExtensionStore } from './store/extensionStore'
 import { placeRetainedExtensionSkillResult } from './agent/extensionResultPlacement'
+import { useOnboardingStore, eligibleForAutomaticSetup } from './onboarding/progress'
+import { useOnboarding } from './onboarding/useOnboarding'
+import { OnboardingShell } from './onboarding/OnboardingShell'
 
 /** Delay before the link peek's page webview is created in the background. */
 
@@ -128,6 +131,7 @@ export default function App() {
   const leaveSettings = (action: () => void) => settingsExit.current ? settingsExit.current(action) : action()
   useAppearance()
   const [loaded, setLoaded] = useState(false)
+  const [createdOutline, setCreatedOutline] = useState<boolean | null>(null)
   const [initialContent, setInitialContent] = useState<JsonValue | null>(null)
   const liveDoc = useRef<JsonValue | null>(null)
   const [trash, setTrash] = useState<TrashEntry[]>([])
@@ -166,6 +170,14 @@ export default function App() {
   const handleActivity = useCallback((event: ActivityEvent) => {
     setActivityCalls((current) => applyActivityEvent(current, event))
   }, [])
+  const onboarding = useOnboarding(editor, session, handleActivity)
+  const settingsLoaded = useSettingsStore((state) => state.isLoaded)
+  const settingsLoadError = useSettingsStore((state) => state.error)
+  const hadPriorSettings = useSettingsStore((state) => state.hadPriorSettings)
+  useEffect(() => {
+    if (!loaded || createdOutline === null || !settingsLoaded || settingsLoadError) return
+    void useOnboardingStore.getState().initialize(eligibleForAutomaticSetup({ local: sessionStatus.storageBackend.kind === 'local', createdOutline, hadPriorSettings, settingsError: settingsLoadError }), session.context()?.outlineId).catch(() => undefined)
+  }, [loaded, createdOutline, settingsLoaded, settingsLoadError, hadPriorSettings, sessionStatus.storageBackend.kind, session])
 
   const openActivityNode = useCallback((nodeId: string, contextNodeId?: string) => {
     if (!editor) return
@@ -325,6 +337,7 @@ export default function App() {
     try {
       const opened = await session.open()
       const { state } = opened
+      setCreatedOutline(opened.createdLocalOutline ?? false)
       persistentHistory.current = { undo: [], redo: [] }
       void opened.history.then((loaded) => {
         persistentHistory.current = mergeLoadedHistory(loaded, persistentHistory.current)
@@ -527,6 +540,7 @@ export default function App() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (useOnboardingStore.getState().progress?.status === 'in-progress') return
       const modifier = event.metaKey || event.ctrlKey
       if (modifier && event.key === ',') {
         event.preventDefault()
@@ -552,14 +566,15 @@ export default function App() {
     if (!('__TAURI_INTERNALS__' in window)) return
     let cancelled = false
     void import('@tauri-apps/api/core').then(({ invoke }) => {
-      if (!cancelled) return invoke('workspace_shortcuts_set_active', { active: view === 'outliner' && Boolean(workspace), paneId: workspaceState.activePaneId })
+      if (!cancelled) return invoke('workspace_shortcuts_set_active', { active: view === 'outliner' && Boolean(workspace) && !onboarding.active, paneId: workspaceState.activePaneId })
     }).catch(() => undefined)
     return () => { cancelled = true }
-  }, [workspace, view, workspaceState.activePaneId])
+  }, [workspace, view, workspaceState.activePaneId, onboarding.active])
 
   useEffect(() => {
     if (!workspace) return
     const keyboard = (event: KeyboardEvent) => {
+      if (useOnboardingStore.getState().progress?.status === 'in-progress') return
       const command = commandForKey(event)
       if (!command) return
       // Command-W is always consumed so the last outline cannot close the window.
@@ -571,6 +586,7 @@ export default function App() {
       if (!event.repeat) dispatchPaneCommand(workspace, workspace.getSnapshot().activePaneId, command)
     }
     const native = (event: Event) => {
+      if (useOnboardingStore.getState().progress?.status === 'in-progress') return
       const detail = (event as CustomEvent<{ command: PaneCommand; nativePage?: boolean; sourcePaneId?: string; resourceId?: string }>).detail
       if (!detail || !paneCommands.some(command => command.id === detail.command)) return
       const sourceId = detail.sourcePaneId ?? workspace.getSnapshot().activePaneId
@@ -763,6 +779,7 @@ export default function App() {
     : 'local'
   const storageStatus = sidebarStorageStatus(storageBackend.kind, storageBackendLabel, syncState, Boolean(saveError))
   const overlayEditor = view === 'outliner'
+    && (!onboarding.active || onboarding.progress?.step === 'note' || onboarding.progress?.step === 'command')
     && workspaceState.panes.find(pane => pane.id === workspaceState.activePaneId)?.current.location.kind === 'outline' ? editor : null
 
   function openInbox() {
@@ -791,7 +808,7 @@ export default function App() {
   }
 
   return (
-    <div id="app">
+    <div id="app" data-onboarding={onboarding.active ? 'true' : undefined}>
       {saveError && (
         <div className="persistence-error" role="alert">
           <span><strong>Outline not saved.</strong> {saveError}</span>
@@ -835,10 +852,12 @@ export default function App() {
           storageStatus={storageStatus}
         />
         <section className="outline-workspace">
-          <div className="outline-editor-view" hidden={view !== 'outliner'}>
+          <OnboardingShell controller={onboarding}>
+          <div className="outline-editor-view" hidden={view !== 'outliner' || (onboarding.active && onboarding.progress?.step !== 'note' && onboarding.progress?.step !== 'command')}>
             <WorkspaceStrip workspace={workspace} state={workspaceState}>
             {id => { const pane = workspaceState.panes.find(pane => pane.id === id)!; return workspace && ( pane.current.location.kind === 'outline' ? <OutlinePane
               key={pane.id}
+              minimal={onboarding.active}
               workspace={workspace}
               pane={pane}
               active={workspaceState.activePaneId === pane.id}
@@ -864,7 +883,7 @@ export default function App() {
               onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}
               onFocusCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}>
               {<LinkPeekPane
-                paneId={pane.id} active={workspaceState.activePaneId === pane.id} visible={view === 'outliner'}
+                paneId={pane.id} active={workspaceState.activePaneId === pane.id} visible={view === 'outliner' && !onboarding.active}
                 onOpenRight={href => workspace.openRight(pane.id, { kind: 'web', href, sourceNodeId: pane.current.location.kind === 'web' ? pane.current.location.sourceNodeId : undefined })}
                 paneActions={<PaneActions workspace={workspace} id={pane.id} />}
                 editor={canonicalEditor}
@@ -881,7 +900,7 @@ export default function App() {
             <SlashMenu
               key={`slash-${workspaceState.lastOutlinePaneId}`}
               editor={editor}
-              interactive={Boolean(overlayEditor)}
+              interactive={Boolean(overlayEditor) && !onboarding.active}
               onError={setAgentError}
               onActivity={handleActivity}
               onBeforeServerRun={prepareServerAgentRun}
@@ -894,8 +913,21 @@ export default function App() {
             <TagMenu key={`tag-${workspaceState.lastOutlinePaneId}`} editor={overlayEditor} />
             <InternalLinkMenu key={`link-${workspaceState.lastOutlinePaneId}`} editor={overlayEditor} />
           </div>
+          </OnboardingShell>
           {viewError && <div className="action-error" role="alert">{viewError}<button onClick={() => setViewError(null)}>Dismiss</button></div>}
-          {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} registerExit={(exit) => { settingsExit.current = exit }} />}
+          {view === 'settings' && <SettingsPanel onBack={() => setView('outliner')} registerExit={(exit) => { settingsExit.current = exit }} onboarding={{ available: storageBackend.kind === 'local', onStart: () => void onboarding.act(async () => {
+            if (storageBackend.kind !== 'local') return
+            if (useSettingsStore.getState().error) throw new Error('Restore Settings before starting setup.')
+            const store = useOnboardingStore.getState()
+            if (!store.loaded) await store.initialize(false, session.context()?.outlineId)
+            if (workspace) {
+              const target = outlineTarget(workspace.getSnapshot())
+              workspace.navigate(target.id, { kind: 'outline', nodeId: null })
+              workspace.activate(target.id, false)
+            }
+            await store.update({ status: 'in-progress', ...(store.progress?.status === 'paused' ? {} : { step: 'note' as const }) })
+            setView('outliner')
+          }) }} />}
           {view === 'trash' && editor && (
             <TrashPanel
               editor={editor}

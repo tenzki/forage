@@ -16,6 +16,7 @@ import { skillExecution } from '../src/agent/skillExecution'
 import { LocalAgentExecutor } from '../src/agent/localExecutor'
 import { NativeEventRepository } from '../src/persistence/eventStore'
 import type { LocalRunResult } from '@forage/agent-runtime'
+import { initialProgress, useOnboardingStore } from '../src/onboarding/progress'
 const viewUpdates: number[] = []
 const updateState = EditorView.prototype.updateState
 EditorView.prototype.updateState = function (state) {
@@ -30,7 +31,10 @@ useExtensionStore.setState({
 })
 useMcpStore.setState({ loaded: true, connections: [] })
 disableNativeTextAssistance()
-createRoot(document.getElementById('app')!).render(<App />)
+// This fixture verifies the ordinary workspace of an existing installation.
+void useOnboardingStore.getState().save(initialProgress(false)).then(() => {
+  createRoot(document.getElementById('app')!).render(<App />)
+})
 const sleep = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const require = (ok: unknown, message: string) => {
   if (!ok) throw new Error(message)

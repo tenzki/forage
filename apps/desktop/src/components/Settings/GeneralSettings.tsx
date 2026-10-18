@@ -6,8 +6,11 @@ import { Button } from '../ui/Button'
 import { Select } from '../ui/Field'
 import { SwitchFieldInput } from '../ui/SwitchFieldInput'
 import { SegmentedControl } from '../ui/SegmentedControl'
+import { useOnboardingStore } from '../../onboarding/progress'
 
-export function GeneralSettings({ onDiagnostics }: { onDiagnostics: () => void }) {
+export function GeneralSettings({ onDiagnostics, onboarding }: { onDiagnostics: () => void; onboarding?: { available: boolean; onStart: () => void } }) {
+  const progress = useOnboardingStore(state => state.progress)
+  const setupError = useOnboardingStore(state => state.error)
   const preferences = useSettingsStore((state) => state.devicePreferences)
   const save = useSettingsStore((state) => state.setDevicePreferences)
   const error = useSettingsStore((state) => state.preferenceError)
@@ -20,6 +23,7 @@ export function GeneralSettings({ onDiagnostics }: { onDiagnostics: () => void }
   }, [])
   return <section className="settings-section general-settings" aria-labelledby="general-heading">
     <div className="settings-page-heading"><h2 id="general-heading">General</h2><p className="settings-hint">Make Forage feel at home.</p></div>
+    {onboarding && <section className="settings-block" aria-labelledby="setup-heading"><h3 id="setup-heading">Getting started</h3><p className="settings-hint">{onboarding.available ? 'Write a first note, connect AI, and choose optional extensions and tools.' : 'Guided setup is available in local mode. Your server connection is kept as configured.'}</p><Button className="self-start" disabled={!onboarding.available || !loaded} onClick={onboarding.onStart}>{progress?.status === 'paused' || progress?.status === 'in-progress' ? 'Resume setup' : 'Start setup'}</Button>{setupError && <p className="settings-error" role="alert">{setupError}</p>}</section>}
     <section className="settings-block" aria-labelledby="appearance-heading">
       <h3 id="appearance-heading">Appearance</h3>
       <div className="settings-row-list">

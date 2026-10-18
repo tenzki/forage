@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { cp, copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -73,6 +73,26 @@ function startManagement(configurationRoot: string, entry = path.join(sidecarRoo
 }
 
 describe('real extension management sidecar process', () => {
+  it('registers application-supplied sources from copied resources without repository paths or node_modules', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'forage-supplied-extensions-'))
+    temporaryDirectories.push(root)
+    await cp(path.join(sidecarRoot, 'dist/extensions'), path.join(root, 'resources'), { recursive: true })
+    const management = startManagement(path.join(root, '.forage'), path.join(sidecarRoot, 'dist/management.mjs'))
+    await management.next()
+    for (const id of ['image-generation', 'text-stats', 'system-one']) {
+      const source = { kind: 'local', path: path.join(root, 'resources', id) }
+      const preview = await management.request('preview_install', { source })
+      if (!preview.ok || !preview.preview) throw new Error(JSON.stringify(preview))
+      expect(preview.preview.entry.manifest?.entry).toBe('./dist/index.mjs')
+      const installed = await management.request('install', { source, previewId: preview.preview.previewId })
+      expect(installed).toMatchObject({ ok: true, entry: { status: 'needs_review' } })
+      if (id === 'text-stats') {
+        if (!installed.ok || !installed.entry) throw new Error('Expected an installed bundled source.')
+        const enabled = await management.request('enable', { installationId: installed.entry.source.installationId, trustAccepted: true })
+        expect(enabled).toMatchObject({ ok: true, entry: { status: 'ready' } })
+      }
+    }
+  }, 30_000)
   it('boots the self-contained packaged run and management entries without node_modules', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'forage-packaged-sidecar-'))
     temporaryDirectories.push(root)

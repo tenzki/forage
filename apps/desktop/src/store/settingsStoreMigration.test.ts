@@ -37,6 +37,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('settings store migration', () => {
+  it('captures installation evidence before writing defaults, including empty existing settings', async () => {
+    await useSettingsStore.getState().load()
+    expect(useSettingsStore.getState().hadPriorSettings).toBe(false)
+    useSettingsStore.setState(initial)
+    await useSettingsStore.getState().load()
+    expect(useSettingsStore.getState().hadPriorSettings).toBe(true)
+    fixture.values.clear()
+    fixture.values.set('enabledTools', [])
+    useSettingsStore.setState(initial)
+    await useSettingsStore.getState().load()
+    expect(useSettingsStore.getState().hadPriorSettings).toBe(true)
+  })
   it.each([undefined, null, 'unsupported', { theme: 'neon', outlineFont: 'downloaded-font', outlineFontSize: 100, followSystemMotion: 'yes' }])('uses compatible defaults for unsupported stored preferences: %j', async (preferences) => {
     fixture.values.set(LOCAL_SETTINGS_FIELD, { version: 1, accounts: [], compute: initial.localCompute, preferences })
     await useSettingsStore.getState().load()

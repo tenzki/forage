@@ -63,6 +63,7 @@ export interface OpenedOutline {
   state: OutlineState
   storageBackend: StorageBackend
   history: Promise<PersistentHistoryState>
+  createdLocalOutline?: boolean
 }
 
 const EMPTY_HISTORY: PersistentHistoryState = { undo: [], redo: [] }
@@ -233,7 +234,7 @@ export class OutlineSession {
       ? this.readHistory(activeIdentity)
       : Promise.resolve(EMPTY_HISTORY)
 
-    return { state, storageBackend, history }
+    return { state, storageBackend, history, createdLocalOutline: mode === 'local' && !replay }
   }
 
   private readHistory(identity: LocalIdentity): Promise<PersistentHistoryState> {
@@ -247,6 +248,13 @@ export class OutlineSession {
       this.localSequence,
       identity.deviceId,
     )
+  }
+
+  /** Wait for accepted edits, including retries, before acknowledging setup. */
+  async acknowledgeEdits(): Promise<void> {
+    let accepted: Promise<void>
+    do { accepted = this.appendQueue; await accepted } while (accepted !== this.appendQueue)
+    if (this.persistenceBlocked || this.status.saveError) throw new Error('Your outline could not be saved. Retry saving before continuing.')
   }
 
   backgroundWork(): Promise<void> {

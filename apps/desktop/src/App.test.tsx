@@ -19,6 +19,7 @@ import { getOutlinerUiState, setZoom } from './editor/outlinerUi'
 import { requestInternalNavigation } from './editor/internalLinks'
 import * as pageBridge from './components/Outliner/pagePeek'
 import { requestLinkPeek } from './editor/externalLinks'
+import { initialProgress, useOnboardingStore } from './onboarding/progress'
 
 const nativeMocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 
@@ -56,6 +57,8 @@ async function renderApp() {
 
 describe('App view switching', () => {
   beforeEach(() => {
+    // These regression cases exercise an existing installation's workspace.
+    useOnboardingStore.setState({ progress: initialProgress(false, 'outline-1'), loaded: true, busy: false, error: null })
     vi.clearAllMocks()
     nativeMocks.invoke.mockImplementation(async (command: string) => {
       if (command === 'event_store_identity') {

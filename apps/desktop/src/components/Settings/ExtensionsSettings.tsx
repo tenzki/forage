@@ -193,8 +193,8 @@ function SettingField({ declaration, value, secretConfigured, secretDraft, onCha
   )
 }
 
-function ExtensionDetail({ entry, onBack, onConfigureTools }: {
-  entry: ExtensionCatalogEntry; onBack: () => void; onConfigureTools: () => void
+export function ExtensionDetail({ entry, onBack, onConfigureTools, onEditAgent, onCreateSkill }: {
+  entry: ExtensionCatalogEntry; onBack: () => void; onConfigureTools: () => void; onEditAgent?: (id: string) => void; onCreateSkill?: () => void
 }) {
   const enable = useExtensionStore((state) => state.enable)
   const disable = useExtensionStore((state) => state.disable)
@@ -233,7 +233,7 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
       try { await publishLocalAgentConfiguration() } catch { setError('Tool policy was saved on this device, but not published to the server. Retry publication in Connection.') }
     })} />) : <p className="settings-hint">No agent tools. Use a declared action in a skill, if available.</p>}
     </section>
-    {entry.tools.length > 0 && <section className="extension-agent-access"><h3>Agent access</h3><div className="settings-block">{agents.map((agent) => <div key={agent.id} className="settings-extension-access-row"><div><p>{agent.name}</p><p className="settings-hint settings-footnote">{entry.tools.filter((tool) => agent.toolIds.includes(tool.id)).length} of {entry.tools.length} tools selected</p></div><Button size="sm" onClick={() => navigation ? navigation.open('agents', 'agent', undefined, agent.id) : onConfigureTools()}>Edit {agent.name} tools</Button></div>)}</div>{!agents.length && <p>No agents configured.</p>}<Button variant="ghost" className="settings-text-link" onClick={onConfigureTools}>Manage agents</Button></section>}
+    {entry.tools.length > 0 && <section className="extension-agent-access"><h3>Agent access</h3><div className="settings-block">{agents.map((agent) => <div key={agent.id} className="settings-extension-access-row"><div><p>{agent.name}</p><p className="settings-hint settings-footnote">{entry.tools.filter((tool) => agent.toolIds.includes(tool.id)).length} of {entry.tools.length} tools selected</p></div><Button size="sm" onClick={() => onEditAgent ? onEditAgent(agent.id) : navigation ? navigation.open('agents', 'agent', undefined, agent.id) : onConfigureTools()}>Edit {agent.name} tools</Button></div>)}</div>{!agents.length && <p>No agents configured.</p>}<Button variant="ghost" className="settings-text-link" onClick={onConfigureTools}>Manage agents</Button></section>}
     <section className="settings-divider"><h3>Use in a skill</h3>{declaredExecutors(entry).length ? declaredExecutors(entry).map((executor) => {
       const option = executors.find((candidate) => candidate.extensionId === declaration?.id && candidate.executorId === executor.id)
       return <div key={executor.id} className="settings-extension-executor"><div><strong>{executor.name}</strong><p className="settings-hint settings-footnote">{executor.description}</p>{!option?.available && <p className="settings-hint settings-footnote">{option?.unavailableReason ?? 'Requires configuration before running.'}</p>}</div><Button aria-label={`Create skill using ${executor.name}`} disabled={!declaration || !option?.available || busy} onClick={() => {
@@ -244,6 +244,7 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
         if (navigation) navigation.requestLeave(create); else create()
       }}>Create skill</Button></div>
     }) : <p className="settings-hint">No skill actions declared.</p>}</section>
+    {onCreateSkill && <Button disabled={busy || !loaded} onClick={onCreateSkill}>Create AI command</Button>}
     <details><summary>Extension details</summary>
       <dl className="m-0 flex flex-col"><DefinitionRow term="Identity">{declaration?.id ?? 'Unavailable'}</DefinitionRow><DefinitionRow term="Source" mono={false}>{sourceLabel(entry)}</DefinitionRow><DefinitionRow term="Revision">{entry.provenance?.sourceRevision ?? 'Unavailable'}</DefinitionRow><DefinitionRow term="Compatibility" mono={false}>{declaration ? 'Current Forage extension contract; readiness remains gated by status.' : 'Invalid or missing manifest'}</DefinitionRow><DefinitionRow term="Lifecycle hooks" mono={false}>{declaration?.contributes.hooks.join(', ') || 'No hooks declared.'}</DefinitionRow></dl>
       <Callout tone="caution" title="Trusted local code"><p>Enabling runs Node.js code with your user permissions, including access to files, network, and supplied values. Tool switches are not a sandbox and do not disable lifecycle hooks.</p></Callout>
@@ -266,7 +267,7 @@ function ExtensionDetail({ entry, onBack, onConfigureTools }: {
   </section>
 }
 
-function InstallPreviewCard({ preview, busy, onBack, onInstall }: {
+export function InstallPreviewCard({ preview, busy, onBack, onInstall }: {
   preview: InstallPreview
   busy: boolean
   onBack: () => void

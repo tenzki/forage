@@ -12,6 +12,8 @@
     "build:workspace-verify": "tsc -p tsconfig.workspace-verify.json && vite build --config vite.workspace-verify.config.ts",
     "test:workspace-native": "node scripts/verify-workspace.mjs",
     "test:workspace-layout": "FORAGE_WORKSPACE_LAYOUT_ONLY=1 node scripts/verify-workspace.mjs",
+    "build:onboarding-verify": "tsc -p tsconfig.workspace-verify.json && vite build --config vite.onboarding-verify.config.ts",
+    "test:onboarding-native": "node scripts/verify-onboarding.mjs",
     "test:pane-resources": "node scripts/verify-pane-resources.mjs",
     "test:pane-shortcuts": "node scripts/verify-pane-shortcuts.mjs",
     "test:pane-clipping": "node scripts/verify-pane-clipping.mjs",

@@ -39,12 +39,12 @@ function Candidate({ candidate, onConnected }: { candidate: McpCandidate; onConn
   </div>
 }
 
-export function McpDiscoveredConnections({ onConnected }: { onConnected: (connection: McpConnection) => void }) {
+export function McpDiscoveredConnections({ onConnected, scanOnMount = true }: { onConnected: (connection: McpConnection) => void; scanOnMount?: boolean }) {
   const { discovery, scanning, discoveryError, busy, scanConnections, connections } = useMcpStore()
   const candidates = discovery?.candidates.filter((candidate) => !connections.some((connection) => connection.discoveryId === candidate.id)) ?? []
-  useEffect(() => { void useMcpStore.getState().scanConnections().catch(() => undefined) }, [])
+  useEffect(() => { if (scanOnMount) void useMcpStore.getState().scanConnections().catch(() => undefined) }, [scanOnMount])
   return <div className="settings-block settings-divider" aria-labelledby="mcp-found-heading">
-    <div className="settings-page-heading"><h3 id="mcp-found-heading">Detected on this computer · {candidates.length}</h3><Button disabled={scanning || busy} onClick={() => void scanConnections().catch(() => undefined)}>Scan again</Button></div>
+    <div className="settings-page-heading"><h3 id="mcp-found-heading">Detected on this computer · {candidates.length}</h3><Button disabled={scanning || busy} onClick={() => void scanConnections().catch(() => undefined)}>{discovery ? 'Scan again' : 'Find existing connections'}</Button></div>
     <p className="settings-hint">Connect servers you already use in other apps.</p>
     {scanning && <p role="status" className="settings-hint">Looking for MCP connections…</p>}
     {discoveryError && <p role="alert" className="settings-error">{mcpSettingsError(new Error(discoveryError), 'Could not scan device configurations. Existing connections remain available; try Scan again or Add server.')}</p>}

@@ -10,6 +10,7 @@ import type { WorkspaceController } from './WorkspaceController'
 import type { OutlineShortcut, TrashEntry } from '../types/tree'
 
 interface Props {
+  minimal?: boolean
   workspace: WorkspaceController
   pane: WorkspacePane
   active: boolean
@@ -31,7 +32,7 @@ interface Props {
   onOpenDailyNotes: () => void
   onOpenTasks: () => void
 }
-export function OutlinePane({ workspace, pane, active, globalTarget, onReady, ...chrome }: Props) {
+export function OutlinePane({ workspace, pane, active, globalTarget, onReady, minimal = false, ...chrome }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [, setRevision] = useState(0)
@@ -46,11 +47,11 @@ export function OutlinePane({ workspace, pane, active, globalTarget, onReady, ..
   }, [workspace, pane.id, editor, onReady])
   const target = pane.current.location.kind === 'outline' ? pane.current.location.nodeId : null
   const missing = Boolean(target && editor && !findBullet(editor.state.doc, target))
-  return <section className="workspace-outline-pane" data-pane-id={pane.id} style={{ flexBasis: pane.width }}
+  return <section className="workspace-outline-pane" data-pane-id={pane.id} data-onboarding-editor={minimal && globalTarget ? 'true' : undefined} style={{ flexBasis: pane.width }}
     aria-label={target ? `Outline pane ${editor && findBullet(editor.state.doc, target)?.text || 'Unavailable'}` : 'Home outline pane'}
     onPointerDownCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}
     onFocusCapture={event => { if (!(event.target as Element).closest('[data-preserve-pane-focus]')) workspace.activate(pane.id, false) }}>
-    <OutlinerChrome editor={editor} active={active} globalTarget={globalTarget} paneActions={<PaneActions workspace={workspace} id={pane.id} />} {...chrome} />
+    {!minimal && <OutlinerChrome editor={editor} active={active} globalTarget={globalTarget} paneActions={<PaneActions workspace={workspace} id={pane.id} />} {...chrome} />}
     <div className="workspace-pane-scroll" ref={scroller} onScroll={event => workspace.scroll(pane.id, event.currentTarget.scrollTop)}>
       {missing && <div className="pane-unavailable" role="status">
         <p>This item is unavailable.</p>
@@ -60,7 +61,7 @@ export function OutlinePane({ workspace, pane, active, globalTarget, onReady, ..
       </div>}
       <div hidden={missing}>
         <OutlinerEditor coordinator={workspace.document} paneId={pane.id} onReady={ready} onUndo={chrome.onUndo} onRedo={chrome.onRedo} />
-        {editor && <BacklinksPanel editor={editor} />}
+        {editor && !minimal && <BacklinksPanel editor={editor} />}
       </div>
     </div>
   </section>

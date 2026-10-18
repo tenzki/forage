@@ -33,7 +33,7 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function SettingsPanel({ onBack, registerExit }: { onBack: () => void; registerExit?: (exit: ((action?: () => void) => void) | null) => void }) {
+export function SettingsPanel({ onBack, registerExit, onboarding }: { onBack: () => void; registerExit?: (exit: ((action?: () => void) => void) | null) => void; onboarding?: { available: boolean; onStart: () => void } }) {
   const enabledToolIds = useSettingsStore((state) => state.enabledToolIds)
   const customTools = useSettingsStore((state) => state.customTools)
   const isLoaded = useSettingsStore((state) => state.isLoaded)
@@ -145,7 +145,7 @@ export function SettingsPanel({ onBack, registerExit }: { onBack: () => void; re
         </nav>
         <div className={`settings-content${activeView === 'agents' && !navigation.route.page ? ' settings-agent-overview' : ''}`}>
         {navigation.route.page && navigation.route.page !== 'extension' && <SettingsBackLink label={settingsSections.find((section) => section.id === activeView)!.label} onBack={navigation.back} />}
-        {activeView === 'general' && (navigation.route.page === 'diagnostics' ? <DiagnosticsSettings onConnection={() => navigation.select('connection')} /> : <GeneralSettings onDiagnostics={() => navigation.open('general', 'diagnostics')} />)}
+        {activeView === 'general' && (navigation.route.page === 'diagnostics' ? <DiagnosticsSettings onConnection={() => navigation.select('connection')} /> : <GeneralSettings onDiagnostics={() => navigation.open('general', 'diagnostics')} onboarding={onboarding} />)}
 
         <section hidden={activeView !== 'connection'} className="settings-section" aria-labelledby="connection-heading">
         <h2 id="connection-heading" className="sr-only">Connection</h2>

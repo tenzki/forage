@@ -123,6 +123,7 @@ interface SettingsState {
   agents: AgentDefinition[]
   skills: SkillDefinition[]
   isLoaded: boolean
+  hadPriorSettings: boolean
   error: string | null
   load: () => Promise<void>
   connectApiKey: (provider: ApiKeyProvider, key: string, signal?: AbortSignal) => Promise<void>
@@ -256,6 +257,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   agents: copyDefaultAgents(),
   skills: copyDefaultSkills(),
   isLoaded: false,
+  hadPriorSettings: true,
   error: null,
 
   connectApiKey: async (provider, key, signal) => updateAccount(async () => {
@@ -320,6 +322,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         store.get<unknown>(LOCAL_SETTINGS_FIELD),
       ])
       const customTools = validCustomTools(storedTools)
+      const hadPriorSettings = [authMode, openAiApiKey, oauthCredential, storedCredentials, modelId, enabledTools, storedTools, storedAgents, storedSkills, storedLocalSettings].some((value) => value !== undefined && value !== null)
       const agents = validAgents(storedAgents, toolOptions(customTools))
       const skills = validSkills(storedSkills, agents)
       if (storedLocalSettings !== undefined && storedLocalSettings !== null) localSettingsSchema.parse(storedLocalSettings)
@@ -352,6 +355,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         agents,
         skills,
         isLoaded: true,
+        hadPriorSettings,
         error: null,
       })
     } catch (error) {
