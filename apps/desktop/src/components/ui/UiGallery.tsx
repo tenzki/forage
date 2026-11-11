@@ -181,7 +181,7 @@ export function UiGallery() {
             <ListRow leading={<Puzzle />} title="Text Stats" description="0.1.0 · Local folder" meta="1 tool · 1 executor · 2 hooks" status={<StatusPill tone="success" icon={false}>Enabled</StatusPill>} onClick={() => undefined} />
           </div>
           <dl className="m-0 flex flex-col">
-            <DefinitionRow term="Identity">app.forage.system-one</DefinitionRow>
+            <DefinitionRow term="Identity">app.forage.text-stats</DefinitionRow>
             <DefinitionRow term="Source" mono={false}>Local folder</DefinitionRow>
           </dl>
           <div>

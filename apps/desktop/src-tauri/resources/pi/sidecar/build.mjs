@@ -4,7 +4,8 @@ import { build } from 'vite'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
-const supplied = { 'image-generation': 'image-generation', 'text-stats': 'reference', 'system-one': 'system-one' }
+const extensionsRoot = path.resolve(root, '../../../../../../extensions')
+const supplied = JSON.parse(await readFile(path.join(extensionsRoot, 'supplied.json'), 'utf8'))
 
 await build({
   root,
@@ -44,19 +45,19 @@ await build({
 
 // Read-only application sources, included in the existing sidecar resource bundle.
 // Choosing them in setup never imports or registers their code.
-for (const [id, directory] of Object.entries(supplied)) {
+for (const { key: id, directory } of supplied) {
   const destination = path.join(root, 'dist/extensions', id)
   await build({
     root, configFile: false, publicDir: false, logLevel: 'warn', ssr: { noExternal: true },
     build: {
       ssr: true, target: 'node22.19', outDir: path.join(destination, 'dist'), emptyOutDir: true, minify: false,
       rollupOptions: {
-        input: path.resolve(root, '../../../../../../extensions', directory, 'src/index.ts'),
+        input: path.join(extensionsRoot, directory, 'src/index.ts'),
         output: { entryFileNames: 'index.mjs', chunkFileNames: 'chunks/[name]-[hash].mjs' },
       },
     },
   })
-  const manifest = JSON.parse(await readFile(path.resolve(root, '../../../../../../extensions', directory, 'forage.extension.json'), 'utf8'))
+  const manifest = JSON.parse(await readFile(path.join(extensionsRoot, directory, 'forage.extension.json'), 'utf8'))
   manifest.entry = './dist/index.mjs'
   await mkdir(destination, { recursive: true })
   await writeFile(path.join(destination, 'forage.extension.json'), `${JSON.stringify(manifest, null, 2)}\n`)

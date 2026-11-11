@@ -159,6 +159,7 @@ export class InMemoryServerRepository implements ServerRepository {
   private readonly credentialAvailable: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
   private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
   private readonly agentMaxAttempts: number
+  private readonly onAutomationError?: (error: unknown) => void
 
   constructor(options: {
     instanceId?: string
@@ -167,6 +168,7 @@ export class InMemoryServerRepository implements ServerRepository {
     credentialAvailable?: (ownerId: string, outlineId: string, credentialId: string) => Promise<boolean>
     dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
     agentMaxAttempts?: number
+    onAutomationError?: (error: unknown) => void
   } = {}) {
     this.instanceId = options.instanceId ?? `instance_${randomUUID()}`
     this.agentStore = new InMemoryAgentStore()
@@ -175,6 +177,7 @@ export class InMemoryServerRepository implements ServerRepository {
     this.credentialAvailable = options.credentialAvailable ?? (async () => false)
     this.dispatcherForAgent = options.dispatcherForAgent
     this.agentMaxAttempts = options.agentMaxAttempts ?? 3
+    this.onAutomationError = options.onAutomationError
   }
 
   async ready(): Promise<boolean> { return true }
@@ -295,7 +298,10 @@ export class InMemoryServerRepository implements ServerRepository {
     const eventId = `event_${randomUUID()}`
     const createdAt = new Date().toISOString()
     const automaticRuns = parentId === canonicalInbox.id
-      ? await this.automaticAdmissions(noteId, input, this.revision + 1)
+      ? await this.automaticAdmissions(noteId, input, this.revision + 1).catch((error: unknown) => {
+        this.onAutomationError?.(error)
+        return []
+      })
       : []
     const event = parseEventEnvelope({
       id: eventId, outlineId: principal.outlineId, actorId: principal.ownerId,

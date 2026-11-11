@@ -220,6 +220,17 @@ export class PostgresAgentStore implements AgentStore {
   async claimNext(workerId: string, now: Date, leaseMs: number): Promise<AgentRunRecord | null> {
     return this.transaction(async (client) => {
       await client.query(
+        `WITH swept AS (
+           UPDATE agent_runs SET status = 'cancelled', error_code = NULL, lease_owner = NULL,
+             lease_expires_at = NULL, updated_at = $1
+           WHERE status = 'running' AND lease_expires_at <= $1 AND cancel_requested_at IS NOT NULL
+           RETURNING id, attempt_count
+         )
+         UPDATE agent_run_attempts attempt SET status = 'cancelled', finished_at = $1
+         FROM swept WHERE attempt.run_id = swept.id AND attempt.attempt_number = swept.attempt_count
+           AND attempt.status = 'running'`, [now],
+      )
+      await client.query(
         `UPDATE agent_runs SET status = 'failed', error_code = 'attempts_exhausted', lease_owner = NULL,
           lease_expires_at = NULL, updated_at = $1
          WHERE status = 'running' AND lease_expires_at <= $1 AND attempt_count >= max_attempts`, [now],

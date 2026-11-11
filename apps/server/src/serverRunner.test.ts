@@ -316,6 +316,21 @@ describe('server agent runner on the legacy engine', () => {
 })
 
 describe('server agent worker', () => {
+  it('reports a run execution that rejects instead of leaving the rejection unhandled', async () => {
+    const run = { id: 'run-rejected' }
+    const store = { claimNext: vi.fn().mockResolvedValueOnce(run).mockResolvedValue(null) }
+    const onError = vi.fn()
+    const worker = new ServerAgentWorker({
+      store: store as never, runner: { execute: vi.fn(async () => { throw new Error('store unreachable') }) } as never,
+      workerId: 'worker', concurrency: 1, pollMs: 60_000, leaseMs: 30_000, onError,
+    })
+    expect(await worker.tick()).toBe(1)
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'store unreachable' }), run))
+    // The slot is released, so the worker keeps claiming.
+    expect(await worker.tick()).toBe(0)
+    expect(store.claimNext).toHaveBeenCalledTimes(2)
+  })
+
   it('wakes a sleeping worker immediately for graceful shutdown', async () => {
     vi.useFakeTimers()
     const store = { claimNext: vi.fn(async () => null) }

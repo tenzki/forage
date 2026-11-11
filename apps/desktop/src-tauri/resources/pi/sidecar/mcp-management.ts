@@ -2,9 +2,10 @@
 import { mcpServerConfigSchema } from '@forage/agent-runtime'
 import { discoverMcp } from '@forage/mcp-host'
 import { discoverConfiguredMcp, resolveConfiguredMcp } from '@forage/mcp-host/discovery'
+import { scrubModelCredentialEnvironment } from './credential-env'
 
 // One bounded request per process. No model runtime or model credentials are needed.
-for (const name of ['AI_CHAT_API_KEY', 'AI_CHAT_ACCOUNT_ID', 'AI_CHAT_OAUTH_EXPIRES', 'OPENAI_API_KEY', 'OPENAI_ACCESS_TOKEN', 'ANTHROPIC_API_KEY']) delete process.env[name]
+scrubModelCredentialEnvironment()
 let buffer = ''
 let started = false
 const controller = new AbortController()

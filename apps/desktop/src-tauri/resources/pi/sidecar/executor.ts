@@ -5,13 +5,11 @@ import {
   forageConfigurationRoot,
   type AdmittedExtensionExecutorRun,
 } from '@forage/extension-host'
+import { scrubModelCredentialEnvironment } from './credential-env'
 import { createSidecarExtensionExecutorProcess } from './executor-process'
 
 const MAX_LINE = 2_000_000
-for (const name of [
-  'AI_CHAT_PROVIDER', 'AI_CHAT_API_KEY', 'AI_CHAT_ACCOUNT_ID', 'AI_CHAT_MODEL_ID', 'AI_CHAT_OAUTH_EXPIRES',
-  'OPENAI_API_KEY', 'OPENAI_ACCESS_TOKEN', 'ANTHROPIC_API_KEY',
-]) delete process.env[name]
+scrubModelCredentialEnvironment()
 
 const host = new ExtensionExecutorHost(createSidecarExtensionExecutorProcess())
 const admissions = new Map<string, AdmittedExtensionExecutorRun>()

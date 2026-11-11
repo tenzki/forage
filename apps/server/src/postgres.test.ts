@@ -507,6 +507,114 @@ describePostgres('PostgreSQL server repository', () => {
     await expect(repository.commitAgentResult('run-cancel', 'worker', structured)).rejects.toThrow(/cancellation/i)
     expect(await repository.agentStore.getRun(bootstrap.outlineId, 'run-cancel')).toMatchObject({ status: 'running' })
   })
+  it('settles a cancelled run whose worker died once its lease expires', async () => {
+    const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
+    const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
+    const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
+      encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 10).toString('base64') }],
+    })
+    const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
+    await repository.agentStore.admitRun({
+      ownerId: bootstrap.ownerId, trigger: 'manual', triggerIdentity: 'manual:abandoned', maxAttempts: 2,
+      input: {
+        version: 1, runId: 'run-abandoned', executionMode: 'server', outlineId: bootstrap.outlineId,
+        source: { nodeId: bootstrap.inboxId, text: 'Source' }, target: { parentId: bootstrap.inboxId },
+        baseRevision: 0, configurationRevision: 1, credentialRef: credential.id,
+        agent: { id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: [] },
+        skill: { id: 'skill', label: 'skill', description: 'Skill', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] },
+        effectiveToolIds: [], prompt: 'Run.', context: [],
+      },
+    })
+    const claimAt = new Date(Date.now() + 1_000)
+    expect(await repository.agentStore.claimNext('worker-dead', claimAt, 1_000)).toMatchObject({ id: 'run-abandoned' })
+    await repository.agentStore.requestCancellation(bootstrap.outlineId, 'run-abandoned', claimAt)
+    // The dead worker never settles; the next claim after lease expiry must.
+    expect(await repository.agentStore.claimNext('worker-live', new Date(claimAt.getTime() + 5_000), 1_000)).toBeNull()
+    expect(await repository.agentStore.getRun(bootstrap.outlineId, 'run-abandoned')).toMatchObject({
+      status: 'cancelled', attemptCount: 1, leaseOwner: null,
+    })
+    const attempts = await pool.query<{ status: string }>(`SELECT status FROM agent_run_attempts WHERE run_id = 'run-abandoned'`)
+    expect(attempts.rows).toEqual([{ status: 'cancelled' }])
+  })
+
+  it('keeps an Inbox capture and releases the outline when the automation dispatcher fails', async () => {
+    const failures: unknown[] = []
+    let outlineLockedDuringDispatch: boolean | null = null
+    const repository = new PostgresServerRepository(pool, {
+      instanceId: 'instance-test',
+      dispatcherForAgent: async ({ outlineId }) => {
+        // The dispatcher calls a model; the capture transaction must already be committed.
+        const probe = await pool.query('SELECT id FROM outlines WHERE id = $1 FOR UPDATE SKIP LOCKED', [outlineId])
+        outlineLockedDuringDispatch = probe.rowCount === 0
+        throw new Error('provider unavailable')
+      },
+      onAutomationError: (error) => failures.push(error),
+    })
+    const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
+    const device = requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'agents:manage'))
+    const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
+      encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 11).toString('base64') }],
+    })
+    const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
+    await repository.agentStore.publishConfiguration(bootstrap.outlineId, 0, {
+      version: 1, revision: 1,
+      agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: [], credentialRef: credential.id }],
+      skills: [{ id: 'research', label: 'research', description: 'Research', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] }],
+      customTools: [], globallyEnabledToolIds: [],
+    }, device.tokenId)
+    await repository.agentStore.publishComputeProfile(bootstrap.outlineId, 0, {
+      version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef: credential.id,
+    }, device.tokenId)
+    await repository.agentStore.publishAutomation(bootstrap.outlineId, 0, {
+      version: 1, revision: 1, enabled: true, policies: [{
+        id: 'dispatch', name: 'Dispatch', enabled: true, priority: 1, match: { urlTypes: ['webpage'] },
+        skillIds: ['research'], dispatcher: { enabled: true, agentId: 'agent', allowedSkillIds: ['research'] },
+      }],
+    }, device.tokenId)
+    const api = requireBoundOutline(await repository.authenticate(bootstrap.apiToken, 'notes:create'))
+    const created = await repository.createNote(api, 'capture', { text: 'https://example.com/post' })
+    expect(await repository.currentRevision(bootstrap.outlineId)).toBe(created.response.revision)
+    expect(outlineLockedDuringDispatch).toBe(false)
+    expect(failures).toHaveLength(1)
+    expect(await repository.agentStore.listRuns(bootstrap.outlineId, 10)).toEqual([])
+  })
+
+  it('commits agent output while captures race it without deadlocking', async () => {
+    const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
+    const bootstrap = await bootstrapSeeded(repository, 'owner@test.invalid')
+    const service = new ServerCredentialService(new PostgresProviderCredentialStore(pool), {
+      validateApiKey: async () => undefined,
+      encryptionKeys: [{ version: 1, keyBase64: Buffer.alloc(32, 13).toString('base64') }],
+    })
+    const credential = await service.enrollApiKey(bootstrap.ownerId, bootstrap.outlineId, 'sk-a-very-long-secret-api-key')
+    const api = requireBoundOutline(await repository.authenticate(bootstrap.apiToken, 'notes:create'))
+    const structured = { version: 1 as const, nodes: [{ type: 'text' as const, text: 'Agent result' }], sources: [] }
+    const rounds = 6
+    for (let round = 0; round < rounds; round += 1) {
+      const runId = `run-race-${round}`
+      await repository.agentStore.admitRun({
+        ownerId: bootstrap.ownerId, trigger: 'manual', triggerIdentity: `manual:race:${round}`, maxAttempts: 2,
+        input: {
+          version: 1, runId, executionMode: 'server', outlineId: bootstrap.outlineId,
+          source: { nodeId: bootstrap.inboxId, text: 'Source' }, target: { parentId: bootstrap.inboxId },
+          baseRevision: 0, configurationRevision: 1, credentialRef: credential.id,
+          agent: { id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: [] },
+          skill: { id: 'skill', label: 'skill', description: 'Skill', systemPrompt: 'Write.', agentId: 'agent', requiredToolIds: [] },
+          effectiveToolIds: [], prompt: 'Run.', context: [],
+        },
+      })
+      await repository.agentStore.claimNext('worker', new Date(Date.now() + 1_000), 30_000)
+      await Promise.all([
+        repository.commitAgentResult(runId, 'worker', structured),
+        repository.createNote(api, `race-a-${round}`, { text: `Capture A ${round}` }),
+        repository.createNote(api, `race-b-${round}`, { text: `Capture B ${round}` }),
+      ])
+    }
+    expect(await repository.currentRevision(bootstrap.outlineId)).toBe(rounds * 3)
+  })
+
   it('notifies subscribers when any process advances the outline revision', async () => {
     const repository = new PostgresServerRepository(pool, { instanceId: 'instance-test' })
     const bootstrap = await bootstrapSeeded(repository)

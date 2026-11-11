@@ -137,7 +137,7 @@ curl --request POST https://notes.example.com/api/v1/notes \
 
 With no `parentId`, the server resolves the current canonical Inbox role for every request. A supplied parent must be an existing non-deleted stable note ID. HTML, ProseMirror JSON, nested children, and asset data are rejected. A successful response is `201 Created` and contains `noteId`, `eventId`, authoritative `revision`, resolved `parentId`, origin, and timestamp. Optional source provenance remains in the immutable event.
 
-The response remains synchronous and backward compatible when agent automation is enabled. A matching Inbox capture admits background runs in the same database transaction, but the request does not wait for enrichment. Provider failures never remove the original capture.
+The response remains synchronous and backward compatible when agent automation is enabled. A capture that matches a rule-based policy admits its background runs in the same database transaction. A policy that delegates skill selection to a dispatcher model is resolved after the capture commits, so the model call holds no outline lock; the response waits for that classification (at most 15 seconds) but not for enrichment. Provider failures never remove the original capture: a failed dispatcher admits no runs and is logged.
 
 For the system share-sheet workflow, see [Capture to Inbox with Apple Shortcuts](apple-shortcuts-capture.md). It uses this endpoint and requires server mode; Forage does not bundle a native macOS share extension.
 

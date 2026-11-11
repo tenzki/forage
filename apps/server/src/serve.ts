@@ -47,6 +47,7 @@ const repository = new PostgresServerRepository(pool, {
     const credential = await credentialService.resolve(agent.credentialRef, ownerId, outlineId)
     return config.agent.engine === 'pi' ? new PiDispatcherClassifier(credential, agent.modelId) : new OpenAIResponsesDispatcherClassifier({ credential, modelId: agent.modelId })
   },
+  onAutomationError: (error) => app.log.error({ error }, 'Inbox automation dispatcher failed; the capture was kept'),
 })
 await repository.reconcileNoteProjections()
 const outlineChangeNotifier = new PostgresOutlineChangeNotifier(
@@ -94,6 +95,7 @@ const worker = new ServerAgentWorker({
   store: repository.agentStore, runner, workerId,
   concurrency: config.agent.worker.concurrency, pollMs: config.agent.worker.pollMs,
   leaseMs: config.agent.worker.leaseSeconds * 1_000,
+  onError: (error, run) => app.log.error({ error, runId: run.id }, 'Agent run did not settle; its lease will expire'),
 })
 
 // Finished call transcripts past the age limit are deleted; replies to those calls then start over.

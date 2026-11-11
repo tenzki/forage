@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { AutomationPolicySet } from '@forage/protocol'
-import { matchAutomationPolicies, resolveAutomationMatches, runBoundedDispatcher } from './automation'
+import {
+  automationNeedsDispatcher, captureFacts, matchAutomationPolicies, resolveAutomationMatches, runBoundedDispatcher,
+} from './automation'
 
 const policies: AutomationPolicySet = {
   version: 1,
@@ -62,6 +64,21 @@ describe('Inbox automation policy matching', () => {
   it('returns no work when the policy set is absent or globally disabled', () => {
     expect(matchAutomationPolicies(null, { source: {}, urls: [] })).toEqual([])
     expect(matchAutomationPolicies({ ...policies, enabled: false }, { source: {}, urls: [] })).toEqual([])
+  })
+
+  it('reports a dispatcher only when the first matching policy delegates to one', () => {
+    const policy = (dispatcher: boolean) => ({
+      version: 1 as const, revision: 1, enabled: true, policies: [{
+        id: 'any', name: 'Any', enabled: true, priority: 1, match: { urlTypes: ['webpage' as const] }, skillIds: ['research'],
+        dispatcher: dispatcher ? { enabled: true, agentId: 'agent', allowedSkillIds: ['research'] } : { enabled: false, allowedSkillIds: [] },
+      }],
+    })
+    const facts = captureFacts('https://example.com/post')
+    expect(automationNeedsDispatcher(policy(true), facts)).toBe(true)
+    expect(automationNeedsDispatcher(policy(false), facts)).toBe(false)
+    expect(automationNeedsDispatcher(policy(true), captureFacts('no link'))).toBe(false)
+    expect(automationNeedsDispatcher({ ...policy(true), enabled: false }, facts)).toBe(false)
+    expect(automationNeedsDispatcher(null, facts)).toBe(false)
   })
 
   it('bounds dispatcher output to configured skill identifiers', async () => {

@@ -21,6 +21,7 @@ import { modelProviderSchema } from '@forage/agent-runtime'
 import { mcpOAuthTokenResponseSchema } from '@forage/agent-runtime'
 import { randomUUID } from 'node:crypto'
 
+import { scrubModelCredentialEnvironment } from './credential-env'
 import { errorMessage, runCommand } from './run'
 
 // ── constants ───────────────────────────────────────────────────────────────
@@ -46,6 +47,9 @@ async function main(): Promise<void> {
   const providerId = provider.success ? provider.data : undefined
   const accessToken = process.env.AI_CHAT_API_KEY?.trim()
   const modelId = process.env.AI_CHAT_MODEL_ID?.trim()
+  const accountId = process.env.AI_CHAT_ACCOUNT_ID?.trim() || ''
+  const oauthExpires = Number(process.env.AI_CHAT_OAUTH_EXPIRES)
+  scrubModelCredentialEnvironment()
 
   if (!providerId || !accessToken || !modelId) {
     emit({ type: 'process_error', error: 'Missing or unsupported provider, model, or credential.' })
@@ -58,8 +62,8 @@ async function main(): Promise<void> {
     ? await createAuthenticatedModelRuntime({
       providerId,
       accessToken,
-      accountId: process.env.AI_CHAT_ACCOUNT_ID?.trim() || '',
-      expires: Number(process.env.AI_CHAT_OAUTH_EXPIRES),
+      accountId,
+      expires: oauthExpires,
     })
     : await createAuthenticatedModelRuntime({ providerId, accessToken })
 

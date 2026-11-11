@@ -559,6 +559,43 @@ describe('Forage server', () => {
     expect(checkpoint.statusCode).toBe(200)
   })
 
+  it('keeps an Inbox capture and admits nothing when the automation dispatcher fails', async () => {
+    const failures: unknown[] = []
+    const repository = new InMemoryServerRepository({
+      instanceId: 'dispatcher-failure', credentialAvailable: async () => true,
+      dispatcherForAgent: async () => { throw new Error('provider unavailable') },
+      onAutomationError: (error) => failures.push(error),
+    })
+    const bootstrap = await repository.bootstrapOwner('dispatcher@test.invalid')
+    const outlineId = 'outline_dispatcher'
+    await repository.claimOutline(await repository.authenticate(bootstrap.deviceToken, 'sync'), { outlineId, name: 'Notes' })
+    await repository.seedOutline(
+      requireBoundOutline(await repository.authenticate(bootstrap.deviceToken, 'sync')),
+      seedDocumentState({ inbox: 'note_inbox', daily: 'note_daily', bullet: 'note_bullet' }),
+    )
+    await repository.agentStore.publishConfiguration(outlineId, 0, {
+      version: 1, revision: 1,
+      agents: [{ id: 'agent', name: 'Agent', description: 'Agent', systemPrompt: 'Work.', modelId: 'gpt-5', toolIds: [], credentialRef: 'credential-1' }],
+      skills: [{ id: 'research', label: 'research', description: 'Research', systemPrompt: 'Research.', agentId: 'agent', requiredToolIds: [] }],
+      customTools: [], globallyEnabledToolIds: [],
+    })
+    await repository.agentStore.publishComputeProfile(outlineId, 0, {
+      version: 1, revision: 1, provider: 'openai', modelId: 'gpt-5', credentialRef: 'credential-1',
+    })
+    await repository.agentStore.publishAutomation(outlineId, 0, {
+      version: 1, revision: 1, enabled: true, policies: [{
+        id: 'dispatch', name: 'Dispatch', enabled: true, priority: 1, match: { urlTypes: ['webpage'] },
+        skillIds: ['research'], dispatcher: { enabled: true, agentId: 'agent', allowedSkillIds: ['research'] },
+      }],
+    })
+    const principal = requireBoundOutline(await repository.authenticate(bootstrap.apiToken, 'notes:create'))
+    const created = await repository.createNote(principal, 'capture', { text: 'https://example.com/post' })
+    expect(created.replayed).toBe(false)
+    expect(await repository.currentRevision(outlineId)).toBe(created.response.revision)
+    expect(await repository.agentStore.listRuns(outlineId, 10)).toEqual([])
+    expect(failures).toHaveLength(1)
+  })
+
   it('atomically admits de-duplicated automation only for new canonical Inbox captures', async () => {
     const repository = new InMemoryServerRepository({
       instanceId: 'automation', supportedAgentToolIds: ['youtube_transcript'], credentialAvailable: async () => true,

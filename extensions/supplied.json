@@ -1,0 +1,5 @@
+[
+  { "key": "image-generation", "directory": "image-generation", "prerequisites": "Requires Node.js and a separate OpenAI API key or local Codex login." },
+  { "key": "text-stats", "directory": "reference", "prerequisites": "Runs locally with Node.js; no AI account required." },
+  { "key": "system-one", "directory": "system-one", "prerequisites": "Requires a System One account and API credentials." }
+]

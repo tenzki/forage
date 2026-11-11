@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { resolveResource } from '@tauri-apps/api/path'
 import type { ExtensionManagementResponse } from '@forage/agent-runtime'
 import imageManifest from '../../../../extensions/image-generation/forage.extension.json'
-import textManifest from '../../../../extensions/reference/forage.extension.json'
-import systemManifest from '../../../../extensions/system-one/forage.extension.json'
+import { suppliedExtensions as supplied } from '../../../../extensions/supplied'
 import { extensionToolOptions, statusLabel, useExtensionStore } from '../store/extensionStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { ExtensionDetail, InstallPreviewCard } from '../components/Settings/ExtensionsSettings'
@@ -15,11 +14,6 @@ import { Button } from '../components/ui/Button'
 import { useOnboardingStore } from './progress'
 
 type Preview = NonNullable<Extract<ExtensionManagementResponse, { ok: true }>['preview']>
-const supplied = [
-  { key: 'image-generation', manifest: imageManifest, prerequisites: 'Requires Node.js and a separate OpenAI API key or local Codex login.' },
-  { key: 'text-stats', manifest: textManifest, prerequisites: 'Runs locally with Node.js; no AI account required.' },
-  { key: 'system-one', manifest: systemManifest, prerequisites: 'Requires a System One account and API credentials.' },
-]
 
 export function ExtensionSetup({ selected, setSelected, configuring, onConfigured }: {
   selected: string[]; setSelected: (value: string[]) => void; configuring: boolean; onConfigured: () => void

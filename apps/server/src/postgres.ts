@@ -44,7 +44,9 @@ import {
   supportedAgentConfigurationSchema,
 } from '@forage/agent-runtime'
 import { automationPolicySetSchema } from '@forage/protocol'
-import { captureFacts, resolveAutomationMatches, type DispatcherClassifier } from './automation.js'
+import {
+  automationNeedsDispatcher, captureFacts, matchAutomationPolicies, resolveAutomationMatches, type DispatcherClassifier,
+} from './automation.js'
 
 export class PostgresServerRepository implements ServerRepository {
   readonly instanceId: string
@@ -53,6 +55,7 @@ export class PostgresServerRepository implements ServerRepository {
   private readonly mcpInventory: McpConnection[]
   private readonly agentMaxAttempts: number
   private readonly dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
+  private readonly onAutomationError?: (error: unknown) => void
 
   constructor(
     private readonly pool: Pool,
@@ -60,6 +63,8 @@ export class PostgresServerRepository implements ServerRepository {
       instanceId: string; supportedAgentToolIds?: string[]; agentMaxAttempts?: number
       mcpInventory?: McpConnection[]
       dispatcherForAgent?: (context: DispatcherAgentContext) => Promise<DispatcherClassifier | undefined>
+      /** Receives dispatcher failures; they never fail the capture that triggered them. */
+      onAutomationError?: (error: unknown) => void
     },
   ) {
     this.instanceId = options.instanceId
@@ -68,6 +73,7 @@ export class PostgresServerRepository implements ServerRepository {
     this.mcpInventory = options.mcpInventory ?? []
     this.agentMaxAttempts = options.agentMaxAttempts ?? 3
     this.dispatcherForAgent = options.dispatcherForAgent
+    this.onAutomationError = options.onAutomationError
   }
 
   async ready(): Promise<boolean> {
@@ -236,7 +242,7 @@ export class PostgresServerRepository implements ServerRepository {
   }
 
   async createNote(principal: BoundPrincipal, key: string, input: NotesCreateRequest): Promise<CreateNoteResult> {
-    return this.transaction(async (client) => {
+    const created = await this.transaction(async (client) => {
       await this.recheckCredential(client, principal)
       const outline = await client.query<{ current_revision: string }>(
         'SELECT current_revision FROM outlines WHERE id = $1 FOR UPDATE', [principal.outlineId],
@@ -253,7 +259,7 @@ export class PostgresServerRepository implements ServerRepository {
         if (previous.rows[0].request_hash !== requestHash) {
           throw new RepositoryError('idempotency_conflict', 'The idempotency key was already used with different input.')
         }
-        return { response: previous.rows[0].response, replayed: true }
+        return { response: previous.rows[0].response, replayed: true, dispatch: false }
       }
 
       const canonicalProjection = await this.canonicalProjection(client, principal.outlineId, true)
@@ -284,14 +290,32 @@ export class PostgresServerRepository implements ServerRepository {
          VALUES ($1, $2, $3, $4)`,
         [principal.tokenId, key, requestHash, response],
       )
-      if (parentId === inbox.id) await this.admitAutomaticRuns(client, principal, noteId, input, revision)
-      return { response, replayed: false }
+      const dispatch = parentId === inbox.id
+        ? await this.admitAutomaticRuns(client, principal, noteId, input, revision, 'rules')
+        : false
+      return { response, replayed: false, dispatch }
     })
+    // The dispatcher calls a model, so it runs after the capture commits: the outline row lock is
+    // released and a provider failure can no longer roll the capture back.
+    if (created.dispatch) {
+      try {
+        await this.admitAutomaticRuns(this.pool, principal, created.response.noteId, input, created.response.revision, 'dispatcher')
+      } catch (error) {
+        this.onAutomationError?.(error)
+      }
+    }
+    return { response: created.response, replayed: created.replayed }
   }
 
+  /**
+   * Admits the runs a capture's matching policy selects. The `rules` phase runs inside the capture
+   * transaction and does no network I/O; it returns true when the policy needs the `dispatcher`
+   * phase, which the caller runs after commit.
+   */
   private async admitAutomaticRuns(
-    client: PoolClient, principal: BoundPrincipal, noteId: string, capture: NotesCreateRequest, baseRevision: number,
-  ): Promise<void> {
+    client: Pick<Pool, 'query'> | Pick<PoolClient, 'query'>, principal: BoundPrincipal, noteId: string,
+    capture: NotesCreateRequest, baseRevision: number, phase: 'rules' | 'dispatcher',
+  ): Promise<boolean> {
     const configurationResult = await client.query<{ configuration: unknown }>(
         'SELECT configuration FROM agent_configuration_revisions WHERE outline_id=$1 ORDER BY revision DESC LIMIT 1', [principal.outlineId],
       )
@@ -301,16 +325,18 @@ export class PostgresServerRepository implements ServerRepository {
     const computeResult = await client.query<{ provider: NonNullable<RunInput['computeProfile']>['provider']; revision: string; model_id: string; credential_reference: string }>(
         'SELECT provider,revision,model_id,credential_reference FROM agent_compute_profiles WHERE outline_id=$1', [principal.outlineId],
       )
-    if (!configurationResult.rows[0] || !automationResult.rows[0] || !computeResult.rows[0]) return
+    if (!configurationResult.rows[0] || !automationResult.rows[0] || !computeResult.rows[0]) return false
     const configuration = migrateAgentConfiguration(
       supportedAgentConfigurationSchema.parse(configurationResult.rows[0].configuration),
     ).configuration
     const policies = automationPolicySetSchema.parse(automationResult.rows[0].policies)
     const compute = computeResult.rows[0]
-    if (!getProviderModels(compute.provider).some((model) => model.id === compute.model_id)) return
-    const matches = await resolveAutomationMatches(
+    if (!getProviderModels(compute.provider).some((model) => model.id === compute.model_id)) return false
+    const facts = captureFacts(capture.text, capture.source)
+    if (phase === 'rules' && automationNeedsDispatcher(policies, facts)) return true
+    const matches = phase === 'rules' ? matchAutomationPolicies(policies, facts) : await resolveAutomationMatches(
       policies,
-      captureFacts(capture.text, capture.source),
+      facts,
       { text: capture.text, source: capture.source ?? {} },
       async (agentId) => {
         const agent = configuration.agents.find((candidate) => candidate.id === agentId)
@@ -369,6 +395,7 @@ export class PostgresServerRepository implements ServerRepository {
           credentialRef, hasMcpTools(effectiveToolIds) ? 1 : this.agentMaxAttempts],
       )
     }
+    return false
   }
 
   async eventsAfter(outlineId: string, revision: number, limit: number): Promise<EventEnvelope[]> {
@@ -596,6 +623,7 @@ export class PostgresServerRepository implements ServerRepository {
       if (run.status !== 'running' || run.lease_owner !== workerId) throw new RepositoryError('conflict', 'Run lease was lost.')
       if (run.cancel_requested_at) throw new RepositoryError('conflict', 'Run cancellation was requested.')
       const input = runInputSchema.parse(run.input_snapshot)
+      const outline = await this.lockOutlineRow(client, run.outline_id)
       const projection = await this.canonicalProjection(client, run.outline_id, true)
       const target = queryCanonicalOutline(projection.state).resolve(input.target.parentId)
       if (target.state !== 'live') {
@@ -609,10 +637,7 @@ export class PostgresServerRepository implements ServerRepository {
         )
         if (assets.rowCount !== imageIds.length) throw new RepositoryError('conflict', 'Structured result references an unavailable asset.')
       }
-      const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
-        'SELECT current_revision, document_version, schema_epoch FROM outlines WHERE id=$1 FOR UPDATE', [run.outline_id],
-      )
-      const revision = Number(outline.rows[0]!.current_revision) + 1
+      const revision = Number(outline.current_revision) + 1
       const nodes = assignResultNodeIds(result.nodes, runId)
       const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
       if (!rootNoteIds.length) throw new RepositoryError('conflict', 'Structured result must contain a text root.')
@@ -627,7 +652,7 @@ export class PostgresServerRepository implements ServerRepository {
       const event = parseEventEnvelope({
         id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
         deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: replaces ? 2 : 1,
-        documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+        documentVersion: outline.document_version, schemaEpoch: outline.schema_epoch,
         baseRevision: revision - 1, revision, origin: 'agent', agentProvenance: provenance,
         changeGroupId: `run_${runId}`.slice(0, 128), occurredAt: new Date().toISOString(),
         payload: { runId, targetNodeId: input.target.parentId, nodes, sources: result.sources, ...(replaces ? { replaces } : {}) },
@@ -680,6 +705,7 @@ export class PostgresServerRepository implements ServerRepository {
       )
       if (!output.rows[0]) throw new RepositoryError('conflict', 'Persisted run output is unavailable.')
       const result = requireStructuredResultV1(parseStructuredResult(output.rows[0].structured_output))
+      const outline = await this.lockOutlineRow(client, run.outline_id)
       const projection = await this.canonicalProjection(client, run.outline_id, true)
       requireLiveCanonicalNode(queryCanonicalOutline(projection.state), targetNodeId, 'target')
       const imageIds = collectImageIds(result)
@@ -690,10 +716,7 @@ export class PostgresServerRepository implements ServerRepository {
         )
         if (assets.rowCount !== imageIds.length) throw new RepositoryError('conflict', 'Structured result references an unavailable asset.')
       }
-      const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
-        'SELECT current_revision,document_version,schema_epoch FROM outlines WHERE id=$1 FOR UPDATE', [run.outline_id],
-      )
-      const revision = Number(outline.rows[0]!.current_revision) + 1
+      const revision = Number(outline.current_revision) + 1
       const input = runInputSchema.parse(run.input_snapshot)
       const nodes = assignResultNodeIds(result.nodes, runId)
       const rootNoteIds = nodes.filter((node) => node.type === 'text').map((node) => node.nodeId)
@@ -701,7 +724,7 @@ export class PostgresServerRepository implements ServerRepository {
       const event = parseEventEnvelope({
         id: `event_${randomUUID()}`, outlineId: run.outline_id, actorId: run.owner_id,
         deviceId: `agent_${this.instanceId}`, type: 'agent.result_committed', eventVersion: 1,
-        documentVersion: outline.rows[0]!.document_version, schemaEpoch: outline.rows[0]!.schema_epoch,
+        documentVersion: outline.document_version, schemaEpoch: outline.schema_epoch,
         baseRevision: revision - 1, revision, origin: 'agent',
         agentProvenance: {
           runId, skillId: input.skill.id, ...(input.source.nodeId ? { sourceNodeId: input.source.nodeId } : {}),
@@ -799,6 +822,20 @@ export class PostgresServerRepository implements ServerRepository {
        WHERE outline_id=$1`,
       [outlineId, revision, NOTE_PROJECTOR_SCHEMA_VERSION],
     )
+  }
+
+  /**
+   * Every outline writer takes the outline row before the projection row. Taking them in the
+   * opposite order deadlocks against a concurrent push or capture.
+   */
+  private async lockOutlineRow(
+    client: PoolClient, outlineId: string,
+  ): Promise<{ current_revision: string; document_version: number; schema_epoch: number }> {
+    const outline = await client.query<{ current_revision: string; document_version: number; schema_epoch: number }>(
+      'SELECT current_revision, document_version, schema_epoch FROM outlines WHERE id = $1 FOR UPDATE', [outlineId],
+    )
+    if (!outline.rows[0]) throw hiddenResourceError()
+    return outline.rows[0]
   }
 
   private async canonicalProjection(

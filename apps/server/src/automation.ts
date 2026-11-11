@@ -54,6 +54,13 @@ export function matchAutomationPolicies(rawPolicies: AutomationPolicySet | null,
   return uniqueMatches(policy.id, policy.skillIds)
 }
 
+export function automationNeedsDispatcher(rawPolicies: AutomationPolicySet | null, facts: CaptureFacts): boolean {
+  if (!rawPolicies) return false
+  const set = automationPolicySetSchema.parse(rawPolicies)
+  if (!set.enabled) return false
+  return firstMatchingPolicy(set, facts)?.dispatcher.enabled === true
+}
+
 export async function resolveAutomationMatches(
   rawPolicies: AutomationPolicySet | null,
   facts: CaptureFacts,

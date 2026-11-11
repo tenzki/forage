@@ -153,6 +153,7 @@ export interface ServerAgentWorkerOptions {
   concurrency: number
   pollMs: number
   leaseMs: number
+  onError?: (error: unknown, run: AgentRunRecord) => void
 }
 
 export class ServerAgentWorker {
@@ -183,7 +184,12 @@ export class ServerAgentWorker {
       if (!run) break
       claimed += 1
       let execution!: Promise<void>
-      execution = this.options.runner.execute(run).finally(() => this.active.delete(execution))
+      execution = this.options.runner.execute(run)
+        .catch((error: unknown) => {
+          if (this.options.onError) this.options.onError(error, run)
+          else console.error(`Agent run ${run.id} did not settle:`, error)
+        })
+        .finally(() => this.active.delete(execution))
       this.active.add(execution)
     }
     return claimed
